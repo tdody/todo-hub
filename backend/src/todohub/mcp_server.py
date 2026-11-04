@@ -1,0 +1,200 @@
+"""todo-db: a local stdio MCP server the sweep uses to write candidate tasks to SQLite.
+
+Started by Claude Code from the per-run MCP config that sweep.py writes. It reads
+TODOHUB_HOME (where the database lives) and TODOHUB_RUN_ID (the sweep run) from env.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Literal
+
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError as MCPToolError
+from pydantic import BaseModel, Field
+
+from . import tools
+from .config import load_settings
+from .db import DB
+
+server = MCPServer(
+    name="todo-db",
+    instructions="Store candidate tasks found during a TodoHub sweep. Nothing here sends anything anywhere.",
+)
+
+_db: DB | None = None
+
+
+class Link(BaseModel):
+    url: str = Field(description="https URL of a document, file, PR, dashboard or page referenced in the source")
+    title: str = Field(description="Short human name, e.g. 'Q1 review deck (Google Slides)' or 'api PR #812'")
+
+
+class Subtask(BaseModel):
+    title: str = Field(description="Short imperative step, e.g. 'Pull the new-customer list from BigQuery'")
+    due_date: str | None = Field(default=None, description="YYYY-MM-DD, only when the source states one")
+
+
+def _get_db() -> DB:
+    global _db
+    if _db is None:
+        _db = DB(load_settings().db_path)
+    return _db
+
+
+def _call(fn, *args, **kwargs) -> dict:
+    """Run a tool; a validation problem goes back to Claude as a readable error it can fix."""
+    try:
+        return fn(*args, **kwargs)
+    except tools.ToolError as exc:
+        raise MCPToolError(str(exc)) from exc
+
+
+def _run_id() -> int | None:
+    value = os.environ.get("TODOHUB_RUN_ID")
+    return int(value) if value else None
+
+
+@server.tool()
+def is_seen(source: Literal["slack", "gmail", "grain", "calendar", "linear"], source_id: str) -> dict:
+    """Check whether a message, email or meeting already produced a candidate task.
+
+    Call this before reading an item in depth; skip items that return seen=true.
+    """
+    return _call(tools.is_seen, _get_db(), source, source_id)
+
+
+@server.tool()
+def mark_seen(source: Literal["slack", "gmail", "grain", "calendar", "linear"], source_id: str) -> dict:
+    """Record that an item was fully read and holds no task, so later sweeps skip it.
+
+    Don't call this for a Grain meeting whose notes or action items aren't ready yet.
+    """
+    return _call(tools.mark_seen, _get_db(), source, source_id)
+
+
+@server.tool()
+def add_candidate(
+    source: Literal["slack", "gmail", "grain", "calendar", "linear"],
+    source_id: str,
+    title: str,
+    signal: Literal["ask", "commitment", "action_item", "deadline", "waiting_on", "meeting_prep", "mention"],
+    why: str,
+    excerpt: str,
+    source_url: str,
+    links: list[Link] | None = None,
+    subtasks: list[Subtask] | None = None,
+    who: str | None = None,
+    client_label: str | None = None,
+    due_date: str | None = None,
+    priority: int = 0,
+    possible_duplicate: str | None = None,
+    asked_on: str | None = None,
+    project: str | None = None,
+    category: Literal["code", "analysis", "model", "review", "meeting", "email", "writing", "admin"] | None = None,
+) -> dict:
+    """Add one candidate task to Thibault's review queue. He approves or drops it later.
+
+    source_id: "<channel id>:<message ts>" for Slack, the Gmail message id, or the Grain meeting id.
+    title: a short imperative task title, e.g. "Send Sam the Q1 review deck".
+    signal: ask (someone asked him), commitment (he said he would), action_item (Grain), deadline,
+        or waiting_on (HE asked someone else for something and is waiting for it; title it
+        "Waiting on <person>: <what>", and set asked_on).
+    why: one sentence on why this is a task for him.
+    excerpt: the exact words from the source that show it (up to ~300 characters).
+    source_url: REQUIRED https link back to the exact Slack message (permalink), email, or Grain
+        meeting (from resolve_urls). For email, pass "" and the link is built from source_id.
+    links: every https link in the source that the task needs (docs, sheets, decks, files, PRs,
+        dashboards, Linear issues), with a short title. Don't repeat source_url.
+    subtasks: the distinct steps, only when the source spells them out (2 to 10). Omit otherwise.
+    who: the person who asked, or the meeting's other participants.
+    client_label: exactly one of the client label names given in the prompt, or omit.
+    due_date: YYYY-MM-DD only when a date is stated or clearly implied.
+    priority: 0 none, 1 urgent, 2 high, 3 medium, 4 low.
+    possible_duplicate: identifier of a similar open Linear issue from the prompt's list, e.g. ENG-123.
+    asked_on: waiting_on only: YYYY-MM-DD date he asked; the follow-up date is counted from it.
+    project: exactly one active Linear project name from the prompt's list, when one clearly fits.
+    category: the kind of work: code (build/fix software), analysis (data, queries, audits, metrics),
+        model (train/tune/score models), review (code or document review), meeting (prep or follow-up
+        for a call), email (reply, send, follow up with someone), writing (docs, decks, reports), admin.
+    """
+    return _call(
+        tools.add_candidate, _get_db(), _run_id(),
+        source=source, source_id=source_id, title=title, signal=signal, why=why, excerpt=excerpt,
+        source_url=source_url, who=who, client_label=client_label, due_date=due_date,
+        priority=priority, possible_duplicate=possible_duplicate,
+        links=[l.model_dump() for l in links or []],
+        subtasks=[s.model_dump() for s in subtasks or []],
+        gmail_account=load_settings().gmail_account, asked_on=asked_on,
+        followup_days=load_settings().followup_days, project=project, category=category,
+    )
+
+
+@server.tool()
+def propose_close(
+    source: Literal["slack", "gmail", "grain", "linear"],
+    source_id: str,
+    source_url: str,
+    target_issue: str,
+    why: str,
+    excerpt: str,
+) -> dict:
+    """Propose closing one of Thibault's open issues because the source shows it's finished.
+
+    Use it when a later message shows the task was done (he sent the file, the PR merged,
+    the client confirmed), or when the reply he was waiting on arrived.
+    target_issue: identifier from the prompt's list of open issues, e.g. ENG-123.
+    excerpt: the exact words that show it's done. source_url: link to that message ("" for email).
+    """
+    s = load_settings()
+    return _call(
+        tools.propose_close, _get_db(), _run_id(), source=source, source_id=source_id, source_url=source_url,
+        target_issue=target_issue, why=why, excerpt=excerpt, gmail_account=s.gmail_account,
+    )
+
+
+@server.tool()
+def propose_update(
+    source: Literal["slack", "gmail", "grain", "linear"],
+    source_id: str,
+    source_url: str,
+    target_issue: str,
+    comment: str,
+    why: str,
+    excerpt: str,
+) -> dict:
+    """Propose a comment on one of Thibault's open issues, instead of a new task.
+
+    Use it when a message adds information to something already tracked: a new date, a
+    changed requirement, an answer, a file. comment: 1-4 sentences to post on the issue,
+    written plainly as a status note. source_url: link to that message ("" for email).
+    """
+    s = load_settings()
+    return _call(
+        tools.propose_update, _get_db(), _run_id(), source=source, source_id=source_id, source_url=source_url,
+        target_issue=target_issue, comment=comment, why=why, excerpt=excerpt, gmail_account=s.gmail_account,
+    )
+
+
+@server.tool()
+def report_source_status(
+    source: Literal["slack", "gmail", "grain", "calendar", "linear"],
+    ok: bool,
+    detail: str,
+    items_scanned: int | None = None,
+) -> dict:
+    """Record how scanning one source went. Call once per source, at the end of that source.
+
+    ok=false when the source's tools failed (for example, a sign-in is needed); put the error in detail.
+    """
+    return _call(
+        tools.report_source_status, _get_db(), _run_id(), source=source, ok=ok, detail=detail, items_scanned=items_scanned
+    )
+
+
+def main() -> None:
+    server.run("stdio")
+
+
+if __name__ == "__main__":
+    main()

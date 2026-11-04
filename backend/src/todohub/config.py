@@ -1,0 +1,231 @@
+"""Settings, file locations and the Linear API key.
+
+Everything lives in one folder, ``~/Library/Application Support/TodoHub`` on macOS
+(override with the ``TODOHUB_HOME`` environment variable, which the tests use):
+
+    config.toml      settings you can edit
+    todohub.db       SQLite: candidate queue, runs, source status
+    sweep/           the folder Claude Code runs in (so no repo .mcp.json is picked up)
+    logs/            one log file per sweep run
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+KEYRING_SERVICE = "todohub"
+KEYRING_LINEAR = "linear-api-key"
+
+# Read-only tools the sweep may call. Anything not listed here is unavailable to the
+# headless run, so a message that says "reply to this" cannot make it send anything.
+DEFAULT_SLACK_TOOLS = [
+    "mcp__claude_ai_Slack__slack_search_public_and_private",
+    "mcp__claude_ai_Slack__slack_read_thread",
+    "mcp__claude_ai_Slack__slack_read_channel",
+    "mcp__claude_ai_Slack__slack_read_user_profile",
+]
+DEFAULT_GRAIN_TOOLS = [
+    "mcp__claude_ai_Grain__list_attended_meetings",
+    "mcp__claude_ai_Grain__fetch_meeting",
+    "mcp__claude_ai_Grain__fetch_meeting_action_items",
+    "mcp__claude_ai_Grain__fetch_meeting_notes",
+    "mcp__claude_ai_Grain__search_in_transcripts",
+    "mcp__claude_ai_Grain__resolve_urls",
+]
+
+DEFAULT_GMAIL_TOOLS = [
+    "mcp__claude_ai_Gmail__search_threads",
+    "mcp__claude_ai_Gmail__get_thread",
+    "mcp__claude_ai_Gmail__get_message",
+    "mcp__claude_ai_Gmail__list_labels",
+]
+DEFAULT_CALENDAR_TOOLS = [
+    "mcp__claude_ai_Google_Calendar__list_events",
+    "mcp__claude_ai_Google_Calendar__get_event",
+    "mcp__claude_ai_Google_Calendar__search_events",
+    "mcp__claude_ai_Google_Calendar__list_calendars",
+]
+
+DEFAULT_CONFIG = """\
+# TodoHub settings. Edit, then restart the app. Missing keys fall back to defaults.
+
+[linear]
+team_key = ""              # key of the team new issues are created in, e.g. "ENG"
+client_label_group = "client"
+todo_state = "Todo"        # status for approved tasks
+waiting_state = "Pending"  # status for "waiting on someone" items
+done_state = "Done"        # status used when you approve "close this issue"
+followup_days = 3          # working days before a "waiting on" item comes due
+default_priority = 4       # 0 none, 1 urgent, 2 high, 3 medium, 4 low
+
+# Your team's Linear labels -> task type (code, analysis, model, review, meeting, email,
+# writing, admin). Checked before the title. Bug, Feature and Improvement are built in.
+# [linear.label_types]
+# "data quality" = "analysis"
+
+[sweep]
+claude_path = "claude"     # full path if launchd can't find it, e.g. "/Users/you/.local/bin/claude"
+model = "sonnet"
+max_turns = 60
+timeout_minutes = 20
+first_run_lookback_hours = 72
+snitch_url = ""            # Dead Man's Snitch URL, e.g. "https://nosnch.in/abc123"
+restricted = true          # run Claude Code with --restricted (ignores ~/.claude settings); keep on
+
+# Read-only tool allowlists (slack_tools, gmail_tools, grain_tools, calendar_tools) default to the
+# built-in lists. Set one to [] to switch that source off, e.g.:
+# gmail_tools = []
+gmail_account = ""         # your Gmail address, used to build "open in Gmail" links
+linear_mentions = true     # read Linear notifications where someone @-mentions you
+github_reviews = true      # read open PRs requesting your review, with the gh command
+gh_path = "gh"
+# extra_denied_servers = []  # your own MCP servers the sweep must never use, on top of the built-in list
+
+[app]
+port = 8765
+"""
+
+
+def home() -> Path:
+    override = os.environ.get("TODOHUB_HOME")
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "TodoHub"
+    return Path.home() / ".todohub"
+
+
+@dataclass
+class Settings:
+    team_key: str = ""
+    client_label_group: str = "client"
+    todo_state: str = "Todo"
+    waiting_state: str = "Pending"
+    done_state: str = "Done"
+    followup_days: int = 3
+    default_priority: int = 4
+    label_types: dict[str, str] = field(default_factory=dict)
+    claude_path: str = "claude"
+    model: str = "sonnet"
+    max_turns: int = 60
+    timeout_minutes: int = 20
+    first_run_lookback_hours: int = 72
+    snitch_url: str = ""
+    restricted: bool = True
+    slack_tools: list[str] = field(default_factory=lambda: list(DEFAULT_SLACK_TOOLS))
+    grain_tools: list[str] = field(default_factory=lambda: list(DEFAULT_GRAIN_TOOLS))
+    gmail_tools: list[str] = field(default_factory=lambda: list(DEFAULT_GMAIL_TOOLS))
+    linear_mentions: bool = True
+    github_reviews: bool = True
+    gh_path: str = "gh"
+    calendar_tools: list[str] = field(default_factory=lambda: list(DEFAULT_CALENDAR_TOOLS))
+    calendar_create_tool: str = "mcp__claude_ai_Google_Calendar__create_event"
+    gmail_account: str = ""
+    extra_denied_servers: list[str] = field(default_factory=list)
+    port: int = 8765
+
+    @property
+    def home(self) -> Path:
+        return home()
+
+    @property
+    def db_path(self) -> Path:
+        return self.home / "todohub.db"
+
+    @property
+    def sweep_dir(self) -> Path:
+        return self.home / "sweep"
+
+    @property
+    def log_dir(self) -> Path:
+        return self.home / "logs"
+
+    @property
+    def config_path(self) -> Path:
+        return self.home / "config.toml"
+
+    def enabled_sources(self) -> list[str]:
+        return [
+            name
+            for name, tools in (
+                ("slack", self.slack_tools), ("gmail", self.gmail_tools),
+                ("grain", self.grain_tools), ("calendar", self.calendar_tools),
+                ("linear", self.linear_mentions), ("github", self.github_reviews),
+            )
+            if tools
+        ]
+
+
+# The first release wrote this line, which kept Gmail off; it's now on by default.
+_OLD_GMAIL_OFF = "# Gmail stays off until its exact read-only tool names are confirmed.\ngmail_tools = []\n"
+
+
+def ensure_home() -> Path:
+    h = home()
+    for p in (h, h / "sweep", h / "logs"):
+        p.mkdir(parents=True, exist_ok=True)
+    cfg = h / "config.toml"
+    if not cfg.exists():
+        cfg.write_text(DEFAULT_CONFIG)
+    elif _OLD_GMAIL_OFF in (text := cfg.read_text()):
+        cfg.write_text(text.replace(_OLD_GMAIL_OFF, "# gmail_tools = []   # uncomment to switch Gmail off\n"))
+    return h
+
+
+def load_settings() -> Settings:
+    ensure_home()
+    raw = tomllib.loads((home() / "config.toml").read_text())
+    s = Settings()
+    linear = raw.get("linear", {})
+    sweep = raw.get("sweep", {})
+    app = raw.get("app", {})
+    s.team_key = linear.get("team_key", s.team_key)
+    s.client_label_group = linear.get("client_label_group", s.client_label_group)
+    s.todo_state = linear.get("todo_state", s.todo_state)
+    s.waiting_state = linear.get("waiting_state", s.waiting_state)
+    s.done_state = linear.get("done_state", s.done_state)
+    s.followup_days = int(linear.get("followup_days", s.followup_days))
+    s.default_priority = int(linear.get("default_priority", s.default_priority))
+    s.label_types = {k.lower(): v for k, v in linear.get("label_types", {}).items()}
+    s.claude_path = sweep.get("claude_path", s.claude_path)
+    s.model = sweep.get("model", s.model)
+    s.max_turns = int(sweep.get("max_turns", s.max_turns))
+    s.timeout_minutes = int(sweep.get("timeout_minutes", s.timeout_minutes))
+    s.first_run_lookback_hours = int(sweep.get("first_run_lookback_hours", s.first_run_lookback_hours))
+    s.snitch_url = sweep.get("snitch_url", s.snitch_url)
+    s.restricted = bool(sweep.get("restricted", s.restricted))
+    s.slack_tools = list(sweep.get("slack_tools", s.slack_tools))
+    s.grain_tools = list(sweep.get("grain_tools", s.grain_tools))
+    s.gmail_tools = list(sweep.get("gmail_tools", s.gmail_tools))
+    s.gmail_account = sweep.get("gmail_account", s.gmail_account)
+    s.calendar_tools = list(sweep.get("calendar_tools", s.calendar_tools))
+    s.calendar_create_tool = sweep.get("calendar_create_tool", s.calendar_create_tool)
+    s.linear_mentions = bool(sweep.get("linear_mentions", s.linear_mentions))
+    s.github_reviews = bool(sweep.get("github_reviews", s.github_reviews))
+    s.gh_path = sweep.get("gh_path", s.gh_path)
+    s.extra_denied_servers = list(sweep.get("extra_denied_servers", s.extra_denied_servers))
+    s.port = int(app.get("port", s.port))
+    return s
+
+
+def get_linear_key() -> str:
+    """The Linear personal API key: macOS Keychain first, then $LINEAR_API_KEY."""
+    env = os.environ.get("LINEAR_API_KEY")
+    if env:
+        return env
+    import keyring
+
+    key = keyring.get_password(KEYRING_SERVICE, KEYRING_LINEAR)
+    if not key:
+        raise RuntimeError("No Linear API key. Run `todohub set-linear-key` first.")
+    return key
+
+
+def set_linear_key(key: str) -> None:
+    import keyring
+
+    keyring.set_password(KEYRING_SERVICE, KEYRING_LINEAR, key)

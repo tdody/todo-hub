@@ -1,0 +1,572 @@
+"""Local HTTP API the Tauri app talks to. Binds to 127.0.0.1 only.
+
+When the app starts it generates a random token and passes it in TODOHUB_TOKEN; every
+request must then carry it in the X-TodoHub-Token header.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import secrets
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Callable, Literal
+
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from . import calendar_block
+from . import capture as capture_mod
+from . import logos, stats, summary
+from .categories import categorize
+from .config import Settings, get_linear_key, load_settings
+from .db import DB
+from .linear import Linear, LinearError, TeamMeta, shape_issue
+from .selfcmd import self_command
+from .tools import ToolError
+
+TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420"]
+META_TTL_SECONDS = 600
+SOURCE_NAMES = {"slack": "Slack message", "gmail": "Email", "grain": "Grain meeting", "calendar": "Calendar event",
+                "manual": "Link"}
+
+
+class SubtaskIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    due_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class CandidateEdit(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    client_label: str | None = None
+    due_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    priority: int | None = Field(default=None, ge=0, le=4)
+    subtasks: list[SubtaskIn] | None = Field(default=None, max_length=10)
+    comment: str | None = Field(default=None, min_length=1, max_length=2000)
+    project: str | None = None
+    category: Literal["code", "analysis", "model", "review", "meeting", "email", "writing", "admin"] | None = None
+
+
+class TodayIn(BaseModel):
+    issue_ids: list[str] = Field(max_length=30)
+
+
+class BlockIn(BaseModel):
+    start: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")    # HH:MM today, America/New_York
+    minutes: int = Field(ge=15, le=240)
+
+
+class SnoozeIn(BaseModel):
+    until: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")   # None un-snoozes
+
+
+class DropIn(BaseModel):
+    reason: Literal["not_mine", "already_done", "noise", "duplicate", "other"] = "other"
+
+
+class CaptureIn(BaseModel):
+    text: str = Field(max_length=4000)
+
+
+class IssueEdit(BaseModel):
+    state_id: str | None = None
+    priority: int | None = Field(default=None, ge=0, le=4)
+    due_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _md(text: str) -> str:
+    """Keep a link title from breaking the markdown link around it."""
+    return text.replace("[", "(").replace("]", ")")
+
+
+def issue_description(c: dict) -> str:
+    lines: list[str] = []
+    if c.get("why"):
+        lines += [c["why"], ""]
+    if c.get("excerpt"):
+        lines += ["> " + line for line in c["excerpt"].splitlines()] + [""]
+    source = SOURCE_NAMES.get(c["source"], c["source"])
+    link = f"[{source}]({c['source_url']})" if c.get("source_url") else source
+    who = f" · {c['who']}" if c.get("who") else ""
+    lines.append(f"**Source:** {link}{who}")
+    lines.append("")
+    if c.get("links"):
+        lines.append("**Links**")
+        lines += [f"- [{_md(l['title'])}]({l['url']})" for l in c["links"]]
+        lines.append("")
+    lines.append(f"_Captured by TodoHub ({c['signal'].replace('_', ' ')}) on {c['created_at'][:10]}._")
+    return "\n".join(lines)
+
+
+def create_app(settings: Settings | None = None, db: DB | None = None,
+               linear_factory: Callable[[], Linear] | None = None,
+               sweep_launcher: Callable[[list[str]], None] | None = None,
+               block_fn: Callable[..., str | None] | None = None) -> FastAPI:
+    settings = settings or load_settings()
+    db = db or DB(settings.db_path)
+    db.release()     # approvals interrupted by a crash go back to the Inbox
+    linear_factory = linear_factory or (lambda: Linear(get_linear_key()))
+    token = os.environ.get("TODOHUB_TOKEN")
+
+    def default_launcher(args: list[str]) -> None:
+        """Start a sweep or capture in the background; it outlives this request."""
+        subprocess.Popen(
+            [*self_command("sweep"), *args],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+
+    launch = sweep_launcher or default_launcher
+    block = block_fn or (lambda **kw: calendar_block.block_time(settings, **kw))
+    app = FastAPI(title="TodoHub", docs_url=None, redoc_url=None)
+    app.add_middleware(
+        CORSMiddleware, allow_origins=TAURI_ORIGINS, allow_methods=["*"], allow_headers=["*"],
+    )
+
+    cache: dict = {"meta": None, "at": 0.0}
+    lock = threading.Lock()
+
+    def check_token(request: Request) -> None:
+        # Only loopback names: blocks DNS-rebinding pages that point a hostname at 127.0.0.1.
+        host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]")
+        if host not in ("127.0.0.1", "localhost", "testserver", "::1"):
+            raise HTTPException(403, "Bad Host header")
+        if token and not secrets.compare_digest(request.headers.get("x-todohub-token", ""), token):
+            raise HTTPException(401, "Bad or missing token")
+
+    def linear_call(fn: Callable[[Linear], object]):
+        client = linear_factory()
+        try:
+            return fn(client)
+        except LinearError as exc:
+            raise HTTPException(502, str(exc))
+        except RuntimeError as exc:   # missing API key
+            raise HTTPException(503, str(exc))
+        finally:
+            client.close()
+
+    def team_meta(refresh: bool = False) -> TeamMeta:
+        with lock:
+            if refresh or cache["meta"] is None or time.time() - cache["at"] > META_TTL_SECONDS:
+                cache["meta"] = linear_call(lambda l: l.team_meta(settings.team_key, settings.client_label_group))
+                cache["at"] = time.time()
+                db.set_meta("client_labels", [l["name"] for l in cache["meta"].client_labels])
+                db.set_meta("projects", [p["name"] for p in cache["meta"].projects])
+            return cache["meta"]
+
+    def candidate_or_404(cid: int) -> dict:
+        c = db.get_candidate(cid)
+        if not c:
+            raise HTTPException(404, "No such candidate")
+        return c
+
+    auth = [Depends(check_token)]
+
+    def today_str() -> str:
+        return datetime.now(stats.TZ).date().isoformat()
+
+    @app.get("/api/health")
+    def health() -> dict:
+        return {"ok": True}
+
+    @app.get("/api/meta", dependencies=auth)
+    def meta(refresh: bool = False) -> dict:
+        m = team_meta(refresh)
+        return {
+            "team_key": settings.team_key,
+            "states": m.states,
+            "client_labels": [l["name"] for l in m.client_labels],
+            "projects": [p["name"] for p in m.projects],
+            "priorities": [
+                {"value": 0, "name": "No priority"}, {"value": 1, "name": "Urgent"},
+                {"value": 2, "name": "High"}, {"value": 3, "name": "Medium"}, {"value": 4, "name": "Low"},
+            ],
+            "sources": settings.enabled_sources(),
+        }
+
+    # ---- review queue -----------------------------------------------------------------
+    @app.get("/api/candidates", dependencies=auth)
+    def candidates(status: str = "pending") -> list[dict]:
+        if status not in ("pending", "snoozed", "approved", "dropped"):
+            raise HTTPException(400, "status must be pending, snoozed, approved or dropped")
+        rows = db.list_candidates(status, today=today_str())
+        for c in rows:     # candidates from before task types existed
+            if not c.get("category"):
+                c["category"] = categorize(c["title"], signal=c["signal"], source=c["source"])
+        return rows
+
+    @app.post("/api/candidates/{cid}/snooze", dependencies=auth)
+    def snooze(cid: int, body: SnoozeIn) -> dict:
+        c = candidate_or_404(cid)
+        if c["status"] != "pending":
+            raise HTTPException(409, f"Already {c['status']}")
+        if body.until and body.until <= today_str():
+            raise HTTPException(400, "Pick a date after today")
+        return db.snooze(cid, body.until)
+
+    @app.patch("/api/candidates/{cid}", dependencies=auth)
+    def edit_candidate(cid: int, edit: CandidateEdit) -> dict:
+        candidate_or_404(cid)
+        changes = edit.model_dump(include=edit.model_fields_set)
+        if changes.get("client_label"):
+            if changes["client_label"] not in db.get_meta("client_labels", []):
+                raise HTTPException(400, f"Unknown client label {changes['client_label']!r}")
+        if changes.get("project"):
+            if changes["project"] not in db.get_meta("projects", []):
+                raise HTTPException(400, f"Unknown project {changes['project']!r}")
+        return db.update_candidate(cid, **changes)
+
+    def source_line(c: dict) -> str:
+        source = SOURCE_NAMES.get(c["source"], c["source"])
+        return f"**Source:** [{source}]({c['source_url']})" if c.get("source_url") else f"**Source:** {source}"
+
+    def act_on_issue(c: dict, m: TeamMeta) -> dict:
+        """Approve a "close this issue" or "post this update" candidate."""
+        warnings: list[str] = []
+        undo: dict = {"comments": []}
+
+        def run(l: Linear) -> dict:
+            target = l.get_issue(c["target_issue"])
+            undo["issue"] = target["id"]
+            if c["kind"] == "close":
+                team_id = (target.get("team") or {}).get("id")
+                states = m.states if team_id in (None, m.team_id) else l.team_states(team_id)
+                done = (next((s for s in states if s["name"] == settings.done_state), None)
+                        or next((s for s in states if s["type"] == "completed"), None))
+                if not done:
+                    raise LinearError(f"{c['target_issue']}'s team has no completed status")
+                closed = l.update_issue(target["id"], {"stateId": done["id"]})
+                undo["state_id"] = target["state"]["id"]
+                quote = "\n".join("> " + line for line in (c.get("excerpt") or "").splitlines())
+                try:
+                    undo["comments"].append(l.create_comment(target["id"], "\n\n".join(
+                        part for part in (f"Closed from TodoHub: {c.get('why') or 'done'}", quote, source_line(c)) if part)))
+                except LinearError as exc:
+                    warnings.append(f"Closed, but the comment wasn't added: {exc}")
+                return closed
+            undo["comments"].append(l.create_comment(target["id"], f"{c['comment']}\n\n{source_line(c)}"))
+            return target
+
+        issue = linear_call(run)
+        updated = db.decide(c["id"], "approved", issue["identifier"], issue["url"])
+        undo["comments"] = [x for x in undo["comments"] if x]
+        db.set_undo(c["id"], undo)
+        return {"candidate": updated, "issue": shape_issue(issue, settings),
+                "subtasks": [], "warnings": warnings}
+
+    @app.post("/api/candidates/{cid}/approve", dependencies=auth)
+    def approve(cid: int, edit: CandidateEdit | None = None) -> dict:
+        c = candidate_or_404(cid)
+        if c["status"] != "pending":
+            raise HTTPException(409, f"Already {c['status']}")
+        if edit and edit.model_fields_set:
+            c = edit_candidate(cid, edit)
+        # A priority picked in the card wins, even "No priority" (0).
+        chosen_priority = edit.priority if edit and "priority" in edit.model_fields_set else None
+        if not db.claim(cid):
+            raise HTTPException(409, "Already being approved")
+        try:
+            return approve_claimed(c, chosen_priority)
+        finally:
+            db.release(cid)      # no-op once the candidate is marked approved
+
+    def approve_claimed(c: dict, chosen_priority: int | None) -> dict:
+        cid = c["id"]
+        m = team_meta()
+        if c["kind"] in ("close", "comment"):
+            return act_on_issue(c, m)
+
+        state_name = settings.waiting_state if c["kind"] == "waiting" else settings.todo_state
+        state = next((s for s in m.states if s["name"] == state_name), None)
+        if not state:
+            raise HTTPException(500, f"Team {settings.team_key} has no {state_name!r} status")
+        label_ids = [l["id"] for l in m.client_labels if l["name"] == c["client_label"]]
+        project_id = next((p["id"] for p in m.projects if p["name"] == c.get("project")), None)
+        priority = chosen_priority if chosen_priority is not None else (c["priority"] or settings.default_priority)
+        issue = linear_call(lambda l: l.create_issue(
+            team_id=m.team_id, title=c["title"], description=issue_description(c),
+            assignee_id=m.viewer_id, state_id=state["id"], priority=priority,
+            due_date=c["due_date"], label_ids=label_ids, project_id=project_id,
+        ))
+        # The parent issue exists now, so mark the candidate approved before the extras:
+        # a failure below must not lead to a second issue on retry.
+        updated = db.decide(cid, "approved", issue["identifier"], issue["url"])
+        undo = {"issues": [issue["id"]]}     # newest last; undo deletes them in reverse
+        db.set_undo(cid, undo)
+        warnings: list[str] = []
+        created: list[dict] = []
+
+        client = linear_factory()
+        try:
+            source = SOURCE_NAMES.get(c["source"], c["source"])
+            links = ([{"url": c["source_url"], "title": source}] if c.get("source_url") else []) + c["links"]
+            for link in links:
+                try:
+                    client.add_link(issue["id"], link["url"], link["title"])
+                except LinearError as exc:
+                    warnings.append(f"Link not attached ({link['title']}): {exc}")
+            for sub in c["subtasks"]:
+                try:
+                    child = client.create_issue(
+                        team_id=m.team_id, title=sub["title"],
+                        description=f"Part of {issue['identifier']}: {c['title']}",
+                        assignee_id=m.viewer_id, state_id=state["id"], priority=priority,
+                        due_date=sub.get("due_date"), label_ids=label_ids, parent_id=issue["id"],
+                        project_id=project_id,
+                    )
+                    created.append(shape_issue(child, settings))
+                    undo["issues"].append(child["id"])
+                    db.set_undo(cid, undo)
+                except LinearError as exc:
+                    warnings.append(f"Subtask not created ({sub['title']}): {exc}")
+        finally:
+            client.close()
+
+        return {
+            "candidate": updated,
+            "issue": shape_issue(issue, settings),
+            "subtasks": created,
+            "warnings": warnings,
+        }
+
+    @app.post("/api/candidates/{cid}/drop", dependencies=auth)
+    def drop(cid: int, body: DropIn | None = None) -> dict:
+        c = candidate_or_404(cid)
+        if c["status"] != "pending":
+            raise HTTPException(409, f"Already {c['status']}")
+        return db.decide(cid, "dropped", drop_reason=(body.reason if body else "other"))
+
+    def completed_since_weeks(weeks: int) -> list[dict]:
+        since = stats.first_day(weeks).astimezone(timezone.utc).replace(microsecond=0).isoformat()
+        raw = linear_call(lambda l: l.my_completed_issues(since))
+        return [shape_issue(i, settings) for i in raw]
+
+    @app.get("/api/stats/balance", dependencies=auth)
+    def balance_stats(weeks: int = 8) -> dict:
+        weeks = max(1, min(weeks, 26))
+        return stats.balance(completed_since_weeks(weeks), weeks)
+
+    @app.get("/api/clients/{client}/summary", dependencies=auth)
+    def client_summary(client: str) -> dict:
+        if client not in db.get_meta("client_labels", []):
+            team_meta()
+            if client not in db.get_meta("client_labels", []):
+                raise HTTPException(404, f"No client label {client!r}")
+        week = stats.week_starts(1)[0]
+        open_issues = [shape_issue(i, settings) for i in linear_call(lambda l: l.my_open_issues())]
+        text = summary.client_summary(client, week, open_issues, completed_since_weeks(1), settings.waiting_state)
+        return {"client": client, "text": text}
+
+    @app.get("/api/runs", dependencies=auth)
+    def runs(limit: int = 30) -> list[dict]:
+        return db.list_runs(max(1, min(limit, 200)))
+
+    @app.get("/api/runs/{run_id}/log", dependencies=auth)
+    def run_log(run_id: int) -> dict:
+        run = db.get_run(run_id)
+        if not run:
+            raise HTTPException(404, "No such run")
+        path = Path(run["log_path"] or "")
+        # Only ever serve files from the logs folder.
+        if not run["log_path"] or path.resolve().parent != settings.log_dir.resolve() or not path.exists():
+            return {"text": "", "missing": True}
+        text = path.read_text(errors="replace")
+        return {"text": text[-120_000:], "truncated": len(text) > 120_000, "missing": False}
+
+    @app.get("/api/stats/approval", dependencies=auth)
+    def approval_stats(weeks: int = 8) -> dict:
+        weeks = max(1, min(weeks, 26))
+        since = stats.first_day(weeks).astimezone(timezone.utc).replace(microsecond=0).isoformat()
+        return stats.approval_rate(db.decisions_since(since), weeks)
+
+    @app.post("/api/candidates/{cid}/undo", dependencies=auth)
+    def undo(cid: int) -> dict:
+        """Put an approved or dropped candidate back in the Inbox, reversing what it did in Linear:
+        created issues go to Linear's trash, a closed issue gets its old status back, and posted
+        comments are deleted. If Linear fails part-way, what's left is kept for a retry."""
+        c = candidate_or_404(cid)
+        if c["status"] == "pending":
+            raise HTTPException(409, "Nothing to undo: it's already in the Inbox")
+        warnings: list[str] = []
+        if c["status"] == "approved":
+            record = db.get_undo(cid)
+            if not record:
+                raise HTTPException(409, f"{c['linear_identifier'] or 'This'} was approved before undo existed; "
+                                         "change it in Linear instead.")
+            try:
+                client = linear_factory()
+            except RuntimeError as exc:      # missing API key
+                raise HTTPException(503, str(exc))
+            try:
+                if record.get("state_id"):
+                    client.update_issue(record["issue"], {"stateId": record["state_id"]})
+                    record.pop("state_id")
+                    db.set_undo(cid, record)
+                while record.get("issues"):          # subtasks first, then the parent
+                    client.delete_issue(record["issues"][-1])
+                    record["issues"].pop()
+                    db.set_undo(cid, record)
+                for comment_id in list(record.get("comments", [])):
+                    try:
+                        client.delete_comment(comment_id)
+                    except LinearError as exc:
+                        warnings.append(f"The comment on {c['target_issue']} wasn't deleted: {exc}")
+                    record["comments"].remove(comment_id)
+                    db.set_undo(cid, record)
+            except LinearError as exc:
+                raise HTTPException(502, f"Couldn't undo in Linear: {exc}. Try again.")
+            finally:
+                client.close()
+            db.set_undo(cid, None)
+        return {"candidate": db.decide(cid, "pending"), "warnings": warnings}
+
+    @app.post("/api/candidates/{cid}/restore", dependencies=auth)
+    def restore(cid: int) -> dict:
+        c = candidate_or_404(cid)
+        if c["status"] != "dropped":
+            raise HTTPException(409, "Only dropped candidates can be restored")
+        return db.decide(cid, "pending")
+
+    # ---- Linear lists -----------------------------------------------------------------
+    @app.get("/api/issues", dependencies=auth)
+    def issues() -> list[dict]:
+        raw = linear_call(lambda l: l.my_open_issues())
+        known = db.categories_by_identifier()    # issues TodoHub created keep the type you approved
+        out = []
+        for i in raw:
+            shaped = shape_issue(i, settings)
+            shaped["category"] = known.get(shaped["identifier"], shaped["category"])
+            out.append(shaped)
+        return out
+
+    @app.get("/api/logos", dependencies=auth)
+    def client_logos(clients: str = "") -> dict:
+        """Logos as data URIs for the given client labels ("|"-separated); null = show initials."""
+        names = [c for c in clients.split("|") if c][:150]
+        return logos.logos_for(settings, names)
+
+    @app.patch("/api/issues/{issue_id}", dependencies=auth)
+    def edit_issue(issue_id: str, edit: IssueEdit) -> dict:
+        fields = edit.model_fields_set
+        if not fields:
+            raise HTTPException(400, "Nothing to change")
+        changes: dict = {}
+        if "state_id" in fields:
+            if not edit.state_id:
+                raise HTTPException(400, "state_id can't be empty")
+            changes["stateId"] = edit.state_id
+        if "priority" in fields:
+            changes["priority"] = edit.priority or 0
+        if "due_date" in fields:
+            changes["dueDate"] = edit.due_date   # None clears it
+        issue = linear_call(lambda l: l.update_issue(issue_id, changes))
+        return shape_issue(issue, settings)
+
+    # ---- sweeps -----------------------------------------------------------------------
+    @app.get("/api/runs/latest", dependencies=auth)
+    def latest_run(kind: str = "sweep") -> dict:
+        return db.latest_run("capture" if kind == "capture" else "sweep") or {}
+
+    def clear_stale() -> None:
+        # A run left "running" by a crash shouldn't block the button forever.
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.timeout_minutes + 5)
+        db.mark_stale_runs(cutoff.replace(microsecond=0).isoformat())
+
+    @app.post("/api/sweep", dependencies=auth, status_code=202)
+    def run_now() -> dict:
+        clear_stale()
+        run = db.latest_run()
+        if run and run["status"] == "running":
+            raise HTTPException(409, "A sweep is already running")
+        launch(["--trigger", "manual"])
+        return {"started": True}
+
+    # ---- today --------------------------------------------------------------------------
+    @app.get("/api/today", dependencies=auth)
+    def get_today() -> dict:
+        return {"day": today_str(), "items": db.get_today(today_str())}
+
+    @app.put("/api/today", dependencies=auth)
+    def put_today(body: TodayIn) -> dict:
+        return {"day": today_str(), "items": db.set_today(today_str(), body.issue_ids)}
+
+    @app.post("/api/today/{issue_id}/block", dependencies=auth)
+    def block_time(issue_id: str, body: BlockIn) -> dict:
+        day = today_str()
+        if issue_id not in {i["issue_id"] for i in db.get_today(day)}:
+            raise HTTPException(400, "Add the issue to Today first")
+        issue = linear_call(lambda l: l.get_issue(issue_id))
+        hh, mm = map(int, body.start.split(":"))
+        start = datetime.now(stats.TZ).replace(hour=hh, minute=mm, second=0, microsecond=0)
+        try:
+            link = block(title=f"{issue['identifier']} {issue['title']}", url=issue["url"], start=start,
+                         minutes=body.minutes)
+        except calendar_block.BlockError as exc:
+            raise HTTPException(502, str(exc))
+        db.set_block(day, issue_id, start.isoformat(), body.minutes, link)
+        return {"day": day, "items": db.get_today(day)}
+
+    # ---- on-demand capture ------------------------------------------------------------
+    @app.post("/api/capture", dependencies=auth)
+    def capture(body: CaptureIn) -> JSONResponse:
+        """A typed note becomes a candidate now; a Slack/Gmail/Grain link starts a short Claude run."""
+        text = body.text.strip()
+        if not text:
+            raise HTTPException(400, "Type a task or paste a link.")
+        if not capture_mod.needs_claude(settings, text):
+            try:
+                result = capture_mod.add_note(db, text)
+            except ToolError as exc:
+                raise HTTPException(400, str(exc))
+            return JSONResponse({"mode": "note", "candidate": db.get_candidate(result["id"]) if "id" in result else None,
+                                 "status": result["status"]})
+        clear_stale()
+        run = db.latest_run("capture")
+        if run and run["status"] == "running":
+            raise HTTPException(409, "A capture is already running; try again in a moment")
+        launch(["--capture", text])
+        return JSONResponse({"mode": "claude", "started": True}, status_code=202)
+
+    @app.exception_handler(HTTPException)
+    async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
+        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+
+    return app
+
+
+def _exit_with_parent() -> None:
+    """When the app that started us goes away (even killed outright), stop too."""
+    parent = os.getppid()
+
+    def watch() -> None:
+        while True:
+            time.sleep(2)
+            if os.getppid() != parent:
+                os._exit(0)
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
+def serve() -> None:
+    parser = argparse.ArgumentParser(description="Run the TodoHub local API.")
+    parser.add_argument("--port", type=int, default=None)
+    args = parser.parse_args()
+    settings = load_settings()
+    if not os.environ.get("TODOHUB_TOKEN"):
+        # Never serve without a token: any web page could otherwise post to localhost.
+        os.environ["TODOHUB_TOKEN"] = secrets.token_hex(24)
+        print(f"No TODOHUB_TOKEN set; using {os.environ['TODOHUB_TOKEN']} (send it as X-TodoHub-Token).")
+    if os.environ.get("TODOHUB_EXIT_WITH_PARENT"):
+        _exit_with_parent()
+    uvicorn.run(create_app(settings), host="127.0.0.1", port=args.port or settings.port, log_level="warning")
+
+
+if __name__ == "__main__":
+    serve()

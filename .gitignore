@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+app/src-tauri/target/
+app/src-tauri/gen/
+.DS_Store
+app/src-tauri/binaries/
+backend/packaging/build/
+backend/packaging/dist/
+
+# Client and company data lives in the settings folder, never in the repo
+backend/src/todohub/client_domains.json
