@@ -50,6 +50,15 @@ DEFAULT_CALENDAR_TOOLS = [
     "mcp__claude_ai_Google_Calendar__list_calendars",
 ]
 
+# HubSpot: your owner id, ticket stages, searches over tickets and notes, and note authors.
+DEFAULT_HUBSPOT_TOOLS = [
+    "mcp__claude_ai_HubSpot__get_user_details",
+    "mcp__claude_ai_HubSpot__search_crm_objects",
+    "mcp__claude_ai_HubSpot__get_crm_objects",
+    "mcp__claude_ai_HubSpot__discover_hubspot_schema",
+    "mcp__claude_ai_HubSpot__search_owners",
+]
+
 DEFAULT_CONFIG = """\
 # TodoHub settings. Edit, then restart the app. Missing keys fall back to defaults.
 
@@ -76,8 +85,8 @@ first_run_lookback_hours = 72
 snitch_url = ""            # Dead Man's Snitch URL, e.g. "https://nosnch.in/abc123"
 restricted = true          # run Claude Code with --restricted (ignores ~/.claude settings); keep on
 
-# Read-only tool allowlists (slack_tools, gmail_tools, grain_tools, calendar_tools) default to the
-# built-in lists. Set one to [] to switch that source off, e.g.:
+# Read-only tool allowlists (slack_tools, gmail_tools, grain_tools, calendar_tools, hubspot_tools) default
+# to the built-in lists. Set one to [] to switch that source off, e.g.:
 # gmail_tools = []
 gmail_account = ""         # your Gmail address, used to build "open in Gmail" links
 linear_mentions = true     # read Linear notifications where someone @-mentions you
@@ -128,6 +137,7 @@ class Settings:
     github_reviews: bool = True
     gh_path: str = "gh"
     calendar_tools: list[str] = field(default_factory=lambda: list(DEFAULT_CALENDAR_TOOLS))
+    hubspot_tools: list[str] = field(default_factory=lambda: list(DEFAULT_HUBSPOT_TOOLS))
     calendar_create_tool: str = "mcp__claude_ai_Google_Calendar__create_event"
     gmail_draft_tool: str = "mcp__claude_ai_Gmail__create_draft"   # used only by "Save as Gmail draft"
     gmail_account: str = ""
@@ -166,6 +176,7 @@ class Settings:
             gmail_tools=self.gmail_tools if source == "gmail" else [],
             grain_tools=self.grain_tools if source == "grain" else [],
             calendar_tools=self.calendar_tools if source == "calendar" else [],
+            hubspot_tools=self.hubspot_tools if source == "hubspot" else [],
             linear_mentions=self.linear_mentions and source == "linear",
             github_reviews=self.github_reviews and source == "github",
         )
@@ -175,7 +186,7 @@ class Settings:
             name
             for name, tools in (
                 ("slack", self.slack_tools), ("gmail", self.gmail_tools),
-                ("grain", self.grain_tools), ("calendar", self.calendar_tools),
+                ("grain", self.grain_tools), ("calendar", self.calendar_tools), ("hubspot", self.hubspot_tools),
                 ("linear", self.linear_mentions), ("github", self.github_reviews),
             )
             if tools
@@ -225,6 +236,7 @@ def load_settings() -> Settings:
     s.gmail_tools = list(sweep.get("gmail_tools", s.gmail_tools))
     s.gmail_account = sweep.get("gmail_account", s.gmail_account)
     s.calendar_tools = list(sweep.get("calendar_tools", s.calendar_tools))
+    s.hubspot_tools = list(sweep.get("hubspot_tools", s.hubspot_tools))
     s.calendar_create_tool = sweep.get("calendar_create_tool", s.calendar_create_tool)
     s.gmail_draft_tool = sweep.get("gmail_draft_tool", s.gmail_draft_tool)
     s.linear_mentions = bool(sweep.get("linear_mentions", s.linear_mentions))

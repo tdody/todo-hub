@@ -150,3 +150,15 @@ def test_propose_close_and_update(db):
                              comment=" ", why="w", excerpt="e")
     with pytest.raises(tools.ToolError, match="signal"):
         add(db, signal="done")
+
+
+def test_hubspot_source(db):
+    db.set_meta("open_issues", [{"identifier": "ENG-123", "title": "Count phone appends"}])
+    url = "https://app.hubspot.com/contacts/6194453/record/0-5/479"
+    r = add(db, source="hubspot", source_id="ticket:479", source_url=url, title="Count SecureOne phone appends")
+    assert r["status"] == "added" and db.get_candidate(r["id"])["source"] == "hubspot"
+    with pytest.raises(tools.ToolError, match="urlTemplate"):
+        add(db, source="hubspot", source_id="note:120", source_url="")
+    r = tools.propose_close(db, None, source="hubspot", source_id="ticket:479#closed", source_url=url,
+                            target_issue="ENG-123", why="Ticket closed in HubSpot on 2026-08-31.", excerpt="Closed")
+    assert db.get_candidate(r["id"])["kind"] == "close"

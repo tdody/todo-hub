@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from . import stats
 
 SOURCE_NAME = {"slack": "Slack", "gmail": "Gmail", "grain": "Grain", "calendar": "Calendar",
-               "linear": "Linear", "github": "GitHub"}
+               "hubspot": "HubSpot", "linear": "Linear", "github": "GitHub"}
 BALANCE_GAP = 0.15          # how far from the target before the digest calls it out
 MIN_CLOSED_FOR_BALANCE = 3  # fewer closed issues than this says nothing about balance
 NOISY_MIN = 5               # decisions from a source before its drop rate is worth a note

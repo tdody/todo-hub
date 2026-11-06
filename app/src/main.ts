@@ -22,7 +22,7 @@ const PRIORITIES = [
 ];
 const SOURCE_NAME: Record<Source, string> = {
   slack: "Slack", gmail: "Email", grain: "Grain", calendar: "Calendar", linear: "Linear", github: "GitHub",
-  manual: "Captured",
+  hubspot: "HubSpot", manual: "Captured",
 };
 const SIGNAL_NAME = {
   ask: "Asked of you", commitment: "You committed", action_item: "Action item", deadline: "Deadline", manual: "Your note",

@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 SIGNALS = ("ask", "commitment", "action_item", "deadline", "manual", "waiting_on", "done", "update")
-SOURCES = ("slack", "gmail", "grain", "calendar", "linear", "github", "manual")
+SOURCES = ("slack", "gmail", "grain", "calendar", "linear", "github", "hubspot", "manual")
 SWEEP_TRIGGERS = ("schedule", "manual")
 CAPTURE_TRIGGERS = ("capture",)
 CANDIDATE_FIELDS = (
@@ -502,8 +502,8 @@ class DB:
         marks = ", ".join("?" * len(open_identifiers))
         with self.connect() as c:
             rows = c.execute(
-                f"SELECT linear_identifier, title, kind, source, source_id, source_url, who, decided_at "
-                f"FROM candidates WHERE status = 'approved' AND kind IN ('task', 'waiting') "
+                f"SELECT linear_identifier, title, kind, source, source_id, source_url, who, possible_duplicate, "
+                f"decided_at FROM candidates WHERE status = 'approved' AND kind IN ('task', 'waiting') "
                 f"AND linear_identifier IN ({marks}) AND source != 'manual' ORDER BY decided_at DESC LIMIT ?",
                 (*open_identifiers, limit)).fetchall()
         return [dict(r) for r in rows]

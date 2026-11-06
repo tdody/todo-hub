@@ -103,7 +103,7 @@ def test_meta_and_sweep(env):
     client, db, _, launched = env
     m = client.get("/api/meta").json()
     assert [s["name"] for s in m["states"]] == ["Backlog", "Todo", "Pending", "Done"]
-    assert m["sources"] == ["slack", "gmail", "grain", "calendar", "linear", "github"]
+    assert m["sources"] == ["slack", "gmail", "grain", "calendar", "hubspot", "linear", "github"]
     assert client.post("/api/sweep").status_code == 202 and launched == [["--trigger", "manual"]]
     assert client.post("/api/sweep", json={"source": "fax"}).status_code == 400
     assert client.post("/api/sweep", json={"source": "gmail"}).json() == {"started": True, "source": "gmail"}
@@ -439,6 +439,7 @@ def test_merge_adds_comment_links_and_subtasks_then_undoes(env):
     assert body["candidate"]["status"] == "approved" and body["candidate"]["linear_identifier"] == "ENG-1"
     issue_id, text = fake.comments[0]
     assert issue_id == "id-ENG-1" and "Send Jordan the rebinned grade table" in text and "**Due:** 2026-11-09" in text
+    assert "**More from Slack message · Sam:** Send Jordan the rebinned grade table" in text
     assert fake.links == [("id-ENG-1", "https://docs.google.com/d/9", "Grade table")]   # no second source link
     assert fake.created[0]["parent_id"] == "id-ENG-1" and fake.created[0]["title"] == "Export the table"
     assert [s["title"] for s in body["subtasks"]] == ["Export the table"]
@@ -697,3 +698,18 @@ def test_daylight_location(env, monkeypatch, tmp_path):
     assert c2.get("/api/daylight").json() == {"location": {"lat": 44.39, "lon": -73.23, "place": "Shelburne, VT"}}
     settings.config_path.write_text('[app]\ndaylight_latitude = 144\ndaylight_longitude = -73.23\n')
     assert load_settings().daylight_latitude is None                         # out of range is ignored
+
+
+def test_hubspot_cards_link_back_and_can_be_muted(env):
+    from todohub import mutes
+    client, db, fake, _ = env
+    url = "https://app.hubspot.com/contacts/6194453/objects/0-46/120"
+    cid = seed(db, source="hubspot", source_id="note:120", signal="mention", source_url=url,
+               sender="Ana Tapsieva", client_label=None)
+    assert f"**Source:** [HubSpot]({url})" in issue_description(db.get_candidate(cid))
+    [card] = client.get("/api/candidates").json()
+    key = {"kind": "sender", "source": "hubspot", "value": "ana tapsieva", "label": "Ana Tapsieva"}
+    assert card["mute_keys"] == [key]
+    r = client.post("/api/mutes", json={**key, "drop_pending": True})
+    assert r.status_code == 200 and r.json()["dropped_ids"] == [cid]
+    assert "sender Ana Tapsieva (HubSpot)" in mutes.prompt_section(db.list_mutes())

@@ -1,7 +1,7 @@
 // Talks to the local Python backend. The Rust shell started it and knows its port and token.
 import { invoke } from "@tauri-apps/api/core";
 
-export type Source = "slack" | "gmail" | "grain" | "calendar" | "linear" | "github" | "manual";
+export type Source = "slack" | "gmail" | "grain" | "calendar" | "linear" | "github" | "hubspot" | "manual";
 export type Signal =
   | "ask" | "commitment" | "action_item" | "deadline" | "manual" | "waiting_on" | "done" | "update"
   | "meeting_prep" | "review_request" | "mention";

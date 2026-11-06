@@ -22,7 +22,8 @@ const REASONS: Record<string, string> = {
   not_mine: "Not mine", already_done: "Already done", noise: "Not a task", duplicate: "Duplicate", other: "Other",
 };
 const SOURCES: Record<string, string> = {
-  slack: "Slack", gmail: "Email", grain: "Grain", calendar: "Calendar", linear: "Linear", github: "GitHub", all: "All sources",
+  slack: "Slack", gmail: "Email", grain: "Grain", calendar: "Calendar", linear: "Linear", github: "GitHub",
+  hubspot: "HubSpot", all: "All sources",
 };
 
 let cache: { at: number; balance?: BalanceStats; approval?: ApprovalStats; runs?: Run[]; slips?: Slips | null; error?: string } = { at: 0 };

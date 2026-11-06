@@ -42,7 +42,7 @@ TODO_DB_TOOLS = [
 ]
 # Belt and braces. Headless mode already refuses tools that aren't allowed, but an "allow" rule
 # in ~/.claude/settings.json would still apply. A deny always wins, so the risky built-ins and
-# every known write tool of the three connectors are denied by name.
+# every known write tool of each connector is denied by name.
 DISALLOWED_TOOLS = [
     "Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent",
     *(f"mcp__claude_ai_Slack__{t}" for t in (
@@ -66,6 +66,11 @@ DISALLOWED_TOOLS = [
         "apply_sensitive_message_label", "apply_sensitive_thread_label",
         "mark_message_spam", "mark_thread_spam", "unmark_message_spam", "unmark_thread_spam",
         "trash_message", "trash_thread", "untrash_message", "untrash_thread",
+    )),
+    *(f"mcp__claude_ai_HubSpot__{t}" for t in (
+        "manage_crm_objects", "manage_blog_post", "manage_campaign_objects", "manage_landing_page",
+        "manage_website_page", "manage_segment", "manage_saved_reports", "manage_aeo_prompts",
+        "manage_aeo_recommendations", "manage_onboarding", "import-claude-design-from-url", "show_feedback_form",
     )),
 ]
 # Overlap with the previous window so a message posted mid-run isn't missed; is_seen dedups.
@@ -128,6 +133,33 @@ def source_sections(settings: Settings, since: datetime, mentions: str | None = 
             "skip it without calling `mark_seen`, so the next sweep looks again. Use the Grain meeting id as the "
             "source_id, and the meeting link from `resolve_urls` as the source_url."
         )
+    if settings.hubspot_tools:
+        hubspot_since = msg_since("hubspot")
+        parts.append(
+            f"### HubSpot: tickets and notes since {_fmt(hubspot_since)}\n"
+            "Get Thibault's owner id with `get_user_details`. Then run these two `search_crm_objects` searches "
+            f"with `limit` 50 and the start time `{hubspot_since.astimezone(timezone.utc):%Y-%m-%dT%H:%M:%SZ}`. "
+            "Request only the properties named, build each source_url from the result's `urlTemplate`, use "
+            '`source` "hubspot" throughout, and use `ticket:<id>` or `note:<id>` as the source_id in every '
+            "todo-db call in this section.\n"
+            "- **Tickets assigned to him:** `TICKET` where `hubspot_owner_id` is his owner id and "
+            "`hubspot_owner_assigneddate` is on or after the start; properties `subject`, `content`, "
+            "`hs_pipeline_stage`. If any come back, get the ticket stages with `discover_hubspot_schema` "
+            "(`GET_PIPELINES` for `TICKET`): a stage whose state is CLOSED is closed. Skip tickets in a closed "
+            'stage. Add each other one with `signal` "ask", source_id `ticket:<id>`, and the start of `content` '
+            "as the excerpt.\n"
+            "- **Notes that mention him:** `NOTE` where `hs_note_body` CONTAINS_TOKEN `Thibault`, "
+            "`hubspot_owner_id` HAS_PROPERTY (Grain copies its meeting notes in without an owner, and the Grain "
+            "section covers those), and `hs_createdate` is on or after the start; properties `hs_body_preview` "
+            "and `hubspot_owner_id`, never `hs_note_body`, which is very long. Look up all the authors in one "
+            "`search_owners` call (`ownerIds`) and pass each note's author name as `sender`. Judge each note: "
+            'if it asks him to do something, `add_candidate` with `signal` "mention" and source_id `note:<id>`; '
+            "if it adds "
+            "information to one of his open issues, `propose_update`; if it's an FYI or a status note, "
+            "`mark_seen`.\n"
+            'Then call `report_source_status` for "hubspot". '
+            "Don't read HubSpot tasks: they are copies of Grain action items."
+        )
     if settings.linear_mentions:
         parts.append(
             "### Linear: mentions of Thibault since the last sweep\n"
@@ -176,11 +208,14 @@ def feedback_section(decisions: dict | None) -> str:
 
 
 def watched_section(watched: list[dict] | None, sources: list[str] | None = None) -> str:
-    """Approved Slack and Gmail items to re-read for replies. Only for sources this sweep can read:
-    a one-source check (say, Grain) has no Slack or Gmail tools, so those threads wait for the
-    next sweep that has them."""
-    readable = {"slack", "gmail"} & set(sources if sources is not None else ("slack", "gmail"))
-    rows = [w for w in (watched or []) if w["source"] in readable and w.get("source_url")]
+    """Approved items to re-check, from sources this sweep reads: Slack and Gmail threads for replies,
+    HubSpot tickets for closing. A ticket merged into an existing issue is left out: closing it
+    doesn't finish that issue."""
+    rechecked = ("slack", "gmail", "hubspot")
+    readable = set(rechecked) & set(sources if sources is not None else rechecked)
+    rows = [w for w in (watched or []) if w["source"] in readable and w.get("source_url")
+            and (w["source"] != "hubspot"
+                 or (w["source_id"].startswith("ticket:") and w["linear_identifier"] != w["possible_duplicate"]))]
     if not rows:
         return "(none to check)"
     return "\n".join(
@@ -261,14 +296,16 @@ def mcp_config(settings: Settings, run_id: int) -> dict:
 
 def allowed_tools(settings: Settings) -> list[str]:
     return [*settings.slack_tools, *settings.gmail_tools, *settings.grain_tools, *settings.calendar_tools,
-            *TODO_DB_TOOLS]
+            *settings.hubspot_tools, *TODO_DB_TOOLS]
 
 
-# Whole MCP servers the sweep never needs. Denying a server by name covers every tool on it,
-# including write tools (Linear save_issue, Drive share_file, HubSpot, browser control).
+HUBSPOT_SERVER = "mcp__claude_ai_HubSpot"
+# Whole MCP servers to deny. Denying a server by name covers every tool on it, including write
+# tools (Linear save_issue, Drive share_file, browser control). claude_command lifts HubSpot's
+# when hubspot_tools is set; Block time and Gmail drafts always deny it.
 # Your own servers go in the extra_denied_servers setting.
 DENIED_SERVERS = [
-    "mcp__claude_ai_Linear", "mcp__claude_ai_HubSpot", "mcp__claude_ai_Google_Drive",
+    "mcp__claude_ai_Linear", HUBSPOT_SERVER, "mcp__claude_ai_Google_Drive",
     "mcp__claude_ai_Google_Docs", "mcp__claude_ai_Google_Slides", "mcp__claude_ai_Claude_Docs",
     "mcp__linear", "mcp__linear-personal", "mcp__sentry", "mcp__slack",
     "mcp__outline", "mcp__figma", "mcp__playwright",
@@ -291,6 +328,8 @@ def hardening_flags(settings: Settings) -> list[str]:
 
 
 def claude_command(settings: Settings, prompt: str, mcp_path: Path) -> list[str]:
+    # A deny on a whole server wins over its allowed tools, so HubSpot's is lifted when the sweep reads it.
+    denied = [s for s in denied_servers(settings) if not (s == HUBSPOT_SERVER and settings.hubspot_tools)]
     return [
         settings.claude_path, "-p", prompt,
         *hardening_flags(settings),
@@ -299,7 +338,7 @@ def claude_command(settings: Settings, prompt: str, mcp_path: Path) -> list[str]
         "--max-turns", str(settings.max_turns),
         "--mcp-config", str(mcp_path),
         "--allowedTools", ",".join(allowed_tools(settings)),
-        "--disallowedTools", ",".join([*DISALLOWED_TOOLS, *denied_servers(settings)]),
+        "--disallowedTools", ",".join([*DISALLOWED_TOOLS, *denied]),
     ]
 
 
@@ -529,7 +568,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one TodoHub sweep, or capture one pasted item.")
     parser.add_argument("--trigger", choices=["schedule", "manual"], default="manual")
     parser.add_argument("--capture", metavar="TEXT", help="capture this link or note instead of sweeping")
-    parser.add_argument("--source", choices=["slack", "gmail", "grain", "calendar", "linear", "github"],
+    parser.add_argument("--source", choices=["slack", "gmail", "grain", "calendar", "hubspot", "linear", "github"],
                         help="sweep only this source")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

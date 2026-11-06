@@ -42,3 +42,20 @@ def test_local_label_types_and_denied_servers(tmp_home):
     s = config.load_settings()
     assert s.team_key == "ENG" and s.label_types == {"data quality": "analysis"}
     assert sweep.denied_servers(s) == [*sweep.DENIED_SERVERS, "mcp__acme_internal"]
+
+
+def test_hubspot_is_on_by_default_and_can_be_switched_off(tmp_home):
+    from todohub import config
+    s = config.load_settings()
+    assert s.hubspot_tools == config.DEFAULT_HUBSPOT_TOOLS and "hubspot" in s.enabled_sources()
+    assert "hubspot_tools" in (tmp_home / "config.toml").read_text()
+    (tmp_home / "config.toml").write_text("[sweep]\nhubspot_tools = []\n")
+    assert "hubspot" not in config.load_settings().enabled_sources()
+
+
+def test_hubspot_read_tools_are_not_broad_rules(tmp_path):
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps({"permissions": {"allow": [
+        "mcp__claude_ai_HubSpot__search_crm_objects", "mcp__claude_ai_HubSpot__manage_crm_objects"]}}))
+    assert cli.broad_allow_rules(load_settings(), f) == ["mcp__claude_ai_HubSpot__manage_crm_objects"]
+    assert cli.CONNECTORS["hubspot"] == "claude.ai HubSpot"

@@ -24,3 +24,9 @@ def test_schema_requires_source_url_and_types_links():
     schema = tools["add_candidate"].input_schema
     assert "source_url" in schema["required"]
     assert {"links", "subtasks"} <= set(schema["properties"])
+
+
+def test_hubspot_is_a_source_for_every_tool():
+    tools = {t.name: t for t in asyncio.run(mcp_server.server.list_tools())}
+    for name in ("is_seen", "mark_seen", "add_candidate", "propose_close", "propose_update", "report_source_status"):
+        assert "hubspot" in tools[name].input_schema["properties"]["source"]["enum"], name

@@ -37,7 +37,7 @@ from .tools import ToolError
 TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420"]
 META_TTL_SECONDS = 600
 SOURCE_NAMES = {"slack": "Slack message", "gmail": "Email", "grain": "Grain meeting", "calendar": "Calendar event",
-                "manual": "Link"}
+                "hubspot": "HubSpot", "manual": "Link"}
 
 
 class SubtaskIn(BaseModel):
@@ -59,7 +59,7 @@ class CandidateEdit(BaseModel):
 
 class MuteIn(BaseModel):
     kind: Literal["sender", "channel", "repo"]
-    source: Literal["slack", "gmail", "grain", "calendar", "linear", "github", "manual"]
+    source: Literal["slack", "gmail", "grain", "calendar", "linear", "github", "hubspot", "manual"]
     value: str = Field(min_length=1, max_length=200)
     label: str = Field(min_length=1, max_length=200)
     drop_pending: bool = False        # also drop cards already in the Inbox that match
@@ -394,7 +394,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     def merge_text(c: dict) -> str:
         source = SOURCE_NAMES.get(c["source"], c["source"])
-        parts = [f"**More from {source.lower()}{' · ' + c['who'] if c.get('who') else ''}:** {c['title']}"]
+        parts = [f"**More from {source}{' · ' + c['who'] if c.get('who') else ''}:** {c['title']}"]
         if c.get("why"):
             parts.append(c["why"])
         if c.get("excerpt"):

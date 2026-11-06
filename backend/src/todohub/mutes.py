@@ -83,7 +83,8 @@ def prompt_section(rules: list[dict]) -> str:
     lines = ["### Muted by Thibault", "Don't propose tasks from these, and don't open or read their messages:"]
     names = {"sender": "sender", "channel": "Slack channel", "repo": "GitHub repo"}
     for r in rules:
-        where = {"gmail": "email", "slack": "Slack", "linear": "Linear", "github": "GitHub"}.get(r["source"], r["source"])
+        where = {"gmail": "email", "slack": "Slack", "linear": "Linear", "github": "GitHub",
+                 "hubspot": "HubSpot"}.get(r["source"], r["source"])
         lines.append(f"- {names[r['kind']]} {r['label']}" + (f" ({where})" if r["kind"] == "sender" else ""))
     lines.append("Leave them out of searches where you can: `-in:#channel` or `-from:@name` in Slack, "
                  "`-from:address` in Gmail.")
