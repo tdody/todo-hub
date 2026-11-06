@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS today (               -- issues picked for a day, in 
     PRIMARY KEY (day, issue_id)
 );
 
+CREATE TABLE IF NOT EXISTS mute_rules (          -- senders, channels and repos the sweep should skip
+    id              INTEGER PRIMARY KEY,
+    kind            TEXT NOT NULL,                   -- sender | channel | repo
+    source          TEXT NOT NULL,                   -- slack | gmail | linear | github
+    value           TEXT NOT NULL,                   -- lowercased sender, Slack channel id, or owner/repo
+    label           TEXT NOT NULL,                   -- what to show: "news@vendor.com", "#alerts", "org/repo"
+    created_at      TEXT NOT NULL,
+    blocked         INTEGER NOT NULL DEFAULT 0,      -- candidates refused since
+    last_blocked_at TEXT,
+    UNIQUE (kind, source, value)
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -96,10 +108,11 @@ CAPTURE_TRIGGERS = ("capture",)
 CANDIDATE_FIELDS = (
     "id", "run_id", "source", "source_id", "source_url", "title", "signal", "why", "excerpt", "who",
     "client_label", "due_date", "priority", "possible_duplicate", "links", "subtasks", "status", "drop_reason", "kind", "target_issue", "comment", "project", "snooze_until", "category",
+    "duplicate_advice", "duplicate_reason", "reply_draft", "sender", "channel", "handled",
     "linear_identifier", "linear_url", "created_at", "decided_at",
 )
 EDITABLE_FIELDS = ("title", "client_label", "due_date", "priority", "why", "subtasks", "comment", "project",
-                   "category")
+                   "category", "reply_draft")
 JSON_FIELDS = ("links", "subtasks")
 # Columns added after the first release, so an existing queue is upgraded in place.
 MIGRATIONS = {
@@ -114,6 +127,16 @@ MIGRATIONS = {
     "category": "ALTER TABLE candidates ADD COLUMN category TEXT",
     # What an approval did in Linear (JSON), so it can be undone.
     "undo": "ALTER TABLE candidates ADD COLUMN undo TEXT",
+    # For a possible duplicate: drop | merge | new, and a one-line reason.
+    "duplicate_advice": "ALTER TABLE candidates ADD COLUMN duplicate_advice TEXT",
+    "duplicate_reason": "ALTER TABLE candidates ADD COLUMN duplicate_reason TEXT",
+    # A reply Thibault could send to an ask (Slack or email), drafted by the sweep.
+    "reply_draft": "ALTER TABLE candidates ADD COLUMN reply_draft TEXT",
+    # Who and where a candidate came from, for mute rules.
+    "sender": "ALTER TABLE candidates ADD COLUMN sender TEXT",
+    "channel": "ALTER TABLE candidates ADD COLUMN channel TEXT",
+    # A Linear issue that seems to have handled a pending candidate already (JSON); see handled.py.
+    "handled": "ALTER TABLE candidates ADD COLUMN handled TEXT",
 }
 KINDS = ("task", "waiting", "close", "comment")
 DROP_REASONS = ("not_mine", "already_done", "noise", "duplicate", "other")
@@ -124,6 +147,8 @@ def _row(row: sqlite3.Row) -> dict:
     for f in JSON_FIELDS:
         if f in d:
             d[f] = json.loads(d[f] or "[]")
+    if "handled" in d:
+        d["handled"] = json.loads(d["handled"]) if d["handled"] else None
     return d
 
 
@@ -239,6 +264,20 @@ class DB:
                 "ORDER BY r.id DESC LIMIT 1", (source,)).fetchone()
         return row["started_at"] if row else None
 
+    def source_overview(self, sources: list[str]) -> list[dict]:
+        """Per source: its latest report in any sweep (full or one-source), and when it last worked."""
+        out = []
+        with self.connect() as c:
+            for source in sources:
+                row = c.execute(
+                    "SELECT s.ok, s.detail, s.items_scanned, r.started_at, r.id FROM source_status s "
+                    "JOIN runs r ON r.id = s.run_id WHERE s.source = ? AND r.trigger IN ('schedule', 'manual') "
+                    "ORDER BY r.id DESC LIMIT 1", (source,)).fetchone()
+                out.append({"source": source, "ok": bool(row["ok"]) if row else None,
+                            "detail": row["detail"] if row else None, "at": row["started_at"] if row else None,
+                            "run_id": row["id"] if row else None, "last_ok_at": self.last_ok_start(source)})
+        return out
+
     def has_reported(self, source: str) -> bool:
         with self.connect() as c:
             return c.execute("SELECT 1 FROM source_status WHERE source = ? LIMIT 1", (source,)).fetchone() is not None
@@ -286,15 +325,17 @@ class DB:
             cur = c.execute(
                 "INSERT OR IGNORE INTO candidates (run_id, source, source_id, source_url, title, title_key, signal, "
                 "why, excerpt, who, client_label, due_date, priority, possible_duplicate, links, subtasks, "
-                "kind, target_issue, comment, project, category, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "kind, target_issue, comment, project, category, duplicate_advice, duplicate_reason, reply_draft, "
+                "sender, channel, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id, f["source"], f["source_id"], f.get("source_url"), f["title"], key, f["signal"],
                     f.get("why"), f.get("excerpt"), f.get("who"), f.get("client_label"), f.get("due_date"),
                     int(f.get("priority") or 0), f.get("possible_duplicate"),
                     json.dumps(f.get("links") or []), json.dumps(f.get("subtasks") or []),
                     f.get("kind") or "task", f.get("target_issue"), f.get("comment"), f.get("project"),
-                    f.get("category"), now_iso(),
+                    f.get("category"), f.get("duplicate_advice"), f.get("duplicate_reason"),
+                    f.get("reply_draft"), f.get("sender"), f.get("channel"), now_iso(),
                 ),
             )
             if cur.rowcount == 0:
@@ -368,6 +409,11 @@ class DB:
             else:
                 c.execute("UPDATE candidates SET status = 'pending' WHERE id = ? AND status = 'approving'", (cid,))
 
+    def set_handled(self, cid: int, handled: dict | None) -> None:
+        with self.connect() as c:
+            c.execute("UPDATE candidates SET handled = ? WHERE id = ?",
+                      (json.dumps(handled) if handled else None, cid))
+
     def decide(self, cid: int, status: str, linear_identifier: str | None = None,
                linear_url: str | None = None, drop_reason: str | None = None) -> dict | None:
         decided = None if status == "pending" else now_iso()
@@ -409,6 +455,35 @@ class DB:
             )
 
     # ---- learning from decisions ------------------------------------------------------
+    # ---- mute rules ---------------------------------------------------------------------
+    def list_mutes(self) -> list[dict]:
+        with self.connect() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM mute_rules ORDER BY created_at DESC, id DESC")]
+
+    def add_mute(self, kind: str, source: str, value: str, label: str) -> dict:
+        with self.connect() as c:
+            c.execute("INSERT OR IGNORE INTO mute_rules (kind, source, value, label, created_at) VALUES (?, ?, ?, ?, ?)",
+                      (kind, source, value, label, now_iso()))
+            row = c.execute("SELECT * FROM mute_rules WHERE kind = ? AND source = ? AND value = ?",
+                            (kind, source, value)).fetchone()
+        return dict(row)
+
+    def delete_mute(self, rule_id: int) -> bool:
+        with self.connect() as c:
+            return c.execute("DELETE FROM mute_rules WHERE id = ?", (rule_id,)).rowcount > 0
+
+    def bump_mute(self, rule_id: int) -> None:
+        with self.connect() as c:
+            c.execute("UPDATE mute_rules SET blocked = blocked + 1, last_blocked_at = ? WHERE id = ?", (now_iso(), rule_id))
+
+    def decided_since(self, source: str, since_iso: str) -> list[dict]:
+        """Approved and dropped candidates from one source, decided since ``since_iso``."""
+        with self.connect() as c:
+            rows = c.execute(
+                f"SELECT {', '.join(CANDIDATE_FIELDS)} FROM candidates WHERE source = ? "
+                "AND status IN ('approved', 'dropped') AND decided_at >= ?", (source, since_iso)).fetchall()
+        return [_row(r) for r in rows]
+
     def recent_decisions(self, limit: int = 15) -> dict:
         """The latest kept and dropped candidates, shown to the sweep as examples."""
         with self.connect() as c:

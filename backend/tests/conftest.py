@@ -63,6 +63,9 @@ class FakeLinear:
         self.completed_since = since_iso
         return getattr(self, "completed", [])
 
+    def my_closed_issues(self, since_iso):
+        return getattr(self, "closed", [])
+
     def create_issue(self, **kw):
         from todohub.linear import LinearError
         if kw["title"] in self.fail_titles:
@@ -95,6 +98,29 @@ class FakeLinear:
 
     def add_link(self, issue_id, url, title):
         self.links.append((issue_id, url, title))
+        return f"att-{len(self.links)}"
+
+    existing_links: dict = {}
+    due_history: list = []
+    due_history_calls = 0
+
+    def due_date_history(self):
+        self.due_history_calls += 1
+        return self.due_history
+
+    def attachment_urls(self, issue_id):
+        return set(self.existing_links.get(issue_id, []))
+
+    def delete_attachment(self, attachment_id):
+        self.deleted_attachments = getattr(self, "deleted_attachments", []) + [attachment_id]
+
+    def issue_preview(self, ident):
+        issue = dict(self.get_issue(ident))
+        issue.update(description="Rebin the grades per channel.\n\n- use deciles", createdAt="2026-11-01T10:00:00Z",
+                     assignee={"name": "Thibault"},
+                     comments={"nodes": [{"body": f"note {n}", "createdAt": f"2026-11-0{n}T09:00:00Z",
+                                          "user": {"name": "Jordan"}} for n in (4, 2, 3, 1)]})
+        return issue
 
     def update_issue(self, issue_id, changes):
         self.updated.append((issue_id, changes))

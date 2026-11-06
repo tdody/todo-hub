@@ -8,12 +8,26 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timedelta
+from difflib import SequenceMatcher
 from zoneinfo import ZoneInfo
 
-from . import categories
-from .db import DB, SOURCES
+from . import categories, mutes
+from .db import DB, SOURCES, title_key
+
+DUPLICATE_ADVICE = ("drop", "merge", "new")
+
+
+def advise_duplicate(title: str, dup: str, dup_title: str | None) -> tuple[str, str]:
+    """A fallback recommendation when the sweep didn't give one: nearly the same title means
+    the same task (drop); otherwise it probably adds to the existing issue (merge)."""
+    if dup_title and SequenceMatcher(None, title_key(title), title_key(dup_title)).ratio() >= 0.8:
+        return "drop", f"Same task as {dup}."
+    return "merge", f"Looks like more on {dup}; add it there."
 
 MAX_TITLE = 200
+MAX_REPLY = 1500
+REPLY_SOURCES = ("slack", "gmail")          # where a drafted reply can be sent from
+REPLY_SIGNALS = ("ask", "mention")
 MAX_TEXT = 1000
 MAX_LINKS = 10
 MAX_SUBTASKS = 10
@@ -148,6 +162,11 @@ def add_candidate(
     followup_days: int = 3,
     project: str | None = None,
     category: str | None = None,
+    duplicate_advice: str | None = None,
+    duplicate_reason: str | None = None,
+    reply_draft: str | None = None,
+    sender: str | None = None,
+    channel: str | None = None,
 ) -> dict:
     notes: list[str] = []
     src = _source(source)
@@ -222,10 +241,29 @@ def add_candidate(
         notes.append("priority must be 0-4; set to 0")
         prio = 0
 
+    clean_sender = _clip(sender, MAX_TITLE)
+    clean_channel = _clip(channel, 80) if src == "slack" else None
+    rule = mutes.matching_rule(db, {"source": src, "source_id": sid, "source_url": url,
+                                    "sender": clean_sender, "channel": clean_channel})
+    if rule:
+        db.bump_mute(rule["id"])
+        db.mark_seen(src, sid)
+        return {"status": "muted", "notes": [f"Thibault muted {rule['label']}; not added. Skip anything else from it."]}
+
     dup = (possible_duplicate or "").strip().upper() or None
     if dup and dup not in set(db.get_meta("open_issue_identifiers", [])):
         notes.append(f"possible_duplicate {dup} is not one of your open issues; ignored")
         dup = None
+    advice = reason = None
+    if dup:
+        advice = (duplicate_advice or "").strip().lower() or None
+        reason = _clip(duplicate_reason, MAX_TITLE) or None
+        if advice and advice not in DUPLICATE_ADVICE:
+            notes.append("duplicate_advice must be drop, merge or new; worked out instead")
+            advice = None
+        if not advice:
+            dup_title = next((i["title"] for i in db.get_meta("open_issues", []) if i["identifier"] == dup), None)
+            advice, reason = advise_duplicate(clean_title, dup, dup_title)
 
     added, cid = db.add_candidate(
         run_id,
@@ -233,7 +271,9 @@ def add_candidate(
         why=_clip(why, MAX_TEXT), excerpt=_clip(excerpt, MAX_TEXT), who=_clip(who, MAX_TITLE),
         client_label=label, due_date=due, priority=prio, possible_duplicate=dup,
         links=clean_links(links, url, notes), subtasks=clean_subtasks(subtasks, notes), kind=kind,
-        project=proj,
+        project=proj, duplicate_advice=advice, duplicate_reason=reason,
+        sender=clean_sender, channel=clean_channel,
+        reply_draft=_clip(reply_draft, MAX_REPLY) if src in REPLY_SOURCES and sig in REPLY_SIGNALS else None,
         category=categories.clean(category) or categories.categorize(clean_title, signal=sig, source=src),
     )
     result: dict = {"status": "added" if added else "already_in_queue"}
@@ -289,6 +329,39 @@ def propose_update(db: DB, run_id: int | None, *, source: str, source_id: str, s
         target_issue=issue["identifier"], comment=body,
     )
     return {"status": "added" if added else "already_in_queue", **({"id": cid} if cid else {})}
+
+
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_CAL_URL_RE = re.compile(r"^https://(www\.)?(calendar\.google\.com|meet\.google\.com)/\S+$")
+
+
+def report_agenda(db: DB, run_id: int | None, *, day: str, events: list) -> dict:
+    """Save a day's calendar (today's for the morning brief, the next working day's for the
+    wrap-up): times, titles, links. Replaces that day's agenda; keeps the latest few days."""
+    if run_id is None:
+        raise ToolError("no active run")
+    try:
+        date.fromisoformat(day)
+    except (TypeError, ValueError):
+        raise ToolError("day must be YYYY-MM-DD")
+    rows = []
+    for e in (events or [])[:40]:
+        start = str(e.get("start") or "").strip()
+        if not _HHMM_RE.match(start):
+            continue
+        end = str(e.get("end") or "").strip()
+        link = str(e.get("link") or "").strip()
+        rows.append({
+            "start": start, "end": end if _HHMM_RE.match(end) else None,
+            "title": _clip(str(e.get("title") or ""), 120) or "(no title)",
+            "link": link if _CAL_URL_RE.match(link) else None,
+            "external": bool(e.get("external")),
+        })
+    rows.sort(key=lambda r: r["start"])
+    agendas = dict(db.get_meta("agendas", {}) or {})
+    agendas[day] = rows
+    db.set_meta("agendas", {d: agendas[d] for d in sorted(agendas)[-4:]})
+    return {"status": "recorded", "events": len(rows)}
 
 
 def report_source_status(db: DB, run_id: int | None, *, source: str, ok: bool, detail: str,

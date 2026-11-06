@@ -57,3 +57,15 @@ export async function notifyNew(candidates: Candidate[]) {
     sendNotification({ title: `TodoHub: ${fresh.length} urgent tasks`, body: fresh.slice(0, 3).map((c) => c.title).join("\n") });
   }
 }
+
+/** A Mac notification at most once per key (e.g. "brief-morning-2026-11-04"). */
+export async function notifyOnce(key: string, title: string, body: string) {
+  try {
+    if (localStorage.getItem(`notified:${key}`)) return;
+    if (!(await canNotify())) return;
+    localStorage.setItem(`notified:${key}`, "1");
+  } catch {
+    return;       // no storage: skip rather than notify every minute
+  }
+  sendNotification({ title, body });
+}

@@ -62,6 +62,7 @@ def sync_github(settings: Settings, db: DB, run_id: int, env: dict | None = None
             title=f"Review {short}#{pr['number']}: {pr['title']}",
             why=f"{(pr.get('author') or {}).get('login', 'Someone')} requested your review on GitHub.",
             excerpt=pr["title"], who=(pr.get("author") or {}).get("login"), priority=3,
+            sender=(pr.get("author") or {}).get("login"),
         )
         added += 1
     requested = {pr["url"] for pr in prs}

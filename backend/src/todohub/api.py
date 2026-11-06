@@ -13,7 +13,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -23,14 +23,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import calendar_block
+from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
-from . import logos, stats, summary
+from . import logos, mutes, stats, summary, tools
 from .categories import categorize
 from .config import Settings, get_linear_key, load_settings
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, shape_issue
 from .selfcmd import self_command
+from .sweep import next_working_day
 from .tools import ToolError
 
 TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420"]
@@ -53,6 +54,23 @@ class CandidateEdit(BaseModel):
     comment: str | None = Field(default=None, min_length=1, max_length=2000)
     project: str | None = None
     category: Literal["code", "analysis", "model", "review", "meeting", "email", "writing", "admin"] | None = None
+    reply_draft: str | None = Field(default=None, max_length=4000)
+
+
+class MuteIn(BaseModel):
+    kind: Literal["sender", "channel", "repo"]
+    source: Literal["slack", "gmail", "grain", "calendar", "linear", "github", "manual"]
+    value: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=200)
+    drop_pending: bool = False        # also drop cards already in the Inbox that match
+
+
+class CarryIn(BaseModel):
+    issue_ids: list[str] = Field(max_length=30)
+
+
+class ReplyDraftIn(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
 
 
 class TodayIn(BaseModel):
@@ -62,6 +80,10 @@ class TodayIn(BaseModel):
 class BlockIn(BaseModel):
     start: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")    # HH:MM today, America/New_York
     minutes: int = Field(ge=15, le=240)
+
+
+class RunIn(BaseModel):
+    source: str | None = None
 
 
 class SnoozeIn(BaseModel):
@@ -109,7 +131,8 @@ def issue_description(c: dict) -> str:
 def create_app(settings: Settings | None = None, db: DB | None = None,
                linear_factory: Callable[[], Linear] | None = None,
                sweep_launcher: Callable[[list[str]], None] | None = None,
-               block_fn: Callable[..., str | None] | None = None) -> FastAPI:
+               block_fn: Callable[..., str | None] | None = None,
+               draft_fn: Callable[[str, str], str | None] | None = None) -> FastAPI:
     settings = settings or load_settings()
     db = db or DB(settings.db_path)
     db.release()     # approvals interrupted by a crash go back to the Inbox
@@ -191,16 +214,49 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "sources": settings.enabled_sources(),
         }
 
+    @app.get("/api/daylight", dependencies=auth)
+    def daylight() -> dict:
+        """Where the Daylight theme works out sunset: config.toml's daylight_latitude/longitude,
+        or null to use the Mac's time zone (the app does that part)."""
+        lat, lon = settings.daylight_latitude, settings.daylight_longitude
+        if lat is None or lon is None:
+            return {"location": None}
+        return {"location": {"lat": lat, "lon": lon,
+                             "place": settings.daylight_place or f"{lat:.2f}, {lon:.2f}"}}
+
     # ---- review queue -----------------------------------------------------------------
     @app.get("/api/candidates", dependencies=auth)
     def candidates(status: str = "pending") -> list[dict]:
         if status not in ("pending", "snoozed", "approved", "dropped"):
             raise HTTPException(400, "status must be pending, snoozed, approved or dropped")
         rows = db.list_candidates(status, today=today_str())
-        for c in rows:     # candidates from before task types existed
-            if not c.get("category"):
+        open_titles = {i["identifier"]: i["title"] for i in db.get_meta("open_issues", [])}
+        for c in rows:
+            if not c.get("category"):       # candidates from before task types existed
                 c["category"] = categorize(c["title"], signal=c["signal"], source=c["source"])
+            c["mute_keys"] = mutes.keys(c)
+            if c.get("possible_duplicate") and not c.get("duplicate_advice"):   # from before advice existed
+                c["duplicate_advice"], c["duplicate_reason"] = tools.advise_duplicate(
+                    c["title"], c["possible_duplicate"], open_titles.get(c["possible_duplicate"]))
         return rows
+
+    @app.post("/api/candidates/recheck", dependencies=auth)
+    def recheck_handled() -> dict:
+        """Compare pending candidates with my open and recently closed issues now (the sweep does
+        this too). Returns how many look handled in Linear already."""
+        since = (datetime.now(timezone.utc) - timedelta(days=handled.CLOSED_LOOKBACK_DAYS)).replace(microsecond=0).isoformat()
+        group = settings.client_label_group
+        def fetch(l: Linear) -> tuple[list[dict], list[dict]]:
+            return ([handled.slim(i, group) for i in l.my_open_issues()],
+                    [handled.slim(i, group) for i in l.my_closed_issues(since)])
+        open_issues, closed = linear_call(fetch)
+        return {"flagged": handled.recheck(db, open_issues, closed)}
+
+    @app.post("/api/candidates/{cid}/keep", dependencies=auth)
+    def keep_candidate(cid: int) -> dict:
+        """Not handled after all: clear the flag and don't match it to that issue again."""
+        handled.keep(db, candidate_or_404(cid))
+        return candidate_or_404(cid)
 
     @app.post("/api/candidates/{cid}/snooze", dependencies=auth)
     def snooze(cid: int, body: SnoozeIn) -> dict:
@@ -336,6 +392,158 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "warnings": warnings,
         }
 
+    def merge_text(c: dict) -> str:
+        source = SOURCE_NAMES.get(c["source"], c["source"])
+        parts = [f"**More from {source.lower()}{' · ' + c['who'] if c.get('who') else ''}:** {c['title']}"]
+        if c.get("why"):
+            parts.append(c["why"])
+        if c.get("excerpt"):
+            parts.append("\n".join("> " + line for line in c["excerpt"].splitlines()))
+        if c.get("due_date"):
+            parts.append(f"**Due:** {c['due_date']}")
+        parts.append(source_line(c))
+        return "\n\n".join(parts) + "\n\n_Merged from TodoHub._"
+
+    @app.post("/api/candidates/{cid}/merge", dependencies=auth)
+    def merge(cid: int, edit: CandidateEdit | None = None) -> dict:
+        """Add a candidate to the open issue it duplicates, instead of making a new issue:
+        a comment with what's new, its links, and its subtasks as sub-issues."""
+        c = candidate_or_404(cid)
+        if c["status"] != "pending":
+            raise HTTPException(409, f"Already {c['status']}")
+        if c["kind"] not in ("task", "waiting") or not c.get("possible_duplicate"):
+            raise HTTPException(400, "Only a task flagged as a possible duplicate can be merged")
+        if edit and edit.model_fields_set:
+            c = edit_candidate(cid, edit)
+        if not db.claim(cid):
+            raise HTTPException(409, "Already being approved")
+        try:
+            return merge_claimed(c)
+        finally:
+            db.release(cid)
+
+    def merge_claimed(c: dict) -> dict:
+        cid = c["id"]
+        m = team_meta()
+        warnings: list[str] = []
+        created: list[dict] = []
+        try:
+            client = linear_factory()
+        except RuntimeError as exc:      # missing API key
+            raise HTTPException(503, str(exc))
+        try:
+            try:
+                target = client.get_issue(c["possible_duplicate"])
+                comment_id = client.create_comment(target["id"], merge_text(c))
+            except LinearError as exc:
+                raise HTTPException(502, str(exc))
+            # The comment is in, so the candidate counts as handled; the rest is best effort.
+            updated = db.decide(cid, "approved", target["identifier"], target["url"])
+            undo: dict = {"issue": target["id"], "comments": [comment_id] if comment_id else [],
+                          "attachments": [], "issues": []}
+            db.set_undo(cid, undo)
+
+            source = SOURCE_NAMES.get(c["source"], c["source"])
+            links = ([{"url": c["source_url"], "title": source}] if c.get("source_url") else []) + c["links"]
+            try:
+                have = client.attachment_urls(target["id"]) if links else set()
+            except LinearError:
+                have = set()
+            for link in links:
+                if link["url"] in have:
+                    continue          # already on the issue; leave it alone (and out of undo)
+                try:
+                    attachment_id = client.add_link(target["id"], link["url"], link["title"])
+                    if attachment_id:
+                        undo["attachments"].append(attachment_id)
+                        db.set_undo(cid, undo)
+                except LinearError as exc:
+                    warnings.append(f"Link not attached ({link['title']}): {exc}")
+
+            if c["subtasks"]:
+                team_id = (target.get("team") or {}).get("id") or m.team_id
+                try:
+                    states = m.states if team_id == m.team_id else client.team_states(team_id)
+                except LinearError:
+                    states = []
+                todo = next((s for s in states if s["name"] == settings.todo_state), None) or \
+                    next((s for s in states if s["type"] == "unstarted"), None)
+                label_ids = [l["id"] for l in m.client_labels if l["name"] == c["client_label"]]
+                for sub in c["subtasks"]:
+                    if not todo:
+                        warnings.append(f"Subtask not created ({sub['title']}): no Todo status on that team")
+                        continue
+                    try:
+                        child = client.create_issue(
+                            team_id=team_id, title=sub["title"],
+                            description=f"Part of {target['identifier']}: {target['title']}",
+                            assignee_id=m.viewer_id, state_id=todo["id"],
+                            priority=c["priority"] or target.get("priority") or settings.default_priority,
+                            due_date=sub.get("due_date"), label_ids=label_ids, parent_id=target["id"],
+                            project_id=(target.get("project") or {}).get("id"),
+                        )
+                        created.append(shape_issue(child, settings))
+                        undo["issues"].append(child["id"])
+                        db.set_undo(cid, undo)
+                    except LinearError as exc:
+                        warnings.append(f"Subtask not created ({sub['title']}): {exc}")
+        finally:
+            client.close()
+        return {"candidate": updated, "issue": shape_issue(target, settings), "subtasks": created,
+                "warnings": warnings}
+
+    save_draft = draft_fn or (lambda message_id, body: gmail_draft.save_reply_draft(settings, message_id, body))
+
+    @app.post("/api/candidates/{cid}/reply-draft", dependencies=auth)
+    def reply_draft(cid: int, body: ReplyDraftIn) -> dict:
+        """Save the card's reply as a Gmail draft in the original thread. Nothing is sent."""
+        c = candidate_or_404(cid)
+        if c["source"] != "gmail":
+            raise HTTPException(400, "Only email tasks can be saved as Gmail drafts; copy the reply instead")
+        db.update_candidate(cid, reply_draft=body.body.strip())
+        try:
+            url = save_draft(c["source_id"], body.body)
+        except gmail_draft.DraftError as exc:
+            raise HTTPException(502, str(exc))
+        return {"url": url}
+
+    # ---- mute rules ---------------------------------------------------------------------
+    @app.get("/api/mutes", dependencies=auth)
+    def list_mutes() -> list[dict]:
+        return db.list_mutes()
+
+    @app.post("/api/mutes", dependencies=auth)
+    def add_mute(body: MuteIn) -> dict:
+        """Stop proposing tasks from a sender, channel or repo. With drop_pending, cards already
+        waiting in the Inbox from it are dropped too (as noise); their ids come back for undo."""
+        value = body.value.strip().lower() if body.kind != "channel" else body.value.strip()
+        rule = db.add_mute(body.kind, body.source, value, body.label.strip())
+        dropped: list[int] = []
+        if body.drop_pending:
+            key = (rule["kind"], rule["source"], rule["value"])
+            for c in db.list_candidates("pending"):
+                if key in {(k["kind"], k["source"], k["value"]) for k in mutes.keys(c)}:
+                    db.decide(c["id"], "dropped", drop_reason="noise")
+                    dropped.append(c["id"])
+        return {"rule": rule, "dropped_ids": dropped}
+
+    @app.delete("/api/mutes/{rule_id}", dependencies=auth)
+    def delete_mute(rule_id: int) -> dict:
+        if not db.delete_mute(rule_id):
+            raise HTTPException(404, "No such mute rule")
+        return {"deleted": rule_id}
+
+    @app.post("/api/mutes/decline", dependencies=auth)
+    def decline_mute(body: MuteIn) -> dict:
+        """'Not now' on a suggestion: don't suggest muting this one again."""
+        mutes.decline(db, {"kind": body.kind, "source": body.source, "value": body.value})
+        return {"declined": True}
+
+    @app.get("/api/candidates/{cid}/mute-suggestion", dependencies=auth)
+    def mute_suggestion(cid: int) -> dict:
+        """After a drop: a sender, channel or repo worth muting, or null."""
+        return {"suggestion": mutes.suggestion(db, candidate_or_404(cid))}
+
     @app.post("/api/candidates/{cid}/drop", dependencies=auth)
     def drop(cid: int, body: DropIn | None = None) -> dict:
         c = candidate_or_404(cid)
@@ -409,6 +617,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                     client.update_issue(record["issue"], {"stateId": record["state_id"]})
                     record.pop("state_id")
                     db.set_undo(cid, record)
+                for attachment_id in list(record.get("attachments", [])):
+                    try:
+                        client.delete_attachment(attachment_id)
+                    except LinearError as exc:
+                        warnings.append(f"A link on {c['linear_identifier']} wasn't removed: {exc}")
+                    record["attachments"].remove(attachment_id)
+                    db.set_undo(cid, record)
                 while record.get("issues"):          # subtasks first, then the parent
                     client.delete_issue(record["issues"][-1])
                     record["issues"].pop()
@@ -417,7 +632,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                     try:
                         client.delete_comment(comment_id)
                     except LinearError as exc:
-                        warnings.append(f"The comment on {c['target_issue']} wasn't deleted: {exc}")
+                        warnings.append(f"The comment on {c['target_issue'] or c['linear_identifier']} "
+                                        f"wasn't deleted: {exc}")
                     record["comments"].remove(comment_id)
                     db.set_undo(cid, record)
             except LinearError as exc:
@@ -446,6 +662,49 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             out.append(shaped)
         return out
 
+    @app.get("/api/issues/{ident}/preview", dependencies=auth)
+    def issue_preview(ident: str) -> dict:
+        """A quick look at an issue: its description and latest comments."""
+        raw = linear_call(lambda l: l.issue_preview(ident))
+        nodes = sorted((raw.get("comments") or {}).get("nodes", []), key=lambda n: n.get("createdAt") or "")
+        description = (raw.get("description") or "").strip()
+        return {
+            **shape_issue(raw, settings),
+            "assignee": (raw.get("assignee") or {}).get("name"),
+            "created_at": raw.get("createdAt"),
+            "description": description[:1500],
+            "description_truncated": len(description) > 1500,
+            "comment_count": len(nodes),
+            "comments": [
+                {"author": (n.get("user") or {}).get("name") or "Someone", "created_at": n.get("createdAt"),
+                 "body": (n.get("body") or "").strip()[:400]}
+                for n in nodes[-3:]
+            ],
+        }
+
+    slip_cache: dict = {"at": 0.0, "data": None}
+
+    @app.get("/api/slips", dependencies=auth)
+    def slips(refresh: bool = False) -> dict:
+        """Due-date slips on my open issues (see stats.due_slips). Cached for 15 minutes."""
+        if refresh or not slip_cache["data"] or time.time() - slip_cache["at"] > 15 * 60:
+            try:
+                raw = linear_call(lambda l: l.due_date_history())
+            except HTTPException as exc:
+                return {"slips": {}, "checked": 0, "error": str(exc.detail)}
+            slip_cache.update(at=time.time(), data={
+                "slips": stats.due_slips(raw, settings.client_label_group), "checked": len(raw), "error": None})
+        return slip_cache["data"]
+
+    @app.get("/api/digest", dependencies=auth)
+    def weekly_digest(week: int = 0) -> dict:
+        """The weekly digest (see digest.py). week: 0 = this week, 1 = last week, up to 8."""
+        week = max(0, min(week, 8))
+        since = stats.first_day(week + 1).astimezone(timezone.utc).replace(microsecond=0).isoformat()
+        open_issues = [shape_issue(i, settings) for i in linear_call(lambda l: l.my_open_issues())]
+        return digest.build(week_offset=week, completed=completed_since_weeks(week + 2), open_issues=open_issues,
+                            slips=slips(), decisions=db.decisions_since(since), runs=db.list_runs(200))
+
     @app.get("/api/logos", dependencies=auth)
     def client_logos(clients: str = "") -> dict:
         """Logos as data URIs for the given client labels ("|"-separated); null = show initials."""
@@ -472,7 +731,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     # ---- sweeps -----------------------------------------------------------------------
     @app.get("/api/runs/latest", dependencies=auth)
     def latest_run(kind: str = "sweep") -> dict:
-        return db.latest_run("capture" if kind == "capture" else "sweep") or {}
+        run = db.latest_run("capture" if kind == "capture" else "sweep") or {}
+        if kind != "capture" and run:
+            # A one-source sweep ("Check now") reports only its source; the overview keeps the rest.
+            run["scope"] = (db.get_meta("run_scopes", {}) or {}).get(str(run["id"]))
+            run["source_overview"] = db.source_overview(settings.enabled_sources())
+        return run
 
     def clear_stale() -> None:
         # A run left "running" by a crash shouldn't block the button forever.
@@ -480,13 +744,17 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         db.mark_stale_runs(cutoff.replace(microsecond=0).isoformat())
 
     @app.post("/api/sweep", dependencies=auth, status_code=202)
-    def run_now() -> dict:
+    def run_now(body: RunIn | None = None) -> dict:
+        """Sweep every source, or only ``body.source``."""
         clear_stale()
+        source = body.source if body else None
+        if source and source not in settings.enabled_sources():
+            raise HTTPException(400, f"{source} isn't an enabled source")
         run = db.latest_run()
         if run and run["status"] == "running":
             raise HTTPException(409, "A sweep is already running")
-        launch(["--trigger", "manual"])
-        return {"started": True}
+        launch(["--trigger", "manual", *(["--source", source] if source else [])])
+        return {"started": True, "source": source}
 
     # ---- today --------------------------------------------------------------------------
     @app.get("/api/today", dependencies=auth)
@@ -496,6 +764,44 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.put("/api/today", dependencies=auth)
     def put_today(body: TodayIn) -> dict:
         return {"day": today_str(), "items": db.set_today(today_str(), body.issue_ids)}
+
+    @app.post("/api/today/carry", dependencies=auth)
+    def carry_over(body: CarryIn) -> dict:
+        """End of day: put unfinished Today items on the next working day's list."""
+        day = date.fromisoformat(today_str())
+        nxt = next_working_day(day).isoformat()
+        have = [i["issue_id"] for i in db.get_today(nxt)]
+        items = db.set_today(nxt, have + [i for i in body.issue_ids if i not in have])
+        return {"day": nxt, "items": items}
+
+    @app.get("/api/brief", dependencies=auth)
+    def brief() -> dict:
+        """What the morning brief and the wrap-up need beyond the issue list: today's and the next
+        working day's agendas (saved by the first sweep of the day) and the issues completed today."""
+        day = today_str()
+        next_day = next_working_day(date.fromisoformat(day)).isoformat()
+        agendas = db.get_meta("agendas", {}) or {}
+        legacy = db.get_meta("agenda", None)          # before agendas were kept per day
+        if day not in agendas and legacy and legacy.get("day") == day:
+            agendas = {**agendas, day: legacy["events"]}
+        start = datetime.combine(date.fromisoformat(day), datetime.min.time(), tzinfo=stats.TZ)
+        since = start.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+        try:
+            done = [shape_issue(i, settings) for i in linear_call(lambda l: l.my_completed_issues(since))
+                    if (i.get("completedAt") or "") and datetime.fromisoformat(i["completedAt"].replace("Z", "+00:00")) >= start]
+            done.sort(key=lambda i: i.get("completed_at") or "", reverse=True)
+            error = None
+        except HTTPException as exc:
+            done, error = [], str(exc.detail)
+        return {
+            "day": day,
+            "next_day": next_day,
+            "agenda": agendas.get(day),
+            "next_agenda": agendas.get(next_day),
+            "completed_today": done,
+            "waiting_state": settings.waiting_state,
+            "error": error,
+        }
 
     @app.post("/api/today/{issue_id}/block", dependencies=auth)
     def block_time(issue_id: str, body: BlockIn) -> dict:

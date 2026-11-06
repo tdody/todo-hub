@@ -87,6 +87,11 @@ gh_path = "gh"
 
 [app]
 port = 8765
+# Daylight theme: where sunset is worked out. Leave the coordinates out to use the city your
+# Mac's time zone is named after (America/New_York -> New York).
+# daylight_place = "Shelburne, VT"
+# daylight_latitude = 44.39
+# daylight_longitude = -73.23
 """
 
 
@@ -124,9 +129,13 @@ class Settings:
     gh_path: str = "gh"
     calendar_tools: list[str] = field(default_factory=lambda: list(DEFAULT_CALENDAR_TOOLS))
     calendar_create_tool: str = "mcp__claude_ai_Google_Calendar__create_event"
+    gmail_draft_tool: str = "mcp__claude_ai_Gmail__create_draft"   # used only by "Save as Gmail draft"
     gmail_account: str = ""
     extra_denied_servers: list[str] = field(default_factory=list)
     port: int = 8765
+    daylight_place: str = ""
+    daylight_latitude: float | None = None
+    daylight_longitude: float | None = None
 
     @property
     def home(self) -> Path:
@@ -147,6 +156,19 @@ class Settings:
     @property
     def config_path(self) -> Path:
         return self.home / "config.toml"
+
+    def only(self, source: str) -> "Settings":
+        """A copy with every source but ``source`` turned off, for a one-source sweep."""
+        from dataclasses import replace
+        return replace(
+            self,
+            slack_tools=self.slack_tools if source == "slack" else [],
+            gmail_tools=self.gmail_tools if source == "gmail" else [],
+            grain_tools=self.grain_tools if source == "grain" else [],
+            calendar_tools=self.calendar_tools if source == "calendar" else [],
+            linear_mentions=self.linear_mentions and source == "linear",
+            github_reviews=self.github_reviews and source == "github",
+        )
 
     def enabled_sources(self) -> list[str]:
         return [
@@ -204,12 +226,25 @@ def load_settings() -> Settings:
     s.gmail_account = sweep.get("gmail_account", s.gmail_account)
     s.calendar_tools = list(sweep.get("calendar_tools", s.calendar_tools))
     s.calendar_create_tool = sweep.get("calendar_create_tool", s.calendar_create_tool)
+    s.gmail_draft_tool = sweep.get("gmail_draft_tool", s.gmail_draft_tool)
     s.linear_mentions = bool(sweep.get("linear_mentions", s.linear_mentions))
     s.github_reviews = bool(sweep.get("github_reviews", s.github_reviews))
     s.gh_path = sweep.get("gh_path", s.gh_path)
     s.extra_denied_servers = list(sweep.get("extra_denied_servers", s.extra_denied_servers))
     s.port = int(app.get("port", s.port))
+    s.daylight_place = str(app.get("daylight_place", s.daylight_place))
+    s.daylight_latitude = _coord(app.get("daylight_latitude"), 90)
+    s.daylight_longitude = _coord(app.get("daylight_longitude"), 180)
     return s
+
+
+def _coord(value, limit: float) -> float | None:
+    """A latitude or longitude from config.toml, or None if it's missing or out of range."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if -limit <= v <= limit else None
 
 
 def get_linear_key() -> str:

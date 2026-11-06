@@ -70,6 +70,33 @@ def approval_rate(decisions: list[dict], weeks: int = 8, today: date | None = No
     return {"weeks": rows, "drop_reasons": dict(reasons)}
 
 
+def due_slips(issues: list[dict], client_group: str = "client") -> dict:
+    """Due-date slips for issues fetched with their history.
+
+    A slip is one change that moved the due date later: both the old and the new date are set and
+    the new one is after the old. Setting a first due date, clearing it, or moving it earlier
+    isn't a slip. ``days`` is the total pushed, summed over the slips."""
+    out: dict = {}
+    for i in issues:
+        changes = []
+        for n in sorted((i.get("history") or {}).get("nodes", []), key=lambda n: n.get("createdAt") or ""):
+            old, new = n.get("fromDueDate"), n.get("toDueDate")
+            if old and new and new > old:
+                changes.append({"from": old, "to": new, "at": n.get("createdAt"),
+                                "by": (n.get("actor") or {}).get("name")})
+        if not changes:
+            continue
+        client = next((l["name"] for l in (i.get("labels") or {}).get("nodes", [])
+                       if (l.get("parent") or {}).get("name") == client_group), None)
+        out[i["id"]] = {
+            "identifier": i["identifier"], "title": i["title"], "url": i.get("url"), "due_date": i.get("dueDate"),
+            "client": client, "count": len(changes),
+            "days": sum((date.fromisoformat(c["to"]) - date.fromisoformat(c["from"])).days for c in changes),
+            "changes": changes,
+        }
+    return out
+
+
 def balance(completed: list[dict], weeks: int = 8, today: date | None = None, target: float = 0.5) -> dict:
     """``completed`` holds shaped issues with ``completed_at`` and ``list`` ("client" | "dev")."""
     starts = week_starts(weeks, today)

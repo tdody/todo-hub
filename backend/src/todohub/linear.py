@@ -13,7 +13,7 @@ from .config import Settings
 API_URL = "https://api.linear.app/graphql"
 
 ISSUE_FIELDS = """
-    id identifier title url priority dueDate updatedAt completedAt
+    id identifier title url priority dueDate createdAt updatedAt completedAt canceledAt
     state { id name type }
     project { id name }
     parent { id identifier title }
@@ -154,6 +154,29 @@ class Linear:
             ["viewer", "assignedIssues"],
         )
 
+    def due_date_history(self) -> list[dict]:
+        """My open issues that have a due date, with their history (for due-date slips)."""
+        return self._paginate(
+            """
+            query($after: String) {
+              viewer {
+                assignedIssues(
+                  first: 25, after: $after,
+                  filter: { state: { type: { nin: ["completed", "canceled", "duplicate"] } }, dueDate: { null: false } }
+                ) {
+                  nodes {
+                    id identifier title url dueDate
+                    labels { nodes { name parent { name } } }
+                    history(first: 50) { nodes { createdAt fromDueDate toDueDate actor { name } } }
+                  }
+                  pageInfo { hasNextPage endCursor }
+                }
+              }
+            }
+            """,
+            ["viewer", "assignedIssues"],
+        )
+
     def my_completed_issues(self, since_iso: str) -> list[dict]:
         """Issues assigned to me that were completed (not canceled) since ``since_iso``."""
         return self._paginate(
@@ -163,6 +186,27 @@ class Linear:
                 assignedIssues(
                   first: 100, after: $after,
                   filter: {{ completedAt: {{ gte: $since }}, state: {{ type: {{ eq: "completed" }} }} }}
+                ) {{
+                  nodes {{ {ISSUE_FIELDS} }}
+                  pageInfo {{ hasNextPage endCursor }}
+                }}
+              }}
+            }}
+            """,
+            ["viewer", "assignedIssues"],
+            {"since": since_iso},
+        )
+
+    def my_closed_issues(self, since_iso: str) -> list[dict]:
+        """Issues assigned to me that were completed or canceled (including duplicates merged
+        away) and touched since ``since_iso``."""
+        return self._paginate(
+            f"""
+            query($after: String, $since: DateTimeOrDuration!) {{
+              viewer {{
+                assignedIssues(
+                  first: 100, after: $after,
+                  filter: {{ updatedAt: {{ gte: $since }}, state: {{ type: {{ in: ["completed", "canceled"] }} }} }}
                 ) {{
                   nodes {{ {ISSUE_FIELDS} }}
                   pageInfo {{ hasNextPage endCursor }}
@@ -239,18 +283,48 @@ class Linear:
         if not data["issueDelete"]["success"]:
             raise LinearError("Linear did not delete the issue.")
 
-    def add_link(self, issue_id: str, url: str, title: str) -> None:
-        """Attach a link to an issue; it shows in the issue's Links section."""
+    def add_link(self, issue_id: str, url: str, title: str) -> str:
+        """Attach a link to an issue; it shows in the issue's Links section. Returns its id."""
         data = self.gql(
             """
             mutation($input: AttachmentCreateInput!) {
-              attachmentCreate(input: $input) { success }
+              attachmentCreate(input: $input) { success attachment { id } }
             }
             """,
             {"input": {"issueId": issue_id, "url": url, "title": title}},
         )
         if not data["attachmentCreate"]["success"]:
             raise LinearError(f"Linear did not attach {url}.")
+        return (data["attachmentCreate"].get("attachment") or {}).get("id") or ""
+
+    def attachment_urls(self, issue_id: str) -> set[str]:
+        data = self.gql("query($id: String!) { issue(id: $id) { attachments(first: 100) { nodes { url } } } }",
+                        {"id": issue_id})
+        return {a["url"] for a in ((data.get("issue") or {}).get("attachments") or {}).get("nodes", [])}
+
+    def delete_attachment(self, attachment_id: str) -> None:
+        data = self.gql("mutation($id: String!) { attachmentDelete(id: $id) { success } }", {"id": attachment_id})
+        if not data["attachmentDelete"]["success"]:
+            raise LinearError("Linear did not remove the link.")
+
+    def issue_preview(self, id_or_identifier: str) -> dict:
+        """An issue with its description, assignee and recent comments, for a quick look."""
+        data = self.gql(
+            f"""
+            query($id: String!) {{
+              issue(id: $id) {{
+                {ISSUE_FIELDS}
+                description createdAt
+                assignee {{ name }}
+                comments(first: 50) {{ nodes {{ body createdAt user {{ name }} }} }}
+              }}
+            }}
+            """,
+            {"id": id_or_identifier},
+        )
+        if not data.get("issue"):
+            raise LinearError(f"Issue {id_or_identifier} not found.")
+        return data["issue"]
 
     def update_issue(self, issue_id: str, changes: dict) -> dict:
         """``changes`` uses Linear's field names: stateId, priority, dueDate (None clears it)."""

@@ -54,7 +54,16 @@ $watched
   If `add_candidate` rejects the call for a missing link, get the link and call it again. Don't skip the task.
 - `links`: every https link in the item (or its thread) that the task needs: Google Docs, Sheets and Slides, Drive files, decks, PRs, dashboards, Linear issues, client portals. Give each one a short title that says what it is ("Q1 review deck (Slides)", "api PR #812"). Leave out the source link itself, unsubscribe links, signatures and tracking links.
 - `subtasks`: only when the source spells out distinct steps (a numbered list, "first… then…", several asks in one message, or a meeting action item with parts). Use 2 to 10 short imperative steps, in order, each with its own `due_date` only if stated. Don't invent steps, and don't split a single action into parts.
+- `sender` and `channel`: who it came from (the email address for email, the Slack display name for Slack) and, for Slack, the channel name like "#data-team" or "DM". If `add_candidate` answers "muted", skip that sender or channel for the rest of the sweep.
+- `reply_draft`: for an ask from Slack or email (`signal` "ask"), write the reply Thibault could send now.
+  - Answer it when the source or its thread has what's needed; otherwise acknowledge it and say when he'll get to it (use the due date).
+  - Write as him: first person, plain and friendly, and match the tone and length of his own messages you read (`from:me`, his sent emails). No sign-off for Slack; a short sign-off for email.
+  - Never promise something the source doesn't support, and never include links you didn't see.
 - `possible_duplicate`: if one of Thibault's open Linear issues below already covers the task, give its identifier. Still add the candidate, because he decides.
+  - Then also set `duplicate_advice` and a one-sentence `duplicate_reason`:
+    - `drop` when the issue already covers this exact task and nothing new was said;
+    - `merge` when it's the same piece of work but the source adds something (a new ask, a date, a step, a link);
+    - `new` when it's related but a separate deliverable.
 
 Thibault's open Linear issues (identifier, title):
 $open_issues

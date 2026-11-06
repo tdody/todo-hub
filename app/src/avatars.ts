@@ -23,6 +23,13 @@ const ICONS: Record<Category, { d?: string[]; dots?: [number, number, number][] 
 };
 
 const NS = "http://www.w3.org/2000/svg";
+export const CATEGORIES = Object.keys(CATEGORY_NAME) as Category[];
+
+/** The line icon for a task type, in the current text color. */
+export function categoryIcon(cat: Category, px: number): SVGElement {
+  return icon(cat, px);
+}
+
 function icon(cat: Category, px: number): SVGElement {
   const svg = document.createElementNS(NS, "svg");
   for (const [k, v] of Object.entries({ viewBox: "0 0 16 16", width: px, height: px, fill: "none",
@@ -94,6 +101,11 @@ function anonMark(px: number, client: string): HTMLElement {
 function clientMark(client: string, size: "lg" | "sm"): HTMLElement {
   const uri = logos.get(client);
   return uri ? logoMark(uri) : anonMark(size === "lg" ? 18 : 12, client);
+}
+
+/** A client's logo (or its generic mark) without the task-type badge. */
+export function clientLogo(client: string): HTMLElement {
+  return h("span", { class: "avatar sm", title: client }, clientMark(client, "sm"));
 }
 
 /** The icon for a task: client logo + type badge, or the type icon alone. */

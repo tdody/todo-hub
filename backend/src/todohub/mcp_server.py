@@ -92,6 +92,11 @@ def add_candidate(
     asked_on: str | None = None,
     project: str | None = None,
     category: Literal["code", "analysis", "model", "review", "meeting", "email", "writing", "admin"] | None = None,
+    duplicate_advice: Literal["drop", "merge", "new"] | None = None,
+    duplicate_reason: str | None = None,
+    reply_draft: str | None = None,
+    sender: str | None = None,
+    channel: str | None = None,
 ) -> dict:
     """Add one candidate task to Thibault's review queue. He approves or drops it later.
 
@@ -112,6 +117,17 @@ def add_candidate(
     due_date: YYYY-MM-DD only when a date is stated or clearly implied.
     priority: 0 none, 1 urgent, 2 high, 3 medium, 4 low.
     possible_duplicate: identifier of a similar open Linear issue from the prompt's list, e.g. ENG-123.
+    duplicate_advice: with possible_duplicate only. drop = the open issue already covers this exact
+        task; merge = same piece of work, but this adds something (a new ask, a date, a step, a link)
+        worth adding to that issue; new = related but a separate deliverable, so it needs its own issue.
+    sender: who sent it: the sender's email address for email, the person's Slack display name for
+        Slack, the commenter's name for Linear. Used for mute rules.
+    channel: Slack only: the channel name, e.g. "#data-team", or "DM".
+    reply_draft: Slack or email asks only: the reply Thibault could send now, in his voice. Answer it
+        if the source has what's needed; otherwise acknowledge and say when he'll do it. Plain text,
+        no subject line or greeting boilerplate, usually 1 to 4 sentences.
+    duplicate_reason: with duplicate_advice: one short sentence saying why, e.g. "Same deck Sam asked
+        for on Monday" or "New ask: the Q2 numbers, not Q1".
     asked_on: waiting_on only: YYYY-MM-DD date he asked; the follow-up date is counted from it.
     project: exactly one active Linear project name from the prompt's list, when one clearly fits.
     category: the kind of work: code (build/fix software), analysis (data, queries, audits, metrics),
@@ -127,6 +143,8 @@ def add_candidate(
         subtasks=[s.model_dump() for s in subtasks or []],
         gmail_account=load_settings().gmail_account, asked_on=asked_on,
         followup_days=load_settings().followup_days, project=project, category=category,
+        duplicate_advice=duplicate_advice, duplicate_reason=duplicate_reason, reply_draft=reply_draft,
+        sender=sender, channel=channel,
     )
 
 
@@ -174,6 +192,25 @@ def propose_update(
         tools.propose_update, _get_db(), _run_id(), source=source, source_id=source_id, source_url=source_url,
         target_issue=target_issue, comment=comment, why=why, excerpt=excerpt, gmail_account=s.gmail_account,
     )
+
+
+class AgendaEvent(BaseModel):
+    start: str = Field(description="HH:MM, 24-hour, America/New_York")
+    end: str | None = Field(default=None, description="HH:MM, 24-hour, America/New_York")
+    title: str
+    link: str | None = Field(default=None, description="the event's htmlLink")
+    external: bool = Field(default=False, description="true when someone outside his email domain attends")
+
+
+@server.tool()
+def report_agenda(day: str, events: list[AgendaEvent]) -> dict:
+    """Save one day's calendar: today's for Thibault's morning brief, the next working day's for
+    his wrap-up. Call once per day, with every timed event he hasn't declined on that day (skip
+    all-day events), in start order.
+
+    day: YYYY-MM-DD (America/New_York).
+    """
+    return _call(tools.report_agenda, _get_db(), _run_id(), day=day, events=[e.model_dump() for e in events])
 
 
 @server.tool()

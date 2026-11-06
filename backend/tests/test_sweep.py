@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import os
 import json
 import stat
@@ -243,3 +243,101 @@ def test_failed_source_gets_its_window_back(settings):
     gmail_line = next(l for l in prompt.splitlines() if l.startswith("### Gmail"))
     assert sweep._fmt(first_start - sweep.MESSAGE_OVERLAP) in slack_line
     assert sweep._fmt(first_start - sweep.MESSAGE_OVERLAP) not in gmail_line
+
+
+# ---- cost trims ---------------------------------------------------------------------------------
+def test_meeting_prep_runs_once_a_day(settings, tmp_path):
+    from todohub.db import DB
+    db = DB(tmp_path / "t.db")
+    now = datetime.now(sweep.TZ)                                 # start_run stamps the real time
+    assert sweep.meeting_prep_due(db, now)                       # never done
+    run = db.start_run("schedule", "2026-11-04T13:00:00+00:00")
+    db.report_source_status(run, "calendar", True, "ok", 3)
+    db.finish_run(run, "ok")
+    assert not sweep.meeting_prep_due(db, now)                   # done this morning
+    assert sweep.meeting_prep_due(db, now + timedelta(days=1))   # due again tomorrow
+    with_prep = sweep.build_prompt(settings, datetime.now(timezone.utc), [], [], [])
+    without = sweep.build_prompt(settings, datetime.now(timezone.utc), [], [], [], meeting_prep=False)
+    assert "meeting prep" in with_prep and "### Google Calendar" not in without
+    nxt = sweep.next_working_day(datetime.now(sweep.TZ).date()).isoformat()
+    assert f"`report_agenda` a second time with day {nxt}" in with_prep               # tomorrow, for the wrap-up
+
+
+def test_prompt_leaves_out_stale_backlog(settings):
+    now = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    old, recent = "2026-09-01T00:00:00Z", "2026-11-01T00:00:00Z"
+    issues = [
+        {"identifier": "ENG-1", "title": "Old backlog idea", "state_type": "backlog", "updated_at": old},
+        {"identifier": "ENG-2", "title": "Old client backlog", "state_type": "backlog", "updated_at": old, "client": "Globex"},
+        {"identifier": "ENG-3", "title": "Old but due", "state_type": "backlog", "updated_at": old, "due_date": "2026-11-20"},
+        {"identifier": "ENG-4", "title": "Recent backlog", "state_type": "backlog", "updated_at": recent},
+        {"identifier": "ENG-5", "title": "Old started work", "state_type": "started", "updated_at": old},
+        {"identifier": "ENG-6", "title": "From an older cache"},
+    ]
+    kept = [i["identifier"] for i in sweep.prompt_issues(issues, now)]
+    assert "ENG-1" not in kept and set(kept) == {"ENG-2", "ENG-3", "ENG-4", "ENG-5", "ENG-6"}
+
+
+def test_one_source_sweep(settings):
+    run = sweep.run_sweep(settings, "manual", "slack")
+    assert run["status"] == "ok" and [s["source"] for s in run["sources"]] == ["slack"]   # nothing else flagged
+    argv = json.loads((settings.home / "argv.json").read_text())
+    prompt = argv[argv.index("-p") + 1]
+    allowed = argv[argv.index("--allowedTools") + 1].split(",")
+    assert "### Slack" in prompt and "### Gmail" not in prompt and "### Google Calendar" not in prompt
+    assert "### Linear: mentions" not in prompt
+    assert not any("Gmail" in t or "Calendar" in t or "grain" in t.lower() for t in allowed)
+    db = DB(settings.db_path)
+    assert db.get_meta("run_scopes") == {str(run["id"]): "slack"}
+    overview = {o["source"]: o for o in db.source_overview(settings.enabled_sources())}
+    assert overview["slack"]["ok"] and overview["slack"]["last_ok_at"] == run["started_at"]
+    assert overview["gmail"]["ok"] is None and overview["gmail"]["last_ok_at"] is None
+
+    # GitHub alone needs no Claude run.
+    (settings.home / "argv.json").unlink()
+    gh = sweep.run_sweep(settings, "manual", "github")
+    assert gh["status"] == "ok" and gh["cost_usd"] == 0.0 and not (settings.home / "argv.json").exists()
+    assert [s["source"] for s in gh["sources"]] == ["github"]
+    assert db.get_meta("run_scopes") == {str(run["id"]): "slack", str(gh["id"]): "github"}
+
+    # A full sweep after them has no scope.
+    full = sweep.run_sweep(settings)
+    assert str(full["id"]) not in db.get_meta("run_scopes")
+    with pytest.raises(ValueError):
+        sweep.run_sweep(settings, "manual", "fax")
+
+
+def test_calendar_check_reads_the_calendar_even_after_prep(settings):
+    db = DB(settings.db_path)
+    rid = db.start_run("schedule", "2026-11-04T13:00:00+00:00")
+    db.report_source_status(rid, "calendar", True, "ok", 3)
+    db.finish_run(rid, "ok")
+    assert not sweep.meeting_prep_due(db)
+    sweep.run_sweep(settings, "manual", "calendar")
+    argv = json.loads((settings.home / "argv.json").read_text())
+    assert "### Google Calendar" in argv[argv.index("-p") + 1]
+
+
+def test_one_source_check_leaves_other_sources_threads_alone(settings):
+    """A Grain-only check has no Slack or Gmail tools, so it mustn't be asked to re-read their threads."""
+    from todohub import tools
+    db = DB(settings.db_path)
+    urls = {"slack": "https://example.slack.com/archives/C1/p77", "gmail": "https://mail.google.com/mail/u/0/#all/abc77"}
+    for n, src in enumerate(("slack", "gmail")):
+        cid = tools.add_candidate(db, None, source=src, source_id=f"x{n}", title=f"Thing {n}", signal="ask",
+                                  why="w", excerpt="e", who="Sam", source_url=urls[src])["id"]
+        db.decide(cid, "approved", linear_identifier="ENG-1", linear_url="https://linear.app/x/ENG-1")
+    watched = db.watched_issues(["ENG-1"])
+    assert len(watched) == 2
+    assert "slack" in sweep.watched_section(watched) and "gmail" in sweep.watched_section(watched)
+    assert sweep.watched_section(watched, ["grain"]) == "(none to check)"
+    only_slack = sweep.watched_section(watched, ["slack", "grain"])
+    assert "slack" in only_slack and "gmail" not in only_slack
+
+    sweep.run_sweep(settings, "manual", "grain")
+    argv = json.loads((settings.home / "argv.json").read_text())
+    prompt = argv[argv.index("-p") + 1]
+    assert urls["slack"] not in prompt and urls["gmail"] not in prompt
+    full = sweep.run_sweep(settings)
+    argv = json.loads((settings.home / "argv.json").read_text())
+    assert urls["slack"] in argv[argv.index("-p") + 1] and full["status"] == "ok"

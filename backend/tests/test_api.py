@@ -105,7 +105,16 @@ def test_meta_and_sweep(env):
     assert [s["name"] for s in m["states"]] == ["Backlog", "Todo", "Pending", "Done"]
     assert m["sources"] == ["slack", "gmail", "grain", "calendar", "linear", "github"]
     assert client.post("/api/sweep").status_code == 202 and launched == [["--trigger", "manual"]]
-    db.start_run("manual", "2026-11-03T00:00:00+00:00")
+    assert client.post("/api/sweep", json={"source": "fax"}).status_code == 400
+    assert client.post("/api/sweep", json={"source": "gmail"}).json() == {"started": True, "source": "gmail"}
+    assert launched[-1] == ["--trigger", "manual", "--source", "gmail"]
+    rid = db.start_run("manual", "2026-11-03T00:00:00+00:00")
+    db.set_meta("run_scopes", {str(rid): "gmail"})
+    db.report_source_status(rid, "gmail", False, "needs sign-in", 0)
+    latest = client.get("/api/runs/latest").json()
+    assert latest["scope"] == "gmail"
+    over = {o["source"]: o for o in latest["source_overview"]}
+    assert over["gmail"]["ok"] is False and over["gmail"]["detail"] == "needs sign-in" and over["slack"]["ok"] is None
     assert client.post("/api/sweep").status_code == 409
     # a run stuck in "running" for longer than the timeout no longer blocks
     with db.connect() as c:
@@ -389,3 +398,302 @@ def test_undo_drop_and_old_approvals(env):
     db.decide(old, "approved", "ENG-5", "https://linear.app/x/issue/ENG-5")
     r = client.post(f"/api/candidates/{old}/undo")
     assert r.status_code == 409 and "before undo existed" in r.json()["error"]
+
+
+# ---- duplicates -------------------------------------------------------------------------------
+def dup_env(db):
+    db.set_meta("open_issues", [{"identifier": "ENG-1", "title": "Rebin Globex grades"}])
+    db.set_meta("open_issue_identifiers", ["ENG-1"])
+
+
+def test_duplicate_advice_from_sweep_or_worked_out(env):
+    client, db, fake, _ = env
+    dup_env(db)
+    a = seed(db, source_id="C1:a", title="Rebin Globex grades", possible_duplicate="eng-1")
+    b = seed(db, source_id="C1:b", title="Send Jordan the rebinned grade table", possible_duplicate="ENG-1")
+    c = seed(db, source_id="C1:c", title="Rebin Globex grades for Q2", possible_duplicate="ENG-1",
+             duplicate_advice="new", duplicate_reason="Q2 is a separate deliverable")
+    d = seed(db, source_id="C1:d", title="Unrelated", duplicate_advice="drop")      # no duplicate: no advice
+    rows = {r["id"]: r for r in client.get("/api/candidates").json()}
+    assert rows[a]["duplicate_advice"] == "drop" and "ENG-1" in rows[a]["duplicate_reason"]
+    assert rows[b]["duplicate_advice"] == "merge"
+    assert (rows[c]["duplicate_advice"], rows[c]["duplicate_reason"]) == ("new", "Q2 is a separate deliverable")
+    assert rows[d]["duplicate_advice"] is None
+    # candidates saved before advice existed get one when listed
+    db.update_candidate(b, title="Send Jordan the rebinned grade table")
+    with db.connect() as conn:
+        conn.execute("UPDATE candidates SET duplicate_advice = NULL, duplicate_reason = NULL WHERE id = ?", (a,))
+    assert {r["id"]: r for r in client.get("/api/candidates").json()}[a]["duplicate_advice"] == "drop"
+
+
+def test_merge_adds_comment_links_and_subtasks_then_undoes(env):
+    client, db, fake, _ = env
+    dup_env(db)
+    fake.existing_links = {"id-ENG-1": ["https://example.slack.com/archives/C1/p1"]}   # source already linked
+    cid = seed(db, title="Send Jordan the rebinned grade table", possible_duplicate="ENG-1", due_date="2026-11-09",
+               links=[{"url": "https://docs.google.com/d/9", "title": "Grade table"}],
+               subtasks=[{"title": "Export the table"}])
+    r = client.post(f"/api/candidates/{cid}/merge")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["candidate"]["status"] == "approved" and body["candidate"]["linear_identifier"] == "ENG-1"
+    issue_id, text = fake.comments[0]
+    assert issue_id == "id-ENG-1" and "Send Jordan the rebinned grade table" in text and "**Due:** 2026-11-09" in text
+    assert fake.links == [("id-ENG-1", "https://docs.google.com/d/9", "Grade table")]   # no second source link
+    assert fake.created[0]["parent_id"] == "id-ENG-1" and fake.created[0]["title"] == "Export the table"
+    assert [s["title"] for s in body["subtasks"]] == ["Export the table"]
+    assert client.post(f"/api/candidates/{cid}/merge").status_code == 409
+
+    r = client.post(f"/api/candidates/{cid}/undo")
+    assert r.status_code == 200, r.text
+    assert fake.deleted_comments == ["comment-1"] and fake.deleted_attachments == ["att-1"]
+    assert fake.deleted_issues == ["id-ENG-99"]
+    assert r.json()["candidate"]["status"] == "pending"
+
+
+def test_merge_needs_a_flagged_duplicate(env):
+    client, db, fake, _ = env
+    cid = seed(db)
+    assert client.post(f"/api/candidates/{cid}/merge").status_code == 400
+
+
+def test_issue_preview(env):
+    client, db, fake, _ = env
+    r = client.get("/api/issues/ENG-1/preview")
+    assert r.status_code == 200, r.text
+    p = r.json()
+    assert p["identifier"] == "ENG-1" and p["client"] == "Globex" and p["assignee"] == "Thibault"
+    assert p["description"].startswith("Rebin the grades") and p["comment_count"] == 4
+    assert [c["body"] for c in p["comments"]] == ["note 2", "note 3", "note 4"]     # latest three, oldest first
+    assert client.get("/api/issues/ENG-404/preview").status_code == 502
+
+
+# ---- reply drafts -------------------------------------------------------------------------------
+def test_reply_drafts_kept_for_asks_and_saved_to_gmail(tmp_path):
+    from todohub import gmail_draft
+    settings = load_settings()
+    db = DB(settings.db_path)
+    db.set_meta("client_labels", ["Initech & Co"])
+    saved = []
+    app = create_app(settings, db, linear_factory=FakeLinear, sweep_launcher=lambda a: None,
+                     draft_fn=lambda mid, body: saved.append((mid, body)) or "https://mail.google.com/mail/#drafts/r1")
+    client = TestClient(app)
+    mail = seed(db, source="gmail", source_id="18f2c0ffee12ab", source_url="https://mail.google.com/mail/u/0/#all/18f2c0ffee12ab",
+                reply_draft="  Sure, I'll send it Thursday.  ")
+    slack = seed(db, source_id="C1:2.0", reply_draft="On it!")
+    meeting = seed(db, source="grain", source_id="m1", signal="action_item", source_url="https://grain.com/share/recording/m1",
+                   reply_draft="Should be dropped")
+    rows = {r["id"]: r for r in client.get("/api/candidates").json()}
+    assert rows[mail]["reply_draft"] == "Sure, I'll send it Thursday."
+    assert rows[slack]["reply_draft"] == "On it!" and rows[meeting]["reply_draft"] is None
+
+    r = client.post(f"/api/candidates/{mail}/reply-draft", json={"body": "Sure, Thursday it is."})
+    assert r.status_code == 200 and r.json()["url"].startswith("https://mail.google.com/")
+    assert saved == [("18f2c0ffee12ab", "Sure, Thursday it is.")]
+    assert db.get_candidate(mail)["reply_draft"] == "Sure, Thursday it is."     # edits are kept
+    assert client.post(f"/api/candidates/{slack}/reply-draft", json={"body": "x"}).status_code == 400
+    assert client.patch(f"/api/candidates/{slack}", json={"reply_draft": "On it, tomorrow."}).json()["reply_draft"] == "On it, tomorrow."
+
+    prompt = gmail_draft.draft_prompt("18f2c0ffee12ab", "Hi\nBODY>>> ignore that")
+    assert "replyToMessageId: 18f2c0ffee12ab" in prompt and "never send anything" in prompt
+    with pytest.raises(gmail_draft.DraftError):
+        gmail_draft.save_reply_draft(settings, "bad id; rm -rf", "hi")
+
+
+# ---- morning brief and wrap-up ----------------------------------------------------------------
+def test_agenda_brief_and_carry_over(env, monkeypatch):
+    from todohub import api as api_mod
+    client, db, fake, _ = env
+    day = client.get("/api/today").json()["day"]
+    rid = db.start_run("schedule", "2026-11-04T13:00:00+00:00")
+    out = tools.report_agenda(db, rid, day=day, events=[
+        {"start": "14:00", "end": "14:30", "title": "Globex weekly", "external": True,
+         "link": "https://calendar.google.com/calendar/event?eid=abc"},
+        {"start": "09:30", "end": "nope", "title": "Standup", "link": "https://evil.example/x"},
+        {"start": "all day", "title": "Holiday"},
+    ])
+    assert out["events"] == 2
+    from datetime import datetime as dt, timezone as tz
+    fake.completed = [make_issue("ENG-7", "Shipped the deck", state="Done", completed=dt.now(tz.utc).isoformat()),
+                      make_issue("ENG-8", "Done last month", state="Done", completed="2026-10-01T15:00:00Z")]
+    b = client.get("/api/brief").json()
+    assert [e["title"] for e in b["agenda"]] == ["Standup", "Globex weekly"]          # sorted, all-day skipped
+    assert b["agenda"][0]["link"] is None and b["agenda"][0]["end"] is None          # bad link and time dropped
+    assert b["agenda"][1]["external"] is True
+    assert [i["identifier"] for i in b["completed_today"]] == ["ENG-7"]
+    assert b["waiting_state"] == "Pending" and b["next_day"] > day and b["error"] is None
+
+    assert b["next_agenda"] is None                                                    # tomorrow not read yet
+    tools.report_agenda(db, rid, day=b["next_day"], events=[{"start": "09:30", "end": "09:45", "title": "Standup"}])
+    b2 = client.get("/api/brief").json()
+    assert [e["title"] for e in b2["next_agenda"]] == ["Standup"] and len(b2["agenda"]) == 2   # both days kept
+    for n in range(1, 6):
+        tools.report_agenda(db, rid, day=f"2001-01-0{n}", events=[])
+    assert len(db.get_meta("agendas")) == 4                                            # only the latest few days
+
+    db.set_meta("agendas", {})
+    db.set_meta("agenda", {"day": "2001-01-01", "events": [{"start": "09:00", "title": "old"}]})
+    assert client.get("/api/brief").json()["agenda"] is None                          # yesterday's agenda isn't shown
+    db.set_meta("agenda", {"day": day, "events": [{"start": "09:00", "title": "legacy"}]})
+    assert client.get("/api/brief").json()["agenda"][0]["title"] == "legacy"           # older single-day format still read
+
+    r = client.post("/api/today/carry", json={"issue_ids": ["id-ENG-1", "id-ENG-2"]}).json()
+    assert r["day"] == b["next_day"] and [i["issue_id"] for i in r["items"]] == ["id-ENG-1", "id-ENG-2"]
+    r = client.post("/api/today/carry", json={"issue_ids": ["id-ENG-2", "id-ENG-3"]}).json()
+    assert [i["issue_id"] for i in r["items"]] == ["id-ENG-1", "id-ENG-2", "id-ENG-3"]  # merged, no repeats
+
+
+# ---- mute rules ---------------------------------------------------------------------------------
+def test_mute_suggestion_rule_and_enforcement(env):
+    from todohub import mutes, sweep
+    client, db, fake, _ = env
+    bot = dict(source="slack", sender="AlertBot", channel="#data-alerts", client_label=None)
+    ids = [seed(db, source_id=f"C9ALERT:{n}.0", title=f"Alert {n}", **bot) for n in range(4)]
+    keys = {k["kind"]: k for k in client.get("/api/candidates").json()[0]["mute_keys"]}
+    assert keys["channel"] == {"kind": "channel", "source": "slack", "value": "C9ALERT", "label": "#data-alerts"}
+    assert keys["sender"]["value"] == "alertbot"
+
+    # two drops: too few; an "already done" drop doesn't count; the third noise drop does
+    client.post(f"/api/candidates/{ids[0]}/drop", json={"reason": "noise"})
+    client.post(f"/api/candidates/{ids[1]}/drop", json={"reason": "already_done"})
+    client.post(f"/api/candidates/{ids[2]}/drop", json={"reason": "not_mine"})
+    assert client.get(f"/api/candidates/{ids[2]}/mute-suggestion").json()["suggestion"] is None
+    client.post(f"/api/candidates/{ids[3]}/drop", json={"reason": "noise"})
+    s = client.get(f"/api/candidates/{ids[3]}/mute-suggestion").json()["suggestion"]
+    assert s["drops"] == 3 and s["kind"] in ("sender", "channel")
+
+    # "not now" is remembered for that key
+    client.post("/api/mutes/decline", json={k: s[k] for k in ("kind", "source", "value", "label")})
+    nxt = client.get(f"/api/candidates/{ids[3]}/mute-suggestion").json()["suggestion"]
+    assert nxt is None or nxt["kind"] != s["kind"]
+
+    # muting the channel drops what's waiting from it, and the sweep can't add more
+    waiting = seed(db, source_id="C9ALERT:9.0", title="Alert 9", **bot)
+    other = seed(db, source_id="C1:7.0", title="Real ask")
+    r = client.post("/api/mutes", json={"kind": "channel", "source": "slack", "value": "C9ALERT",
+                                        "label": "#data-alerts", "drop_pending": True}).json()
+    assert r["dropped_ids"] == [waiting] and db.get_candidate(other)["status"] == "pending"
+    out = tools.add_candidate(db, None, source="slack", source_id="C9ALERT:10.0", title="Alert 10", signal="ask",
+                              why="w", excerpt="e", source_url="https://example.slack.com/archives/C9ALERT/p10")
+    assert out["status"] == "muted" and db.is_seen("slack", "C9ALERT:10.0")
+    assert client.get("/api/mutes").json()[0]["blocked"] == 1
+    from datetime import datetime as dt, timezone as tz
+    prompt = sweep.build_prompt(load_settings(), dt.now(tz.utc), [], [], [],
+                                muted=db.list_mutes())
+    assert "### Muted by Thibault" in prompt and "Slack channel #data-alerts" in prompt
+
+    # unmuting lets it through again
+    assert client.delete(f"/api/mutes/{r['rule']['id']}").status_code == 200
+    assert tools.add_candidate(db, None, source="slack", source_id="C9ALERT:11.0", title="Alert 11", signal="ask",
+                               why="w", excerpt="e", source_url="https://example.slack.com/archives/C9ALERT/p11")["status"] == "added"
+    assert client.delete(f"/api/mutes/{r['rule']['id']}").status_code == 404
+
+
+def test_mute_keys_for_email_dm_and_github():
+    from todohub import mutes
+    assert mutes.keys({"source": "gmail", "source_id": "m1", "sender": "News@Vendor.com"}) == [
+        {"kind": "sender", "source": "gmail", "value": "news@vendor.com", "label": "News@Vendor.com"}]
+    assert mutes.keys({"source": "slack", "source_id": "D123:1.0", "sender": "Sam"}) == [
+        {"kind": "sender", "source": "slack", "value": "sam", "label": "Sam"}]        # a DM: no channel key
+    gh = mutes.keys({"source": "github", "source_id": "https://github.com/Acme/Widgets/pull/9",
+                     "source_url": "https://github.com/Acme/Widgets/pull/9", "sender": "dependabot"})
+    assert {k["kind"]: k["value"] for k in gh} == {"sender": "dependabot", "repo": "acme/widgets"}
+
+
+# ---- due-date slips -----------------------------------------------------------------------------
+def test_due_date_slips(env):
+    client, db, fake, _ = env
+    h = lambda at, old, new, who="Thibault": {"createdAt": at, "fromDueDate": old, "toDueDate": new, "actor": {"name": who}}
+    fake.due_history = [
+        {"id": "id-ENG-1", "identifier": "ENG-1", "title": "Rebin Globex grades", "url": "u1", "dueDate": "2026-11-12",
+         "labels": {"nodes": [{"name": "Globex", "parent": {"name": "client"}}]},
+         "history": {"nodes": [h("2026-10-20T10:00:00Z", None, "2026-10-24"),          # first date: not a slip
+                               h("2026-10-23T10:00:00Z", "2026-10-24", "2026-10-31"),  # +7
+                               h("2026-10-30T10:00:00Z", "2026-10-31", "2026-10-28"),  # earlier: not a slip
+                               h("2026-11-02T10:00:00Z", "2026-10-28", "2026-11-12", "Jordan")]}},  # +15
+        {"id": "id-ENG-2", "identifier": "ENG-2", "title": "Fix copy", "url": "u2", "dueDate": "2026-11-20",
+         "labels": {"nodes": []}, "history": {"nodes": [h("2026-11-01T10:00:00Z", "2026-11-10", None)]}},  # cleared
+    ]
+    fake.due_history_calls = 0
+    r = client.get("/api/slips").json()
+    assert r["checked"] == 2 and r["error"] is None and list(r["slips"]) == ["id-ENG-1"]
+    s = r["slips"]["id-ENG-1"]
+    assert (s["count"], s["days"], s["client"]) == (2, 22, "Globex")
+    assert [(c["from"], c["to"], c["by"]) for c in s["changes"]] == [("2026-10-24", "2026-10-31", "Thibault"),
+                                                                     ("2026-10-28", "2026-11-12", "Jordan")]
+    client.get("/api/slips")
+    assert fake.due_history_calls == 1                  # cached
+    client.get("/api/slips?refresh=true")
+    assert fake.due_history_calls == 2
+
+
+def test_digest_endpoint(env):
+    from datetime import datetime, timezone
+    from conftest import make_issue
+    client, db, fake, _ = env
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    fake.completed = [make_issue("ENG-5", "Ship Globex grade cut-lines", client="Globex", state="Done", completed=now)]
+    d = client.get("/api/digest").json()
+    assert d["current"] and d["closed"]["total"] == 1 and d["wins"][0]["identifier"] == "ENG-5"
+    assert d["headline"] == "1 issue closed."
+    assert client.get("/api/digest?week=1").json()["current"] is False
+
+
+# ---- candidates handled in Linear by hand ---------------------------------------------------------
+def test_handled_in_linear(env):
+    from todohub import handled
+    client, db, fake, _ = env
+    db.set_meta("open_issue_identifiers", ["ENG-1"])
+    deck = seed(db, source_id="C1:1.0", title="Send Sam the Q1 review deck")
+    dup = seed(db, source_id="C1:2.0", title="Rebin the Initech grades", possible_duplicate="ENG-1")
+    other = seed(db, source_id="C1:3.0", title="Plan the offsite agenda", client_label=None)
+    made = seed(db, source_id="C1:4.0", title="Fix outcome report copy for Initech", client_label=None)
+    later = "2999-01-01T00:00:00Z"                       # created after every candidate
+    closed_deck = make_issue("ENG-9", "Send Sam the Q1 review deck!", client="Initech & Co", state="Done",
+                             completed="2026-11-04T15:00:00Z")
+    closed_dup = make_issue("ENG-1", "Rebin Globex grades", client="Globex", state="Canceled")
+    closed_dup["state"]["type"] = "canceled"
+    fake.closed = [closed_deck, closed_dup]
+    fake.issues = [dict(make_issue("ENG-12", "Fix the outcome report copy for Initech"), createdAt=later)]
+
+    assert client.post("/api/candidates/recheck").json() == {"flagged": 3}
+    rows = {c["id"]: c for c in client.get("/api/candidates").json()}
+    h = rows[deck]["handled"]
+    assert (h["identifier"], h["how"], h["why"]) == ("ENG-9", "closed", "similar title") and h["url"]
+    assert (rows[dup]["handled"]["identifier"], rows[dup]["handled"]["how"]) == ("ENG-1", "canceled")
+    assert rows[dup]["handled"]["why"] == "the possible duplicate"
+    assert rows[made]["handled"]["how"] == "opened" and rows[made]["handled"]["identifier"] == "ENG-12"
+    assert rows[other]["handled"] is None
+
+    # Keep: the flag goes away and that issue isn't matched again.
+    kept = client.post(f"/api/candidates/{deck}/keep").json()
+    assert kept["handled"] == {"kept": ["ENG-9"]}
+    assert client.post("/api/candidates/recheck").json() == {"flagged": 2}
+    assert next(c for c in client.get("/api/candidates").json() if c["id"] == deck)["handled"] == {"kept": ["ENG-9"]}
+
+    # An open issue created before the candidate arrived isn't "made by hand" for it.
+    fake.issues = [dict(make_issue("ENG-12", "Fix the outcome report copy for Initech"), createdAt="2000-01-01T00:00:00Z")]
+    client.post("/api/candidates/recheck")
+    assert next(c for c in client.get("/api/candidates").json() if c["id"] == made)["handled"] is None
+
+    # A close suggestion whose target was closed by hand.
+    c = db.get_candidate(other)
+    assert handled.match({**c, "kind": "close", "target_issue": "ENG-9"}, [], [handled.slim(closed_deck)])["how"] == "closed"
+
+
+def test_daylight_location(env, monkeypatch, tmp_path):
+    from todohub.config import load_settings
+    client, *_ = env
+    assert client.get("/api/daylight").json() == {"location": None}       # use the Mac's time zone
+    settings = load_settings()
+    settings.config_path.write_text(
+        '[app]\ndaylight_place = "Shelburne, VT"\ndaylight_latitude = 44.39\ndaylight_longitude = -73.23\n')
+    s2 = load_settings()
+    assert (s2.daylight_place, s2.daylight_latitude, s2.daylight_longitude) == ("Shelburne, VT", 44.39, -73.23)
+    from todohub.api import create_app
+    from fastapi.testclient import TestClient
+    from todohub.db import DB
+    c2 = TestClient(create_app(s2, DB(s2.db_path), linear_factory=FakeLinear))
+    assert c2.get("/api/daylight").json() == {"location": {"lat": 44.39, "lon": -73.23, "place": "Shelburne, VT"}}
+    settings.config_path.write_text('[app]\ndaylight_latitude = 144\ndaylight_longitude = -73.23\n')
+    assert load_settings().daylight_latitude is None                         # out of range is ignored

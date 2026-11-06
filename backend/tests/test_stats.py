@@ -49,3 +49,49 @@ def test_drop_reasons_feed_the_prompt():
     assert "Kept:\n  - [slack, ask] Task 0" in text
     assert "Task 1 (dropped: already done)" in text and "Task 2" not in text
     assert feedback_section({"approved": [], "dropped": []}) == "(no decisions yet)"
+
+
+def test_weekly_digest():
+    from datetime import date
+    from todohub import digest
+    today = date(2026, 11, 5)          # a Thursday; the week starts Mon Nov 2
+    def issue(ident, lst, completed=None, due=None, client=None):
+        return {"identifier": ident, "title": f"T {ident}", "client": client, "url": f"u/{ident}", "list": lst,
+                "due_date": due, "completed_at": completed}
+    completed = [issue("A-1", "client", "2026-11-03T15:00:00Z", client="Globex"),
+                 issue("A-2", "dev", "2026-11-04T15:00:00Z"), issue("A-3", "dev", "2026-11-05T15:00:00Z"),
+                 issue("A-4", "dev", "2026-11-05T16:00:00Z"),
+                 issue("A-5", "dev", "2026-10-28T15:00:00Z")]           # last week
+    open_issues = [issue("B-1", "client", due="2026-11-01", client="Globex"), issue("B-2", "dev", due="2026-11-09")]
+    slips = {"slips": {"x": {"identifier": "B-1", "title": "T", "client": "Globex", "url": "u/B-1", "count": 3, "days": 9,
+                             "due_date": "2026-11-01"},
+                       "y": {"identifier": "B-2", "title": "T", "client": None, "url": "u/B-2", "count": 1, "days": 2,
+                             "due_date": "2026-11-09"}}, "checked": 2, "error": None}
+    decisions = ([{"source": "gmail", "status": "dropped", "decided_at": "2026-11-03T15:00:00Z"}] * 5
+                 + [{"source": "gmail", "status": "approved", "decided_at": "2026-11-03T15:00:00Z"}]
+                 + [{"source": "slack", "status": "approved", "decided_at": "2026-11-04T15:00:00Z"}]
+                 + [{"source": "slack", "status": "dropped", "decided_at": "2026-10-29T15:00:00Z"}])  # last week
+    runs = [{"trigger": "schedule", "started_at": "2026-11-03T13:00:00Z", "cost_usd": 0.4},
+            {"trigger": "capture", "started_at": "2026-11-03T14:00:00Z", "cost_usd": 0.1},
+            {"trigger": "schedule", "started_at": "2026-10-30T13:00:00Z", "cost_usd": 0.5}]
+    d = digest.build(week_offset=0, completed=completed, open_issues=open_issues, slips=slips,
+                     decisions=decisions, runs=runs, today=today)
+    assert d["week"] == "2026-11-02" and d["week_end"] == "2026-11-08" and d["current"]
+    assert d["closed"] == {"total": 4, "client": 1, "dev": 3, "client_share": 0.25, "prev_total": 1, "target": 0.5}
+    assert d["headline"] == "4 issues closed. Client work fell behind."
+    assert [w["identifier"] for w in d["wins"]] == ["A-4", "A-3", "A-2", "A-1"]
+    assert [s["identifier"] for s in d["slipping"]] == ["B-1"]
+    assert [o["identifier"] for o in d["overdue"]] == ["B-1"]
+    assert d["inbox"] == {"approved": 2, "dropped": 5, "noisy": "Gmail",
+                          "by_source": {"Gmail": {"approved": 1, "dropped": 5}, "Slack": {"approved": 1, "dropped": 0}}}
+    assert d["sweeps"] == {"runs": 1, "cost_usd": 0.4}
+    recs = d["recommendations"]
+    assert len(recs) == 3 and recs[0]["url"] == "u/B-1" and "pushed 3 times (9 days)" in recs[0]["text"]
+    assert recs[1]["tab"] == "client" and "25%" in recs[1]["text"]
+    assert recs[2]["tab"] == "client" and "1 open issue is overdue" in recs[2]["text"]
+
+    last = digest.build(week_offset=1, completed=completed, open_issues=open_issues, slips=slips,
+                        decisions=decisions, runs=runs, today=today)
+    assert last["week"] == "2026-10-26" and not last["current"]
+    assert last["closed"]["total"] == 1 and last["headline"] == "1 issue closed."
+    assert last["inbox"]["dropped"] == 1 and last["sweeps"]["runs"] == 1

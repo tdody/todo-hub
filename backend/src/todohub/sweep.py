@@ -26,7 +26,7 @@ from .config import Settings, get_linear_key, load_settings
 from .db import DB, now_iso
 from .linear import Linear, LinearError, client_label_of
 from .selfcmd import self_command
-from . import sources
+from . import handled, mutes, sources
 
 log = logging.getLogger("todohub.sweep")
 
@@ -38,6 +38,7 @@ TODO_DB_TOOLS = [
     "mcp__todo-db__propose_close",
     "mcp__todo-db__propose_update",
     "mcp__todo-db__report_source_status",
+    "mcp__todo-db__report_agenda",
 ]
 # Belt and braces. Headless mode already refuses tools that aren't allowed, but an "allow" rule
 # in ~/.claude/settings.json would still apply. A deny always wins, so the risky built-ins and
@@ -90,7 +91,7 @@ def next_working_day(d: date) -> date:
 
 
 def source_sections(settings: Settings, since: datetime, mentions: str | None = None,
-                    sinces: dict[str, datetime] | None = None) -> str:
+                    sinces: dict[str, datetime] | None = None, meeting_prep: bool = True) -> str:
     """``sinces`` gives each source its own start, so a source that failed last time is re-read."""
     def msg_since(source: str) -> datetime:
         return (sinces or {}).get(source, since) - MESSAGE_OVERLAP
@@ -135,8 +136,9 @@ def source_sections(settings: Settings, since: datetime, mentions: str | None = 
             "the given link as `source_url`. If it adds information to one of his open issues, `propose_update` "
             "instead. If it's an FYI, do nothing.\n\n" + (mentions or "(no new mentions)")
         )
-    if settings.calendar_tools:
-        prep_day = next_working_day(datetime.now(TZ).date())
+    if settings.calendar_tools and meeting_prep:
+        today = datetime.now(TZ).date()
+        prep_day = next_working_day(today)
         parts.append(
             f"### Google Calendar: meeting prep for {prep_day.strftime('%A %Y-%m-%d')}\n"
             f"List the events on Thibault's primary calendar on {prep_day.isoformat()} (America/New_York). "
@@ -147,8 +149,13 @@ def source_sections(settings: Settings, since: datetime, mentions: str | None = 
             "`client_label` for the client's company, and `subtasks`: one \"Check <identifier>: <title>\" for "
             "each of his open issues with that client label (from the list below, up to 8), plus \"Review notes "
             'from the last <client> call" if Grain has one. Link the agenda or deck if the event has one. '
-            "Skip internal meetings, declined events, and all-day events. Call `report_source_status` for "
-            '"calendar" when done.'
+            "Skip internal meetings, declined events, and all-day events.\n"
+            f"Also list today's events ({today.isoformat()}) and call `report_agenda` once with every timed "
+            "event he hasn't declined (start and end as HH:MM, title, htmlLink, and whether people outside "
+            "his domain attend), for his morning brief. "
+            f"Call `report_agenda` a second time with day {prep_day.isoformat()} and every timed event he hasn't "
+            "declined that day (internal ones too), for his evening wrap-up. "
+            "Then call `report_source_status` for \"calendar\"."
         )
     return "\n\n".join(parts)
 
@@ -168,8 +175,12 @@ def feedback_section(decisions: dict | None) -> str:
     return f"Kept:\n{kept}\n\nDropped:\n{dropped}"
 
 
-def watched_section(watched: list[dict] | None) -> str:
-    rows = [w for w in (watched or []) if w["source"] in ("slack", "gmail") and w.get("source_url")]
+def watched_section(watched: list[dict] | None, sources: list[str] | None = None) -> str:
+    """Approved Slack and Gmail items to re-read for replies. Only for sources this sweep can read:
+    a one-source check (say, Grain) has no Slack or Gmail tools, so those threads wait for the
+    next sweep that has them."""
+    readable = {"slack", "gmail"} & set(sources if sources is not None else ("slack", "gmail"))
+    rows = [w for w in (watched or []) if w["source"] in readable and w.get("source_url")]
     if not rows:
         return "(none to check)"
     return "\n".join(
@@ -179,29 +190,59 @@ def watched_section(watched: list[dict] | None) -> str:
     )
 
 
+STALE_BACKLOG_DAYS = 30
+MAX_PROMPT_ISSUES = 120
+
+
+def prompt_issues(open_issues: list[dict], now: datetime | None = None) -> list[dict]:
+    """The open issues worth showing the sweep, to keep its prompt short: everything except
+    backlog issues untouched for a month that have no client and no due date. Those rarely
+    match anything new, and duplicates of them are still accepted."""
+    cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=STALE_BACKLOG_DAYS)).isoformat()
+
+    def keep(i: dict) -> bool:
+        if i.get("state_type") != "backlog" or i.get("client") or i.get("due_date"):
+            return True
+        return (i.get("updated_at") or "9999") >= cutoff   # older caches have no dates: keep
+
+    kept = [i for i in open_issues if keep(i)]
+    return sorted(kept, key=lambda i: i.get("updated_at") or "", reverse=True)[:MAX_PROMPT_ISSUES]
+
+
+def meeting_prep_due(db: DB, now: datetime | None = None) -> bool:
+    """Meeting prep runs once a working day: in the first sweep that gets it done (normally 8am)."""
+    last = db.last_ok_start("calendar")
+    if not last:
+        return True
+    today = (now or datetime.now(TZ)).astimezone(TZ).date()
+    return datetime.fromisoformat(last).astimezone(TZ).date() < today
+
+
 def build_prompt(settings: Settings, since: datetime, client_labels: list[str],
                  open_issues: list[dict], pending: list[dict], decisions: dict | None = None,
                  watched: list[dict] | None = None, projects: list[str] | None = None,
-                 mentions: str | None = None, sinces: dict[str, datetime] | None = None) -> str:
+                 mentions: str | None = None, sinces: dict[str, datetime] | None = None,
+                 meeting_prep: bool = True, muted: list[dict] | None = None) -> str:
     template = Template(resources.files("todohub").joinpath("sweep_prompt.md").read_text())
     now = datetime.now(timezone.utc)
     issues = "\n".join(
         f"  - {i['identifier']}: {i['title']}"
         + (f"  [client: {i['client']}]" if i.get("client") else "")
         + (f"  [project: {i['project']}]" if i.get("project") else "")
-        for i in open_issues
+        for i in prompt_issues(open_issues)
     ) or "  (none)"
     queue = "\n".join(f"  - {c['title']}" for c in pending) or "  (empty)"
     return template.substitute(
         now=now.replace(microsecond=0).isoformat(),
         now_local=_fmt(now),
-        source_sections=source_sections(settings, since, mentions, sinces),
+        source_sections="\n\n".join(part for part in (
+            mutes.prompt_section(muted or []), source_sections(settings, since, mentions, sinces, meeting_prep)) if part),
         client_labels=", ".join(client_labels) or "(no client labels loaded)",
         projects=", ".join(projects or []) or "(no projects loaded)",
         open_issues=issues,
         pending=queue,
         feedback=feedback_section(decisions),
-        watched=watched_section(watched),
+        watched=watched_section(watched, settings.enabled_sources()),
     )
 
 
@@ -283,7 +324,9 @@ def refresh_linear_context(settings: Settings, db: DB) -> list[dict]:
         slim = [
             {"identifier": i["identifier"], "title": i["title"],
              "client": client_label_of(i, settings.client_label_group),
-             "project": i["project"]["name"] if i.get("project") else None}
+             "project": i["project"]["name"] if i.get("project") else None,
+             "state_type": (i.get("state") or {}).get("type"), "updated_at": i.get("updatedAt"),
+             "due_date": i.get("dueDate"), "url": i.get("url"), "created_at": i.get("createdAt")}
             for i in issues
         ]
         db.set_meta("open_issues", slim)
@@ -379,7 +422,13 @@ def _log_path(settings: Settings, kind: str) -> Path:
     return settings.log_dir / f"{kind}-{datetime.now(TZ).strftime('%Y%m%d-%H%M%S-%f')}.log"
 
 
-def run_sweep(settings: Settings, trigger: str = "manual") -> dict:
+def run_sweep(settings: Settings, trigger: str = "manual", only: str | None = None) -> dict:
+    """A sweep of every enabled source, or of ``only`` that one ("Check now" in the app). A
+    one-source sweep reads that source from its own last success, like a full one."""
+    if only:
+        if only not in settings.enabled_sources():
+            raise ValueError(f"{only} isn't an enabled source")
+        settings = settings.only(only)
     with _exclusive(settings, "sweep"):
         db = DB(settings.db_path)
         stale = datetime.now(timezone.utc) - timedelta(minutes=settings.timeout_minutes + 5)
@@ -397,16 +446,28 @@ def run_sweep(settings: Settings, trigger: str = "manual") -> dict:
         since = min(sinces.values(), default=datetime.fromisoformat(last) if last else fallback)
         log_path = _log_path(settings, "sweep")
         run_id = db.start_run(trigger, since.replace(microsecond=0).isoformat(), str(log_path))
+        scopes = {k: v for k, v in (db.get_meta("run_scopes", {}) or {}).items() if int(k) > run_id - 50}
+        if only:
+            scopes[str(run_id)] = only
+        db.set_meta("run_scopes", scopes)
 
         open_issues = refresh_linear_context(settings, db)
+        recheck_pending(settings, db, open_issues)
         if settings.github_reviews:
             sources.sync_github(settings, db, run_id, _env())
         mentions = (read_mentions(settings, db, run_id, sinces.get("linear", since) - MESSAGE_OVERLAP)
                     if settings.linear_mentions else None)
+        if only == "github":                # no Claude needed: GitHub was read above
+            db.finish_run(run_id, "ok", cost_usd=0.0, num_turns=0)
+            return db.get_run(run_id, with_sources=True) or {}
+        prep = meeting_prep_due(db) or only == "calendar"   # asked for: read the calendar again
+        if settings.calendar_tools and not prep:
+            db.report_source_status(run_id, "calendar", True, "Meeting prep already done today", 0)
         prompt = build_prompt(settings, since, db.get_meta("client_labels", []), open_issues,
                               db.list_candidates("pending"), db.recent_decisions(),
                               db.watched_issues([i["identifier"] for i in open_issues]),
-                              db.get_meta("projects", []), mentions, sinces)
+                              db.get_meta("projects", []), mentions, sinces, meeting_prep=prep,
+                              muted=db.list_mutes())
         out = _invoke_claude(settings, run_id, prompt, log_path, f"sweep {run_id}, since {since.isoformat()}")
 
         reported = {s["source"] for s in (db.get_run(run_id, with_sources=True) or {}).get("sources", [])}
@@ -418,6 +479,22 @@ def run_sweep(settings: Settings, trigger: str = "manual") -> dict:
         if out["status"] == "ok":
             ping_snitch(settings.snitch_url, str(out["result"].get("result", "ok")))
         return db.get_run(run_id, with_sources=True) or {}
+
+
+def recheck_pending(settings: Settings, db: DB, open_issues: list[dict]) -> int:
+    """Flag pending Inbox candidates that look handled in Linear already (see handled.py).
+    Never fails the sweep: without Linear, the flags just stay as they were."""
+    since = (datetime.now(timezone.utc) - timedelta(days=handled.CLOSED_LOOKBACK_DAYS)).replace(microsecond=0).isoformat()
+    try:
+        client = Linear(get_linear_key())
+        try:
+            closed = [handled.slim(i, settings.client_label_group) for i in client.my_closed_issues(since)]
+        finally:
+            client.close()
+    except (LinearError, RuntimeError, httpx.HTTPError) as exc:
+        log.warning("Couldn't read closed issues; skipping the handled check: %s", exc)
+        return 0
+    return handled.recheck(db, open_issues, closed)
 
 
 def build_capture_prompt(settings: Settings, text: str, client_labels: list[str], open_issues: list[dict]) -> str:
@@ -452,11 +529,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one TodoHub sweep, or capture one pasted item.")
     parser.add_argument("--trigger", choices=["schedule", "manual"], default="manual")
     parser.add_argument("--capture", metavar="TEXT", help="capture this link or note instead of sweeping")
+    parser.add_argument("--source", choices=["slack", "gmail", "grain", "calendar", "linear", "github"],
+                        help="sweep only this source")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = load_settings()
     try:
-        run = run_capture(settings, args.capture) if args.capture is not None else run_sweep(settings, args.trigger)
+        run = (run_capture(settings, args.capture) if args.capture is not None
+               else run_sweep(settings, args.trigger, args.source))
     except AlreadyRunning as exc:
         print(exc, file=sys.stderr)
         return 0
