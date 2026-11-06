@@ -56,7 +56,7 @@ def _run_id() -> int | None:
 
 
 @server.tool()
-def is_seen(source: Literal["slack", "gmail", "grain", "calendar", "linear"], source_id: str) -> dict:
+def is_seen(source: Literal["slack", "gmail", "grain", "calendar", "linear", "hubspot"], source_id: str) -> dict:
     """Check whether a message, email or meeting already produced a candidate task.
 
     Call this before reading an item in depth; skip items that return seen=true.
@@ -65,7 +65,7 @@ def is_seen(source: Literal["slack", "gmail", "grain", "calendar", "linear"], so
 
 
 @server.tool()
-def mark_seen(source: Literal["slack", "gmail", "grain", "calendar", "linear"], source_id: str) -> dict:
+def mark_seen(source: Literal["slack", "gmail", "grain", "calendar", "linear", "hubspot"], source_id: str) -> dict:
     """Record that an item was fully read and holds no task, so later sweeps skip it.
 
     Don't call this for a Grain meeting whose notes or action items aren't ready yet.
@@ -75,7 +75,7 @@ def mark_seen(source: Literal["slack", "gmail", "grain", "calendar", "linear"], 
 
 @server.tool()
 def add_candidate(
-    source: Literal["slack", "gmail", "grain", "calendar", "linear"],
+    source: Literal["slack", "gmail", "grain", "calendar", "linear", "hubspot"],
     source_id: str,
     title: str,
     signal: Literal["ask", "commitment", "action_item", "deadline", "waiting_on", "meeting_prep", "mention"],
@@ -100,15 +100,17 @@ def add_candidate(
 ) -> dict:
     """Add one candidate task to Thibault's review queue. He approves or drops it later.
 
-    source_id: "<channel id>:<message ts>" for Slack, the Gmail message id, or the Grain meeting id.
+    source_id: "<channel id>:<message ts>" for Slack, the Gmail message id, the Grain meeting id, or
+        "ticket:<id>" or "note:<id>" for HubSpot.
     title: a short imperative task title, e.g. "Send Sam the Q1 review deck".
     signal: ask (someone asked him), commitment (he said he would), action_item (Grain), deadline,
         or waiting_on (HE asked someone else for something and is waiting for it; title it
         "Waiting on <person>: <what>", and set asked_on).
     why: one sentence on why this is a task for him.
     excerpt: the exact words from the source that show it (up to ~300 characters).
-    source_url: REQUIRED https link back to the exact Slack message (permalink), email, or Grain
-        meeting (from resolve_urls). For email, pass "" and the link is built from source_id.
+    source_url: REQUIRED https link back to the exact Slack message (permalink), email, Grain meeting
+        (from resolve_urls) or HubSpot record (from the search result's urlTemplate). For email, pass ""
+        and the link is built from source_id.
     links: every https link in the source that the task needs (docs, sheets, decks, files, PRs,
         dashboards, Linear issues), with a short title. Don't repeat source_url.
     subtasks: the distinct steps, only when the source spells them out (2 to 10). Omit otherwise.
@@ -121,7 +123,7 @@ def add_candidate(
         task; merge = same piece of work, but this adds something (a new ask, a date, a step, a link)
         worth adding to that issue; new = related but a separate deliverable, so it needs its own issue.
     sender: who sent it: the sender's email address for email, the person's Slack display name for
-        Slack, the commenter's name for Linear. Used for mute rules.
+        Slack, the commenter's name for Linear, the note's author for HubSpot. Used for mute rules.
     channel: Slack only: the channel name, e.g. "#data-team", or "DM".
     reply_draft: Slack or email asks only: the reply Thibault could send now, in his voice. Answer it
         if the source has what's needed; otherwise acknowledge and say when he'll do it. Plain text,
@@ -150,7 +152,7 @@ def add_candidate(
 
 @server.tool()
 def propose_close(
-    source: Literal["slack", "gmail", "grain", "linear"],
+    source: Literal["slack", "gmail", "grain", "linear", "hubspot"],
     source_id: str,
     source_url: str,
     target_issue: str,
@@ -173,7 +175,7 @@ def propose_close(
 
 @server.tool()
 def propose_update(
-    source: Literal["slack", "gmail", "grain", "linear"],
+    source: Literal["slack", "gmail", "grain", "linear", "hubspot"],
     source_id: str,
     source_url: str,
     target_issue: str,
@@ -215,7 +217,7 @@ def report_agenda(day: str, events: list[AgendaEvent]) -> dict:
 
 @server.tool()
 def report_source_status(
-    source: Literal["slack", "gmail", "grain", "calendar", "linear"],
+    source: Literal["slack", "gmail", "grain", "calendar", "linear", "hubspot"],
     ok: bool,
     detail: str,
     items_scanned: int | None = None,

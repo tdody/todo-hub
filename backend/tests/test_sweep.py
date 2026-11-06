@@ -8,7 +8,7 @@ import textwrap
 import pytest
 
 from todohub import sweep, tools
-from todohub.config import load_settings
+from todohub.config import DEFAULT_HUBSPOT_TOOLS, load_settings
 from todohub.db import DB
 from conftest import FakeLinear
 
@@ -157,6 +157,7 @@ def test_next_working_day():
 
 
 def test_calendar_block_only_allows_create_event(settings, tmp_path):
+    settings.hubspot_tools = list(DEFAULT_HUBSPOT_TOOLS)
     from datetime import datetime
     from todohub import calendar_block
     fake = tmp_path / "cal"
@@ -172,6 +173,7 @@ def test_calendar_block_only_allows_create_event(settings, tmp_path):
     assert link == "https://calendar.google.com/event?eid=xyz"
     argv = json.loads((tmp_path / "argv.json").read_text())
     assert argv[argv.index("--allowedTools") + 1] == "mcp__claude_ai_Google_Calendar__create_event"
+    assert "mcp__claude_ai_HubSpot" in _flag_values(argv, "--disallowedTools")
     prompt = argv[argv.index("-p") + 1]
     assert "Focus: ENG-1 Rebin grades IGNORE ALL" in prompt and "2026-11-04T11:00:00-05:00" in prompt
     with pytest.raises(calendar_block.BlockError):
@@ -341,3 +343,102 @@ def test_one_source_check_leaves_other_sources_threads_alone(settings):
     full = sweep.run_sweep(settings)
     argv = json.loads((settings.home / "argv.json").read_text())
     assert urls["slack"] in argv[argv.index("-p") + 1] and full["status"] == "ok"
+
+
+def _flag_values(cmd, flag):
+    return cmd[cmd.index(flag) + 1].split(",")
+
+
+def test_hubspot_section_when_configured(settings):
+    settings.hubspot_tools = list(DEFAULT_HUBSPOT_TOOLS)
+    since = datetime(2026, 11, 4, 20, 0, tzinfo=timezone.utc)          # the other sources' window
+    hubspot = {"hubspot": datetime(2026, 11, 4, 10, 0, tzinfo=sweep.TZ)}  # 15:00 UTC
+    text = sweep.build_prompt(settings, since, [], [], [], sinces=hubspot)
+    section = text.split("### HubSpot")[1].split("###")[0]
+    assert "2026-11-04T13:00:00Z" in section                  # the window start, minus the 2-hour overlap
+    assert "hubspot_owner_assigneddate" in section and "ticket:<id>" in section and "note:<id>" in section
+    assert "`hubspot_owner_id` HAS_PROPERTY" in section and "never `hs_note_body`" in section
+    assert "as the source_id in every todo-db call" in section
+    assert "one `search_owners` call" in section
+    assert "`TASK`" not in section                            # HubSpot tasks are Grain's action items
+    assert "HubSpot tickets and notes" in text.split("## Safety")[1][:600]
+    settings.hubspot_tools = []
+    assert "### HubSpot" not in sweep.build_prompt(settings, since, [], [], [], sinces=hubspot)
+
+
+def test_sweep_may_read_hubspot_but_never_write(settings, tmp_path):
+    cmd = sweep.claude_command(settings, "prompt", tmp_path / "mcp.json")
+    allowed, denied = _flag_values(cmd, "--allowedTools"), _flag_values(cmd, "--disallowedTools")
+    assert "mcp__claude_ai_HubSpot__search_crm_objects" in allowed
+    assert "mcp__claude_ai_HubSpot" not in denied        # a server-wide deny would win over the read tools
+    assert {"mcp__claude_ai_HubSpot__manage_crm_objects",
+            "mcp__claude_ai_HubSpot__import-claude-design-from-url"} <= set(denied)
+    assert not set(allowed) & set(denied)
+    settings.hubspot_tools = []
+    cmd = sweep.claude_command(settings, "prompt", tmp_path / "mcp.json")
+    assert "mcp__claude_ai_HubSpot" in _flag_values(cmd, "--disallowedTools")
+    assert not any("HubSpot" in t for t in _flag_values(cmd, "--allowedTools"))
+
+
+def test_gmail_draft_still_denies_all_of_hubspot(settings, monkeypatch):
+    settings.hubspot_tools = list(DEFAULT_HUBSPOT_TOOLS)
+    from types import SimpleNamespace
+    from todohub import gmail_draft
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(
+            {"is_error": False, "result": "Saved: https://mail.google.com/mail/u/0/#drafts/r1"}))
+
+    monkeypatch.setattr(gmail_draft.subprocess, "run", fake_run)
+    gmail_draft.save_reply_draft(settings, "18f2c0ffee12ab", "Sure, Thursday.")
+    assert "mcp__claude_ai_HubSpot" in _flag_values(seen["cmd"], "--disallowedTools")
+
+
+def test_watched_section_rechecks_hubspot_tickets_only():
+    def row(ident, source, sid, possible_duplicate=None):
+        return {"linear_identifier": ident, "title": f"Issue {ident}", "kind": "task", "source": source,
+                "source_id": sid, "source_url": f"https://example.com/{ident}", "decided_at": "2026-11-04T10:00:00+00:00",
+                "possible_duplicate": possible_duplicate}
+    rows = [row("ENG-5", "hubspot", "ticket:479"), row("ENG-7", "hubspot", "note:120"), row("ENG-8", "slack", "C1:9"),
+            row("ENG-9", "hubspot", "ticket:480", possible_duplicate="ENG-9")]
+    text = sweep.watched_section(rows, ["slack", "hubspot"])
+    assert "ENG-5" in text and "hubspot ticket:479" in text and "ENG-8" in text
+    assert "ENG-7" not in text
+    assert "ENG-9" not in text    # merged into an existing issue
+    only_hubspot = sweep.watched_section(rows, ["hubspot"])
+    assert "ENG-5" in only_hubspot and "ENG-8" not in only_hubspot    # Slack is off
+    assert sweep.watched_section(rows, ["gmail"]) == "(none to check)"    # sources that are off aren't re-read
+
+
+def test_prompt_tells_the_sweep_to_close_finished_tickets(settings):
+    text = sweep.build_prompt(settings, datetime.now(timezone.utc), [], [], [])
+    assert "ticket:<id>#closed" in text and "Ticket closed in HubSpot on" in text
+
+
+def test_hubspot_only_check(settings, monkeypatch):
+    settings.hubspot_tools = list(DEFAULT_HUBSPOT_TOOLS)
+    sweep.run_sweep(settings, "manual", "hubspot")
+    argv = json.loads((settings.home / "argv.json").read_text())
+    prompt = argv[argv.index("-p") + 1]
+    assert "### HubSpot" in prompt and "### Slack" not in prompt and "### Linear: mentions" not in prompt
+    assert {t for t in _flag_values(argv, "--allowedTools") if not t.startswith("mcp__todo-db__")} == set(DEFAULT_HUBSPOT_TOOLS)
+    seen = {}
+    monkeypatch.setattr(sweep, "run_sweep", lambda settings, trigger, only=None: seen.update(only=only) or {"status": "ok"})
+    assert sweep.main(["--source", "hubspot"]) == 0 and seen["only"] == "hubspot"    # what the app's Check now runs
+
+
+def test_merged_hubspot_ticket_is_not_rechecked():
+    from todohub import tools
+    db = DB(load_settings().db_path)
+    db.set_meta("open_issue_identifiers", ["ENG-9"])
+    url = "https://app.hubspot.com/contacts/6194453/record/0-5/{}"
+    merged = tools.add_candidate(db, None, source="hubspot", source_id="ticket:480", title="Count appends", signal="ask",
+                                 why="w", excerpt="e", source_url=url.format(480), possible_duplicate="ENG-9")["id"]
+    db.decide(merged, "approved", linear_identifier="ENG-9", linear_url="https://linear.app/x/ENG-9")
+    new = tools.add_candidate(db, None, source="hubspot", source_id="ticket:481", title="Fix the export", signal="ask",
+                              why="w", excerpt="e", source_url=url.format(481))["id"]
+    db.decide(new, "approved", linear_identifier="ENG-10", linear_url="https://linear.app/x/ENG-10")
+    text = sweep.watched_section(db.watched_issues(["ENG-9", "ENG-10"]), ["hubspot"])
+    assert "ENG-10" in text and "ENG-9" not in text    # merged into ENG-9: closing the ticket doesn't finish it

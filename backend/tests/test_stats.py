@@ -95,3 +95,11 @@ def test_weekly_digest():
     assert last["week"] == "2026-10-26" and not last["current"]
     assert last["closed"]["total"] == 1 and last["headline"] == "1 issue closed."
     assert last["inbox"]["dropped"] == 1 and last["sweeps"]["runs"] == 1
+
+
+def test_digest_names_hubspot():
+    from todohub import digest
+    decisions = [{"source": "hubspot", "status": "dropped", "decided_at": "2026-11-03T15:00:00Z"}] * 5
+    d = digest.build(week_offset=0, completed=[], open_issues=[], slips={"slips": {}, "checked": 0, "error": None},
+                     decisions=decisions, runs=[], today=date(2026, 11, 5))
+    assert d["inbox"]["by_source"] == {"HubSpot": {"approved": 0, "dropped": 5}}

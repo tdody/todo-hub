@@ -27,7 +27,8 @@ from .selfcmd import self_command
 LABEL = "com.todohub.sweep"
 SCHEDULE_HOURS = (8, 10, 12, 14, 16)
 WEEKDAYS = (1, 2, 3, 4, 5)   # launchd: 0 and 7 are Sunday
-CONNECTORS = {"gmail": "claude.ai Gmail", "slack": "claude.ai Slack", "grain": "claude.ai Grain"}
+CONNECTORS = {"gmail": "claude.ai Gmail", "slack": "claude.ai Slack", "grain": "claude.ai Grain",
+              "hubspot": "claude.ai HubSpot"}
 
 
 def plist_path() -> Path:
@@ -60,7 +61,7 @@ def broad_allow_rules(settings, path: Path | None = None) -> list[str]:
     except (OSError, ValueError):
         return []
     read_only = (set(settings.slack_tools) | set(settings.gmail_tools) | set(settings.grain_tools)
-                 | set(settings.calendar_tools))
+                 | set(settings.calendar_tools) | set(settings.hubspot_tools))
     return [r for r in rules if isinstance(r, str) and r.startswith("mcp__") and r not in read_only]
 
 

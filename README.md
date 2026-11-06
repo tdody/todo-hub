@@ -1,6 +1,6 @@
 # TodoHub
 
-One place for Thibault's to-dos. Claude Code reads Slack, Gmail, Grain, Google Calendar, Linear mentions and GitHub review requests on a schedule and puts candidate tasks in a review queue. You approve, edit, snooze or drop each one in a small Mac app. Approved tasks become Linear issues in your team. The same app shows your open Client and Dev issues, a Today plan, and Insights.
+One place for Thibault's to-dos. Claude Code reads Slack, Gmail, Grain, Google Calendar, HubSpot, Linear mentions and GitHub review requests on a schedule and puts candidate tasks in a review queue. You approve, edit, snooze or drop each one in a small Mac app. Approved tasks become Linear issues in your team. The same app shows your open Client and Dev issues, a Today plan, and Insights.
 
 ```
 launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item, ⌥⌘T capture
@@ -8,7 +8,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
         │                                            │
         ▼                                            ▼
   sweep ── claude -p (restricted, read-only) ──►  local API (127.0.0.1, token, Host check)
-     │        Slack · Gmail · Grain · Calendar           │              │
+     │        Slack · Gmail · Grain · Calendar · HubSpot │              │
      │        + todo-db MCP (writes the queue)           │              │
      ├── gh search prs (review requests)                 ▼              ▼
      └── Linear API (open issues, projects, mentions)  SQLite queue   Linear API (lists, edits, create, close, comment)
@@ -19,7 +19,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 **Capture**
 - Scheduled sweeps on weekdays, plus **Run now**.
 - A capture box (and **⌥⌘T** from any app). Paste a Slack, Gmail or Grain link and Claude reads it; type a note and it goes straight in.
-- **Signals:** asks of you, your commitments, Grain action items, deadlines, "waiting on" (you asked someone), Google Docs comments assigned to you (via Gmail), Linear @-mentions, GitHub review requests, and prep for tomorrow's client meetings.
+- **Signals:** asks of you, your commitments, Grain action items, deadlines, "waiting on" (you asked someone), Google Docs comments assigned to you (via Gmail), HubSpot tickets assigned to you, notes teammates write in HubSpot that mention you, Linear @-mentions, GitHub review requests, and prep for tomorrow's client meetings.
 - **Each candidate carries:**
   - a required link back to its source, plus the links mentioned in it;
   - subtasks when the source spells out steps;
@@ -41,9 +41,10 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 - **Logos** come from each client's website icon. The client-label-to-website mapping is `client_domains.json` in the settings folder, for example `{"Globex": "globex.example", "Hooli": null}`; it stays on your Mac and out of the repo. Fetched icons are cached in `logos/` in the settings folder. A client with no known logo (not in the mapping, `null`, or no usable icon) gets one generic company logo.
 
 **Follow-up**
-- Each sweep re-reads the threads behind issues TodoHub created. It proposes **Close ENG-…** when a thread shows the work is done or the reply arrived, and **Update ENG-…** (a comment) when there's new information.
+- Each sweep re-reads the threads behind issues TodoHub created, for the sources that sweep reads. It proposes **Close ENG-…** when a thread shows the work is done or the reply arrived, and **Update ENG-…** (a comment) when there's new information.
 - **Waiting on** items go to Linear's *Pending* status, due **3 working days** after you asked.
 - GitHub review issues are proposed for closing once the review request disappears.
+- Issues from a HubSpot ticket are proposed for closing once the ticket is closed.
 
 **Review**
 - Approve (⌘↩ or **a**), drop with a reason (**d**, 1–5), snooze (**s**, 1–3), bulk approve or drop, and full keyboard navigation (**?** lists the shortcuts).
@@ -91,7 +92,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - **Why you dropped:** a breakdown of drop reasons.
   - **Slipped due dates:** how many of your open issues with a due date have been pushed, which ones were pushed two or more times, and totals by client. A slip is a change that moved the due date later; setting a first date, clearing it, or moving it earlier doesn't count. In Client and Dev, a "pushed 2×" tag marks those issues, with the dates in its tooltip. Read from Linear's issue history and cached for 15 minutes.
   - **Sweep history:** cost and turns for each run, with its log, plus the average cost per sweep this week against last week.
-- **Sidebar:** Inbox, Today, Client, Dev and Insights on the left with their counts, then your clients, the ones that need you first: overdue issues ("2 late"), then a meeting still ahead today ("2:30"), then the most open issues. Click a client to see its issues in the Client tab. The **+** captures a task. At the bottom, **Sources** lists Slack, Gmail, Grain, Calendar, Linear and GitHub with when each last worked (red with the reason, such as "sign-in", if its last check failed). Hover a source and click **↻** to check only that one: it reads what's new since that source last worked, with a smaller Claude run (GitHub needs none; Calendar re-reads today's and tomorrow's agenda). **Run all** sweeps everything; the theme and shortcuts sit next to it. In a narrow window the sidebar shrinks to icons.
+- **Sidebar:** Inbox, Today, Client, Dev and Insights on the left with their counts, then your clients, the ones that need you first: overdue issues ("2 late"), then a meeting still ahead today ("2:30"), then the most open issues. Click a client to see its issues in the Client tab. The **+** captures a task. At the bottom, **Sources** lists Slack, Gmail, Grain, Calendar, HubSpot, Linear and GitHub with when each last worked (red with the reason, such as "sign-in", if its last check failed). Hover a source and click **↻** to check only that one: it reads what's new since that source last worked, with a smaller Claude run (GitHub needs none; Calendar re-reads today's and tomorrow's agenda). **Run all** sweeps everything; the theme and shortcuts sit next to it. In a narrow window the sidebar shrinks to icons.
 - **Changes you make in Linear:** Client, Dev and Today read Linear every minute and when the window comes back to the front. **Refresh** also re-reads labels, projects and statuses (a new client label shows up without a restart) and re-checks the Inbox. Before each sweep, and on Refresh, every pending suggestion is compared with your issues, and one that looks handled already gets a green "Looks handled in Linear" note: the issue it's about or its possible duplicate was closed or canceled; a closed or canceled issue from the last 14 days has a close title (similarity 0.78, or 0.66 with the same client label); or an open issue you created after the suggestion arrived has a close title. Each note has **Drop as already done** (or **Drop as duplicate** for a ticket you opened) and **Keep**, which clears it and never matches that issue again. A banner above the cards drops them all in one click, with undo. It's a title comparison, not a model, so it costs nothing.
 - **Daylight theme:** the theme button opens a menu of System (follows the Mac), Light, Dark and **Daylight** (with the current phase and when the next starts); **t** still cycles them. Daylight changes the colors through the day: Morning (cream and amber, from 6:00 or 30 minutes before sunrise, whichever is earlier) → Day (the Light theme, 10:30–2:00) → Afternoon (warm sand, until an hour before sunset) → Dusk (lavender, an hour each side of sunset) → Night (indigo dark, from an hour after sunset). Light phases blend over 30 minutes; Dusk to Night switches at once. Sunset is worked out on the Mac for the city your time zone is named after (America/New_York → New York), or for `daylight_latitude` / `daylight_longitude` under `[app]` in config.toml (with `daylight_place` as its name). The button's tooltip says the phase, when the next one starts, and today's sunset and where it was worked out for. Status colors and pills keep their meaning in every phase.
 - **Status and priority pills:** status and priority show as colored pills everywhere you can change them (Client, Dev, the Today pane, and priority on Inbox cards). Status: Backlog (dashed), Todo (grey), In Progress (blue), Pending (purple), Done (green). Priority: Urgent (solid red), High (orange), Medium (sand), Low (outline), none (plain text). Click a pill for a menu; number keys pick. Urgent rows get a red left edge and a light tint, High rows an orange edge; in the Today list, Urgent and High also show as a pill in the row's details.
@@ -102,8 +103,8 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 ## Safety model
 
 - **Read-only sweeps.** Sweeps and captures run Claude Code with `--restricted --permission-mode dontAsk`. That ignores `~/.claude` settings, so no "allow" rule or bypass mode applies, and it denies anything not explicitly allowed.
-  - The allowlist has only read tools for Slack, Gmail, Grain and Calendar, plus the four `todo-db` tools.
-  - Every known write tool of those connectors, and every other MCP server (Linear, Drive, HubSpot, browser…), is also denied by name. Add your own servers to `sweep.extra_denied_servers`.
+  - The allowlist has only read tools for Slack, Gmail, Grain, Calendar and HubSpot, plus the `todo-db` tools.
+  - Every known write tool of those connectors, and every other MCP server (Linear, Drive, browser…), is also denied by name. Block time and Save as Gmail draft deny all of HubSpot as well. Add your own servers to `sweep.extra_denied_servers`.
 - **Untrusted input.** Messages are treated as data. The `todo-db` tools validate every field: unknown labels and projects, bad dates, non-https links and issues that aren't yours are rejected or dropped.
 - **Writes need a click.** Nothing reaches Linear until you click Approve, and a candidate can't be approved twice. The only other write is **Block time**: it runs only on your click, can call only the calendar's create-event tool, and gets a cleaned title with no addresses or links in it.
 - **Local API.** It listens on 127.0.0.1 only, needs a random per-launch token, and rejects non-loopback `Host` headers. It also exits by itself if the app goes away.
@@ -190,7 +191,7 @@ Create a snitch with a **daily** interval and put its URL in `snitch_url`. Each 
 | `sweep.claude_path` | `claude` | Full path if launchd can't find Claude Code |
 | `sweep.model` / `max_turns` / `timeout_minutes` | `sonnet` / `60` / `20` | Per sweep |
 | `sweep.restricted` | `true` | Run Claude Code in restricted mode (see Safety) |
-| `sweep.slack_tools` / `gmail_tools` / `grain_tools` / `calendar_tools` | read-only lists | `[]` turns that source off |
+| `sweep.slack_tools` / `gmail_tools` / `grain_tools` / `calendar_tools` / `hubspot_tools` | read-only lists | `[]` turns that source off |
 | `sweep.linear_mentions` / `github_reviews` | `true` | The two sources read without Claude's connectors |
 | `sweep.gmail_account` | empty | Your Gmail address, used in "Open in Gmail" links |
 | `sweep.extra_denied_servers` | `[]` | Your own MCP servers the sweep and Block time must never use |
@@ -200,6 +201,7 @@ Create a snitch with a **daily** interval and put its URL in `snitch_url`. Each 
 ## How the sweep decides
 
 - **Window:** each source restarts from the last sweep where *it* worked, minus a 2-hour overlap, so a source that failed (for example, an expired sign-in) gets its missed window back. Meetings get a 24-hour lookback, because Grain notes take time. `is_seen` and `mark_seen` stop anything from being proposed twice.
+- **HubSpot:** tickets count from when they were assigned to you, notes from when they were created. Only notes with an owner are read: Grain copies its meeting notes into HubSpot without one, and the Grain source already reads those meetings. HubSpot tasks aren't read, because they're Grain's action items too.
 - **Meeting prep:** for the next working day (Friday looks at Monday), every event with people outside your own email domain gets a "Prep for the <client> call" task. Its subtasks check that client's open issues and review the last call's notes. To save cost, this runs once a day, in the first sweep that completes it (normally 8am), and that sweep also saves today's agenda for the morning brief.
 - **Your open issues** are shown to the sweep for duplicate checks and meeting prep. Backlog issues untouched for 30 days, with no client and no due date, are left out to keep the prompt short.
 - **Learning:** your last 15 kept and 15 dropped candidates, with drop reasons, are part of every sweep prompt.

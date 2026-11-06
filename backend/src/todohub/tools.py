@@ -38,6 +38,7 @@ MISSING_URL_HELP = {
     "calendar": "Use the event's htmlLink from the calendar tool.",
     "linear": "Use the comment link given with the mention in the prompt.",
     "github": "Use the pull request URL.",
+    "hubspot": "Use the record link built from the search result's urlTemplate.",
 }
 
 
