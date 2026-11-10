@@ -830,6 +830,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         raw = linear_call(lambda l: l.issue_preview(ident))
         nodes = sorted((raw.get("comments") or {}).get("nodes", []), key=lambda n: n.get("createdAt") or "")
         description = (raw.get("description") or "").strip()
+        own_team = team_meta().team_id
         return {
             **shape_issue(raw, settings),
             "assignee": (raw.get("assignee") or {}).get("name"),
@@ -842,6 +843,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 {"author": (n.get("user") or {}).get("name") or "Someone", "created_at": n.get("createdAt"),
                  "body": (n.get("body") or "").strip()[:PREVIEW_COMMENT]}
                 for n in nodes[-3:]
+            ],
+            # Done ones too. A sub-issue in another team has statuses the app doesn't know, so the
+            # pane shows its status without a checkbox.
+            "sub_issues": [
+                {**shape_issue(n, settings), "assignee": (n.get("assignee") or {}).get("name"),
+                 "own_team": (n.get("team") or {}).get("id") == own_team}
+                for n in (raw.get("children") or {}).get("nodes", [])
             ],
         }
 
