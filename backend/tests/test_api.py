@@ -99,6 +99,46 @@ def test_issue_lists_and_edits(env):
     assert client.patch("/api/issues/id-ENG-2", json={"due_date": "soon"}).status_code == 422
 
 
+def test_edit_issue_title_and_description(env):
+    client, _, fake, _ = env
+    assert client.patch("/api/issues/id-ENG-2", json={"title": "  Fix the report copy "}).status_code == 200
+    assert fake.updated[-1] == ("id-ENG-2", {"title": "Fix the report copy"})
+    assert client.patch("/api/issues/id-ENG-2", json={"description": "## Steps\n\n- one"}).status_code == 200
+    assert fake.updated[-1] == ("id-ENG-2", {"description": "## Steps\n\n- one"})
+    client.patch("/api/issues/id-ENG-2", json={"description": None})
+    assert fake.updated[-1] == ("id-ENG-2", {"description": ""})
+    r = client.patch("/api/issues/id-ENG-2", json={"title": "   "})
+    assert r.status_code == 400 and r.json()["error"] == "The title can't be empty"
+    assert client.patch("/api/issues/id-ENG-2", json={"title": "x" * 201}).status_code == 422
+    assert len(fake.updated) == 3
+
+
+def test_edit_issue_client_swaps_only_the_client_label(env):
+    client, _, fake, _ = env
+    r = client.patch("/api/issues/id-ENG-1", json={"client": "Initech & Co"})
+    assert r.status_code == 200, r.text
+    # ENG-1 has Bug and Globex; only Globex (in the client group) goes.
+    assert fake.updated[-1] == ("id-ENG-1", {"removedLabelIds": ["l-Globex"], "addedLabelIds": ["l-Initech & Co"]})
+    client.patch("/api/issues/id-ENG-1", json={"client": None})          # to Dev
+    assert fake.updated[-1] == ("id-ENG-1", {"removedLabelIds": ["l-Globex"]})
+    client.patch("/api/issues/id-ENG-2", json={"client": "Globex"})      # from Dev
+    assert fake.updated[-1] == ("id-ENG-2", {"addedLabelIds": ["l-Globex"]})
+    r = client.patch("/api/issues/id-ENG-1", json={"client": "Vandelay"})
+    assert r.status_code == 400 and r.json()["error"] == "No client label 'Vandelay' in Linear"
+    assert len(fake.updated) == 3
+
+
+def test_edit_issue_project(env):
+    client, _, fake, _ = env
+    client.patch("/api/issues/id-ENG-2", json={"project": "Globex"})
+    assert fake.updated[-1] == ("id-ENG-2", {"projectId": "p-globex"})
+    client.patch("/api/issues/id-ENG-2", json={"project": None})
+    assert fake.updated[-1] == ("id-ENG-2", {"projectId": None})
+    r = client.patch("/api/issues/id-ENG-2", json={"project": "Old thing"})
+    assert r.status_code == 400 and r.json()["error"] == "No open project 'Old thing' in Linear"
+    assert len(fake.updated) == 2
+
+
 def test_meta_and_sweep(env):
     client, db, _, launched = env
     m = client.get("/api/meta").json()

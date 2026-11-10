@@ -31,7 +31,7 @@ from .categories import categorize
 from .config import (SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings,
                      get_linear_key, load_settings, read_overrides, source_state, write_overrides)
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, is_linear_upload, shape_issue
+from .linear import Linear, LinearError, TeamMeta, client_labels, is_linear_upload, shape_issue
 from .selfcmd import self_command
 from .sweep import next_working_day
 from .tools import ToolError
@@ -133,6 +133,10 @@ class IssueEdit(BaseModel):
     state_id: str | None = None
     priority: int | None = Field(default=None, ge=0, le=4)
     due_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    title: str | None = Field(default=None, max_length=200)
+    description: str | None = None      # Markdown; empty or null clears it
+    client: str | None = None           # a client label's name; null makes it a Dev issue
+    project: str | None = None          # an open project's name; null takes it out of its project
 
 
 class RestoreIn(BaseModel):
@@ -236,6 +240,15 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 db.set_meta("client_labels", [l["name"] for l in cache["meta"].client_labels])
                 db.set_meta("projects", [p["name"] for p in cache["meta"].projects])
             return cache["meta"]
+
+    def id_by_name(items: list[dict], name: str | None, what: str) -> str | None:
+        """The id of the client label or project called ``name`` (None for none); a 400 if Linear has none."""
+        if name is None:
+            return None
+        found = next((x for x in items if x["name"] == name), None)
+        if not found:
+            raise HTTPException(400, f"No {what} {name!r} in Linear")
+        return found["id"]
 
     def candidate_or_404(cid: int) -> dict:
         c = db.get_candidate(cid)
@@ -875,8 +888,29 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             changes["priority"] = edit.priority or 0
         if "due_date" in fields:
             changes["dueDate"] = edit.due_date   # None clears it
-        issue = linear_call(lambda l: l.update_issue(issue_id, changes))
-        return shape_issue(issue, settings)
+        if "title" in fields:
+            title = (edit.title or "").strip()
+            if not title:
+                raise HTTPException(400, "The title can't be empty")
+            changes["title"] = title
+        if "description" in fields:
+            changes["description"] = edit.description or ""
+        if "project" in fields:
+            changes["projectId"] = id_by_name(team_meta().projects, edit.project, "open project")
+        new_client = id_by_name(team_meta().client_labels, edit.client, "client label") if "client" in fields else None
+
+        def run(l: Linear) -> dict:
+            # A client change swaps the label in the client group and keeps every other label.
+            if "client" in fields:
+                old = [x["id"] for x in client_labels(l.get_issue(issue_id), settings.client_label_group)]
+                new = [new_client] if new_client else []
+                if removed := [x for x in old if x not in new]:
+                    changes["removedLabelIds"] = removed
+                if added := [x for x in new if x not in old]:
+                    changes["addedLabelIds"] = added
+            return l.update_issue(issue_id, changes)
+
+        return shape_issue(linear_call(run), settings)
 
     @app.delete("/api/issues/{issue_id}", dependencies=auth)
     def delete_issue(issue_id: str) -> dict:
