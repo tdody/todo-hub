@@ -13,7 +13,7 @@ import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskA
 import type { Category } from "./avatars";
 
 applyTheme();
-import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
+import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
 
 type Tab = "inbox" | "today" | "client" | "dev" | "insights" | "settings";
 
@@ -448,31 +448,52 @@ async function drop(c: Candidate, reason: DropReason = "other") {
   }
 }
 
-async function editIssue(issue: Issue, change: Parameters<typeof api.editIssue>[1]) {
+/** Change an issue in Linear, with Undo. For a description edit ``issue`` is the pane's preview:
+ *  its text is what Undo puts back. Returns whether Linear took the change. */
+async function editIssue(issue: Issue | IssuePreview, change: IssueEdit): Promise<boolean> {
   try {
     const updated = await api.editIssue(issue.id, change);
     const status = state.meta?.states.find((s) => s.id === updated.state.id);
     const closed = closedType(status?.type ?? updated.state.type);
+    // In Client or Dev, an issue that moved to the other list leaves this one: select the next row.
+    const kind = state.tab === "client" || state.tab === "dev" ? state.tab : null;
+    if (kind && !state.pickedProject && updated.list !== issue.list && state.listSel[kind] === issue.id) {
+      const at = listOrder.indexOf(issue.id);
+      state.listSel[kind] = listOrder[at + 1] ?? listOrder[at - 1] ?? null;
+    }
     state.issues = closed ? state.issues.filter((i) => i.id !== issue.id)
       : state.issues.map((i) => (i.id === issue.id ? updated : i));
+    if (change.description !== undefined) setDescription(issue.id, change.description);
     // The reverse change: put back whatever this edit replaced.
-    const before: Parameters<typeof api.editIssue>[1] = {};
+    const before: IssueEdit = {};
     if ("state_id" in change) before.state_id = issue.state.id;
     if ("priority" in change) before.priority = issue.priority;
     if ("due_date" in change) before.due_date = issue.due_date;
+    if ("title" in change) before.title = issue.title;
+    if ("client" in change) before.client = issue.client;
+    if ("project" in change) before.project = issue.project;
+    if ("description" in change && "description" in issue) before.description = issue.description;
     const what = "state_id" in change ? `moved to ${status?.name ?? updated.state.name}`
       : "priority" in change ? `priority set to ${priorityName(updated.priority)}`
+      : "title" in change ? "renamed"
+      : "description" in change ? "description saved"
+      : "client" in change ? `moved to ${updated.client ?? "Dev"}`
+      : "project" in change ? (updated.project ? `project set to ${updated.project}` : "project cleared")
       : updated.due_date ? `due ${updated.due_date}` : "due date cleared";
     offerUndo(`${issue.identifier} ${what}`, `${issue.identifier} change reverted`, async () => {
       const restored = await api.editIssue(issue.id, before);
       state.issues = state.issues.some((i) => i.id === issue.id)
         ? state.issues.map((i) => (i.id === issue.id ? restored : i))
         : [restored, ...state.issues];
+      if (before.description !== undefined) setDescription(issue.id, before.description);
     });
+    return true;
   } catch (e) {
     fail(e);
+    return false;
+  } finally {
+    render();
   }
-  render();
 }
 
 /** Delete an issue after a confirm: Linear moves it to its trash (restorable for 30 days there),
@@ -622,7 +643,9 @@ function clientSelect(value: string | null, onChange: (v: string | null) => void
 }
 
 function projectSelect(value: string | null, onChange: (v: string | null) => void) {
-  const projects = state.meta?.projects ?? [];
+  // The list holds open projects only; an issue in a completed one still shows it.
+  const open = state.meta?.projects ?? [];
+  const projects = value && !open.includes(value) ? [value, ...open] : open;
   return quietSelect(h(
     "select",
     { class: "project", title: "Linear project", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
@@ -1903,6 +1926,98 @@ function todaySplit(): { open: TodayItem[]; gone: TodayItem[] } {
 type Detail = { at: number; loading?: true; error?: string; issue?: IssuePreview };
 const details = new Map<string, Detail>();           // reading pane content, by issue id
 
+// Text typed in the pane, by "<issue id>:<field>" (title, description, comment, sub), until it's
+// saved. Re-renders rebuild the fields from it, so a sweep finishing or the list reloading never
+// loses what you typed. A title or description draft also means its editor is open.
+const paneDrafts = new Map<string, string>();
+let rebuilding = false;        // render() is replacing the page
+
+/** A field lost focus because you left it, not because a re-render removed it. */
+function left(e: Event): boolean {
+  return !rebuilding && (e.target as Element).isConnected;
+}
+
+/** Open the title or description editor with ``text``, cursor at the end. */
+function openEdit(key: string, text: string) {
+  paneDrafts.set(key, text);
+  render();
+  const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-edit="${CSS.escape(key)}"]`);
+  el?.focus();
+  el?.setSelectionRange(el.value.length, el.value.length);
+}
+
+interface PaneKeep { edit: string | null; start: number | null; end: number | null; pane: string | null; scroll: number }
+
+/** Before a re-render: the pane field holding the cursor, and how far the reading pane is scrolled. */
+function paneKeep(): PaneKeep {
+  const a = document.activeElement as HTMLInputElement | null;
+  const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
+  const edit = a?.dataset?.edit ?? null;
+  return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null,
+    pane: pane?.getAttribute("aria-label") ?? null, scroll: pane?.scrollTop ?? 0 };
+}
+
+/** After a re-render: the same field gets the cursor back, and the same issue's pane its scroll. */
+function paneRestore(k: PaneKeep) {
+  const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
+  if (pane && k.pane && pane.getAttribute("aria-label") === k.pane) pane.scrollTop = k.scroll;
+  if (!k.edit) return;
+  const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-edit="${CSS.escape(k.edit)}"]`);
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  if (k.start !== null) el.setSelectionRange(k.start, k.end ?? k.start);
+}
+
+/** Keep the pane's copy of a description in step with a save or an undo. */
+function setDescription(id: string, text: string) {
+  const d = details.get(id);
+  if (d?.issue) d.issue = { ...d.issue, description: text };
+}
+
+/** The issue's title in a reading pane. Click it (or press e) to rename it in place; Enter or
+ *  leaving the field saves, Esc cancels. */
+function titleField(i: Issue, tag: "h2" | "h3"): HTMLElement {
+  const key = `${i.id}:title`;
+  const draft = paneDrafts.get(key);
+  if (draft === undefined) {
+    return h(tag, { class: "pane-title", "data-pane": "title", title: "Rename (e)", onclick: () => openEdit(key, i.title) }, i.title);
+  }
+  return h(tag, { class: "pane-title editing" }, h("input", {
+    class: "pane-title-input", value: draft, maxLength: 200, readOnly: state.busy.has(key), "aria-label": "Title", "data-edit": key,
+    oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); },
+    onkeydown: (e: KeyboardEvent) => {
+      if (e.key === "Enter") { e.preventDefault(); void saveTitle(i); }
+      if (e.key === "Escape") { e.stopPropagation(); paneDrafts.delete(key); render(); }
+    },
+    onblur: (e: Event) => { if (left(e)) void saveTitle(i); },
+  }));
+}
+
+async function saveTitle(i: Issue) {
+  const key = `${i.id}:title`;
+  const title = paneDrafts.get(key)?.trim();
+  if (title === undefined || state.busy.has(key)) return;
+  if (title && title !== i.title) {            // an empty title reverts
+    state.busy.add(key);
+    render();
+    await editIssue(i, { title });
+    state.busy.delete(key);
+  }
+  paneDrafts.delete(key);
+  render();
+}
+
+/** Status, priority, due date, client and project: the fields both reading panes edit in place. */
+function issueFields(i: Issue): HTMLElement[] {
+  return [
+    statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
+    priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
+    dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
+    clientSelect(i.client, (v) => void editIssue(i, { client: v })),
+    projectSelect(i.project, (v) => void editIssue(i, { project: v })),
+  ];
+}
+
 function loadDetail(id: string, force = false) {
   const d = details.get(id);
   if (!force && d && (d.loading || Date.now() - d.at < 2 * 60_000)) return;
@@ -1911,7 +2026,10 @@ function loadDetail(id: string, force = false) {
     .then((issue) => details.set(id, { at: Date.now(), issue }))
     .catch((e) => details.set(id, { at: Date.now(), error: e instanceof ApiError ? e.message : String(e) }))
     .finally(() => {
-      document.querySelectorAll<HTMLElement>(`.tl-detail[data-id="${id}"]`).forEach((el) => el.replaceWith(detailBody(id)));
+      const shown = [...document.querySelectorAll<HTMLElement>(`.tl-detail[data-id="${id}"]`)];
+      // While you type in it, re-render the page instead: that keeps your cursor where it was.
+      if (shown.some((el) => el.contains(document.activeElement))) render();
+      else shown.forEach((el) => el.replaceWith(detailBody(id)));
     });
 }
 
@@ -2488,11 +2606,7 @@ function stageBody(i: Issue, onToday: boolean): Node[] {
         confirmDelete(i);
       } }, "Delete…")));
   return [
-    h("div", { class: "tl-fields" },
-      statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
-      priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
-      dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
-      h("span", { class: "spacer" }), more),
+    h("div", { class: "tl-fields" }, ...issueFields(i), h("span", { class: "spacer" }), more),
     detailBody(i.id),
   ];
 }
@@ -2523,7 +2637,7 @@ function focusStage(i: Issue, ctx: TodayCtx): Child[] {
     : actButton(`Block ${fmtMinutes(len)} at ${hm12(start)}`, "b", (btn) => void blockFirst(i, btn, len, start));
   return [
     stageTop(i, pick ? "Claude's pick" : ""),
-    h("h2", {}, i.title),
+    titleField(i, "h2"),
     pick?.why ? h("p", { class: "td-why" }, pick.why) : "",
     waiting ? draftBox(nudgeText(i), "A nudge to send") : "",
     fit ? h("div", { class: `td-fit n${fit.over ? " over" : ""}` }, fit.text,
@@ -2558,7 +2672,7 @@ function wrapStage(i: Issue, ctx: TodayCtx): Child[] {
   };
   return [
     stageTop(i, ""),
-    h("h2", {}, i.title),
+    titleField(i, "h2"),
     a?.why ? h("p", { class: "td-why" }, a.why) : "",
     a?.action === "ask" && a.message && !decided ? draftBox(a.message, "Drafted by Claude") : "",
     decided ? h("p", { class: "td-okline" }, checkIcon(), decided)
@@ -2581,7 +2695,7 @@ function offStage(i: Issue, ctx: TodayCtx): Child[] {
   const fit = pick?.minutes ? fitFor(pick.minutes, b.agenda) : null;
   return [
     stageTop(i, a ? h("span", { class: "late" }, "not on Today") : "Claude's pick, not on Today"),
-    h("h2", {}, i.title),
+    titleField(i, "h2"),
     (a ?? pick)?.why ? h("p", { class: "td-why" }, (a ?? pick)!.why) : "",
     a?.action === "ask" && a.message && !decided ? draftBox(a.message, "Drafted by Claude") : "",
     fit ? h("div", { class: `td-fit n${fit.over ? " over" : ""}` }, fit.text) : "",
@@ -2777,12 +2891,9 @@ function issuePane(i: Issue): HTMLElement {
   return h("section", { class: "tl-pane", "aria-label": i.identifier },
     h("span", { class: "tl-meta" }, link(`${i.identifier} ↗`, i.url, "ident"), [i.client ?? i.project].filter(Boolean).map((x) => ` · ${x}`).join(""),
       state.slips?.slips[i.id] ? " · " : "", slipTag(state.slips?.slips[i.id])),
-    h("h3", {}, i.title),
-    // One row: status, priority, due date, then Block time (or Add to Today) and ⋯.
-    h("div", { class: "tl-fields" },
-      statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
-      priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
-      dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
+    titleField(i, "h3"),
+    // One row: status, priority, due date, client, project, then Block time (or Add to Today) and ⋯.
+    h("div", { class: "tl-fields" }, ...issueFields(i),
       h("span", { class: "spacer" }),
       t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
         onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
@@ -3291,16 +3402,23 @@ function render() {
       : state.tab === "dev" && state.pickedProject ? projectView(state.pickedProject)
       : byStatus ? statusView(state.tab as "client" | "dev")
       : listView(state.tab as "client" | "dev");
-  main.replaceChildren(
-    head,
-    state.error ? h("div", { class: "banner error" }, state.error) : "",
-    state.tab === "inbox" && state.run.status !== "running" && problems.length
-      ? h("div", { class: "banner warn" },
-          ...problems.map((p) => h("div", {}, `${SOURCE_NAME[p.source]}: ${p.detail ?? "problem during the last sweep"}`)))
-      : "",
-    state.tab === "inbox" ? captureBar : "",
-    h("div", { class: "content" }, view()),
-  );
+  const keep = paneKeep();
+  rebuilding = true;
+  try {
+    main.replaceChildren(
+      head,
+      state.error ? h("div", { class: "banner error" }, state.error) : "",
+      state.tab === "inbox" && state.run.status !== "running" && problems.length
+        ? h("div", { class: "banner warn" },
+            ...problems.map((p) => h("div", {}, `${SOURCE_NAME[p.source]}: ${p.detail ?? "problem during the last sweep"}`)))
+        : "",
+      state.tab === "inbox" ? captureBar : "",
+      h("div", { class: "content" }, view()),
+    );
+  } finally {
+    rebuilding = false;
+  }
+  paneRestore(keep);
 }
 
 // ---- on-demand capture ----------------------------------------------------------------------
