@@ -1,0 +1,1217 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-10T14:16:09+00:00",
+  "title": "Design System: TodoHub",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Early-Light Navy",
+        "canonical": "#1f3a5f",
+        "oklch": "oklch(34.7% 0.073 256.7)",
+        "tonalRamp": [
+          "#070b11",
+          "#1b2634",
+          "#31435b",
+          "#496386",
+          "#6984a9",
+          "#92a7c4",
+          "#bccade",
+          "#e8eff9"
+        ]
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "On Navy",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Desk",
+        "canonical": "#f6f7f9",
+        "oklch": "oklch(97.6% 0.003 264.5)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252526",
+          "#414243",
+          "#606163",
+          "#818284",
+          "#a4a5a6",
+          "#c9c9ca",
+          "#eeeeef"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Shaded Paper",
+        "canonical": "#f0f2f5",
+        "oklch": "oklch(96.0% 0.005 258.3)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242526",
+          "#414244",
+          "#606163",
+          "#818285",
+          "#a4a5a7",
+          "#c8c9ca",
+          "#eeeeef"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#dfe3e8",
+        "oklch": "oklch(91.4% 0.008 253.9)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#242527",
+          "#404245",
+          "#5e6165",
+          "#7f8387",
+          "#a3a5a8",
+          "#c7c9cb",
+          "#eeeeef"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#1b2330",
+        "oklch": "oklch(25.5% 0.027 260.0)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#22252b",
+          "#3c424c",
+          "#59626f",
+          "#7a8391",
+          "#9fa5b1",
+          "#c5c9d1",
+          "#eceff2"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Pencil",
+        "canonical": "#5d6878",
+        "oklch": "oklch(51.4% 0.029 257.7)",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#21252b",
+          "#3c424c",
+          "#586270",
+          "#798392",
+          "#9ea6b1",
+          "#c4cad1",
+          "#eceff2"
+        ]
+      },
+      "warn-bg": {
+        "role": "secondary",
+        "displayName": "Morning Amber Wash",
+        "canonical": "#fff4dc",
+        "oklch": "oklch(96.9% 0.034 86.3)",
+        "tonalRamp": [
+          "#0c0b08",
+          "#28251d",
+          "#474135",
+          "#69604e",
+          "#8a816e",
+          "#aba496",
+          "#cdc9bf",
+          "#f0eee9"
+        ]
+      },
+      "warn-ink": {
+        "role": "secondary",
+        "displayName": "Morning Amber",
+        "canonical": "#7a4b00",
+        "oklch": "oklch(45.6% 0.099 69.1)",
+        "tonalRamp": [
+          "#110a04",
+          "#32210c",
+          "#583b17",
+          "#815722",
+          "#a57845",
+          "#c09e79",
+          "#dcc5ac",
+          "#f8ece1"
+        ]
+      },
+      "good": {
+        "role": "signal",
+        "displayName": "Done Green",
+        "canonical": "#2f7d57",
+        "oklch": "oklch(53.1% 0.098 159.0)",
+        "tonalRamp": [
+          "#050e08",
+          "#112b1e",
+          "#1f4c35",
+          "#2e704f",
+          "#51926f",
+          "#82b297",
+          "#b3d2bf",
+          "#e4f3ea"
+        ]
+      },
+      "bad": {
+        "role": "signal",
+        "displayName": "Alarm Red",
+        "canonical": "#b3261e",
+        "oklch": "oklch(50.1% 0.178 28.7)",
+        "tonalRamp": [
+          "#180504",
+          "#43120e",
+          "#74211a",
+          "#a83027",
+          "#d05548",
+          "#e5877a",
+          "#f7b7ad",
+          "#fee9e6"
+        ]
+      },
+      "bad-bg": {
+        "role": "signal",
+        "displayName": "Alarm Red Wash",
+        "canonical": "#fde8e7",
+        "oklch": "oklch(94.8% 0.023 20.9)",
+        "tonalRamp": [
+          "#0d0a0a",
+          "#2a2323",
+          "#4a3f3e",
+          "#6d5d5c",
+          "#8e7e7d",
+          "#aea1a1",
+          "#cfc7c6",
+          "#f1eded"
+        ]
+      },
+      "s-todo-bg": {
+        "role": "signal",
+        "displayName": "Todo Pill",
+        "canonical": "#eef1f5",
+        "oklch": "oklch(95.7% 0.006 255.5)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#242526",
+          "#404244",
+          "#5f6164",
+          "#808286",
+          "#a3a5a8",
+          "#c8c9cb",
+          "#eeeeef"
+        ]
+      },
+      "s-todo-ink": {
+        "role": "signal",
+        "displayName": "Todo Pill Ink",
+        "canonical": "#3d4756",
+        "oklch": "oklch(39.5% 0.029 258.4)",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#21252b",
+          "#3c424c",
+          "#596270",
+          "#798392",
+          "#9ea6b1",
+          "#c4c9d1",
+          "#eceff2"
+        ]
+      },
+      "s-prog-bg": {
+        "role": "signal",
+        "displayName": "In Progress Pill",
+        "canonical": "#e5edf8",
+        "oklch": "oklch(94.3% 0.017 256.3)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232529",
+          "#3e4248",
+          "#5c626a",
+          "#7d838c",
+          "#a1a5ac",
+          "#c6c9ce",
+          "#edeef1"
+        ]
+      },
+      "s-prog-ink": {
+        "role": "signal",
+        "displayName": "In Progress Pill Ink",
+        "canonical": "#1f4f8f",
+        "oklch": "oklch(43.1% 0.118 256.8)",
+        "tonalRamp": [
+          "#050b15",
+          "#14253d",
+          "#25426a",
+          "#38629b",
+          "#5884c0",
+          "#86a7d6",
+          "#b5cbea",
+          "#e5efff"
+        ]
+      },
+      "s-pend-bg": {
+        "role": "signal",
+        "displayName": "Pending Pill",
+        "canonical": "#efe9f7",
+        "oklch": "oklch(94.3% 0.020 305.3)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#262428",
+          "#434048",
+          "#635f69",
+          "#85808b",
+          "#a7a3ac",
+          "#cac8ce",
+          "#efeef1"
+        ]
+      },
+      "s-pend-ink": {
+        "role": "signal",
+        "displayName": "Pending Pill Ink",
+        "canonical": "#5b3a8a",
+        "oklch": "oklch(42.7% 0.129 300.0)",
+        "tonalRamp": [
+          "#0d0914",
+          "#291e3c",
+          "#493668",
+          "#6c5098",
+          "#8d71bc",
+          "#ad99d3",
+          "#cec2e9",
+          "#f1ebfe"
+        ]
+      },
+      "s-done-bg": {
+        "role": "signal",
+        "displayName": "Done Pill",
+        "canonical": "#e6f2ea",
+        "oklch": "oklch(95.0% 0.017 156.9)",
+        "tonalRamp": [
+          "#0a0c0b",
+          "#222624",
+          "#3d4440",
+          "#5b645e",
+          "#7c857f",
+          "#a0a7a2",
+          "#c6cac7",
+          "#edefed"
+        ]
+      },
+      "s-done-ink": {
+        "role": "signal",
+        "displayName": "Done Pill Ink",
+        "canonical": "#2f7d57",
+        "oklch": "oklch(53.1% 0.098 159.0)",
+        "tonalRamp": [
+          "#050e08",
+          "#112b1e",
+          "#1f4c35",
+          "#2e704f",
+          "#51926f",
+          "#82b297",
+          "#b3d2bf",
+          "#e4f3ea"
+        ]
+      },
+      "p-urgent-bg": {
+        "role": "signal",
+        "displayName": "Urgent Pill",
+        "canonical": "#d1462f",
+        "oklch": "oklch(58.7% 0.179 31.9)",
+        "tonalRamp": [
+          "#180503",
+          "#43130a",
+          "#742214",
+          "#a8311e",
+          "#d05641",
+          "#e58876",
+          "#f7b7aa",
+          "#fee9e5"
+        ]
+      },
+      "p-urgent-ink": {
+        "role": "signal",
+        "displayName": "Urgent Pill Ink",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "p-high-bg": {
+        "role": "signal",
+        "displayName": "High Pill",
+        "canonical": "#fde6d8",
+        "oklch": "oklch(94.0% 0.031 53.5)",
+        "tonalRamp": [
+          "#0d0a09",
+          "#2b231f",
+          "#4b3f38",
+          "#6e5d53",
+          "#907e73",
+          "#b0a299",
+          "#d1c7c1",
+          "#f2edeb"
+        ]
+      },
+      "p-high-ink": {
+        "role": "signal",
+        "displayName": "High Pill Ink",
+        "canonical": "#a8420f",
+        "oklch": "oklch(51.2% 0.146 42.1)",
+        "tonalRamp": [
+          "#150703",
+          "#3d190a",
+          "#6b2d12",
+          "#9b431b",
+          "#c1653f",
+          "#d89175",
+          "#eebdaa",
+          "#fee9e2"
+        ]
+      },
+      "p-med-bg": {
+        "role": "signal",
+        "displayName": "Medium Pill",
+        "canonical": "#f1ecdc",
+        "oklch": "oklch(94.3% 0.022 92.5)",
+        "tonalRamp": [
+          "#0c0b09",
+          "#272520",
+          "#454239",
+          "#656155",
+          "#868275",
+          "#a8a59b",
+          "#cbc9c2",
+          "#efeeeb"
+        ]
+      },
+      "p-med-ink": {
+        "role": "signal",
+        "displayName": "Medium Pill Ink",
+        "canonical": "#6b5a1d",
+        "oklch": "oklch(47.2% 0.082 93.3)",
+        "tonalRamp": [
+          "#0d0b04",
+          "#2b2510",
+          "#4c411e",
+          "#6f602d",
+          "#91824e",
+          "#b0a57f",
+          "#d1c9b0",
+          "#f2eee3"
+        ]
+      },
+      "edge-urgent": {
+        "role": "signal",
+        "displayName": "Urgent Edge",
+        "canonical": "#d1462f",
+        "oklch": "oklch(58.7% 0.179 31.9)",
+        "tonalRamp": [
+          "#180503",
+          "#43130a",
+          "#742214",
+          "#a8311e",
+          "#d05641",
+          "#e58876",
+          "#f7b7aa",
+          "#fee9e5"
+        ]
+      },
+      "edge-high": {
+        "role": "signal",
+        "displayName": "High Edge",
+        "canonical": "#f0a37a",
+        "oklch": "oklch(78.2% 0.107 48.7)",
+        "tonalRamp": [
+          "#130804",
+          "#371e10",
+          "#60361e",
+          "#8c4f2d",
+          "#b0704e",
+          "#ca987e",
+          "#e3c1b0",
+          "#fbebe2"
+        ]
+      },
+      "urgent-tint": {
+        "role": "signal",
+        "displayName": "Urgent Row Tint",
+        "canonical": "#fff8f6",
+        "oklch": "oklch(98.4% 0.008 36.6)",
+        "tonalRamp": [
+          "#0c0b0b",
+          "#272424",
+          "#454140",
+          "#65605e",
+          "#86817f",
+          "#a8a4a3",
+          "#cbc8c7",
+          "#efeeee"
+        ]
+      },
+      "slack": {
+        "role": "source",
+        "displayName": "Slack",
+        "canonical": "#5b3a73",
+        "oklch": "oklch(41.3% 0.099 309.4)",
+        "tonalRamp": [
+          "#0e0911",
+          "#2b1f35",
+          "#4c385c",
+          "#705387",
+          "#9274aa",
+          "#b19ac4",
+          "#d1c2de",
+          "#f2ebf9"
+        ]
+      },
+      "gmail": {
+        "role": "source",
+        "displayName": "Gmail",
+        "canonical": "#a8321f",
+        "oklch": "oklch(49.3% 0.157 31.8)",
+        "tonalRamp": [
+          "#160604",
+          "#40160f",
+          "#6f281c",
+          "#a13b2a",
+          "#c85e4b",
+          "#de8c7c",
+          "#f2baae",
+          "#fee9e5"
+        ]
+      },
+      "grain": {
+        "role": "source",
+        "displayName": "Grain",
+        "canonical": "#23645a",
+        "oklch": "oklch(45.9% 0.068 181.3)",
+        "tonalRamp": [
+          "#050d0b",
+          "#142a26",
+          "#254a43",
+          "#366c63",
+          "#588e84",
+          "#87afa7",
+          "#b6d0ca",
+          "#e5f2ef"
+        ]
+      },
+      "linear": {
+        "role": "source",
+        "displayName": "Linear",
+        "canonical": "#4b55c4",
+        "oklch": "oklch(50.5% 0.171 274.6)",
+        "tonalRamp": [
+          "#070a19",
+          "#1b2048",
+          "#323a7d",
+          "#4a55b5",
+          "#6978dc",
+          "#909feb",
+          "#bac6fa",
+          "#eaeefe"
+        ]
+      },
+      "hubspot": {
+        "role": "source",
+        "displayName": "HubSpot",
+        "canonical": "#9b2c6f",
+        "oklch": "oklch(48.4% 0.161 347.7)",
+        "tonalRamp": [
+          "#15060e",
+          "#3c152b",
+          "#68264c",
+          "#983870",
+          "#be5a92",
+          "#d689b1",
+          "#ecb7d1",
+          "#fee7f2"
+        ]
+      },
+      "cat-code": {
+        "role": "category",
+        "displayName": "Code",
+        "canonical": "#2f5fb3",
+        "oklch": "oklch(49.8% 0.144 260.7)",
+        "tonalRamp": [
+          "#050b17",
+          "#132443",
+          "#234073",
+          "#355fa8",
+          "#5581ce",
+          "#83a6e0",
+          "#b3caf2",
+          "#e6effe"
+        ]
+      },
+      "cat-analysis": {
+        "role": "category",
+        "displayName": "Analysis",
+        "canonical": "#2f7d57",
+        "oklch": "oklch(53.1% 0.098 159.0)",
+        "tonalRamp": [
+          "#050e08",
+          "#112b1e",
+          "#1f4c35",
+          "#2e704f",
+          "#51926f",
+          "#82b297",
+          "#b3d2bf",
+          "#e4f3ea"
+        ]
+      },
+      "cat-model": {
+        "role": "category",
+        "displayName": "Model work",
+        "canonical": "#7a4fb5",
+        "oklch": "oklch(52.4% 0.157 300.5)",
+        "tonalRamp": [
+          "#0d0816",
+          "#2b1c40",
+          "#4b3270",
+          "#6f4aa3",
+          "#906cc8",
+          "#af96dc",
+          "#d0c0ef",
+          "#f1ebff"
+        ]
+      },
+      "cat-review": {
+        "role": "category",
+        "displayName": "Review",
+        "canonical": "#9a5600",
+        "oklch": "oklch(52.2% 0.121 61.2)",
+        "tonalRamp": [
+          "#120903",
+          "#371e07",
+          "#60370c",
+          "#8c5110",
+          "#b07239",
+          "#ca9a71",
+          "#e3c2a8",
+          "#fbebdf"
+        ]
+      },
+      "cat-meeting": {
+        "role": "category",
+        "displayName": "Meeting",
+        "canonical": "#1d6f80",
+        "oklch": "oklch(50.2% 0.079 215.0)",
+        "tonalRamp": [
+          "#040d0f",
+          "#0f292f",
+          "#1b4953",
+          "#286b7a",
+          "#4c8d9d",
+          "#80aeba",
+          "#b1cfd7",
+          "#e3f1f5"
+        ]
+      },
+      "cat-email": {
+        "role": "category",
+        "displayName": "Email",
+        "canonical": "#b0413e",
+        "oklch": "oklch(52.9% 0.146 25.0)",
+        "tonalRamp": [
+          "#160606",
+          "#3e1715",
+          "#6c2927",
+          "#9d3d3a",
+          "#c4605a",
+          "#db8d87",
+          "#efbab5",
+          "#fee9e7"
+        ]
+      },
+      "cat-writing": {
+        "role": "category",
+        "displayName": "Writing",
+        "canonical": "#535b66",
+        "oklch": "oklch(46.8% 0.020 256.4)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#222529",
+          "#3d4249",
+          "#5b626c",
+          "#7b838d",
+          "#a0a6ae",
+          "#c5c9cf",
+          "#edeff1"
+        ]
+      },
+      "cat-admin": {
+        "role": "category",
+        "displayName": "Admin",
+        "canonical": "#6b5a3a",
+        "oklch": "oklch(47.6% 0.052 82.7)",
+        "tonalRamp": [
+          "#0d0b07",
+          "#2a2419",
+          "#4b402d",
+          "#6e5f43",
+          "#908063",
+          "#b0a48d",
+          "#d0c8b9",
+          "#f2eee7"
+        ]
+      },
+      "sky-morning": {
+        "role": "sky",
+        "displayName": "Morning Sky",
+        "canonical": "#ffdca6",
+        "oklch": "oklch(91.1% 0.079 78.3)",
+        "tonalRamp": [
+          "#0f0a05",
+          "#2e2311",
+          "#513f20",
+          "#775c30",
+          "#9a7d51",
+          "#b7a281",
+          "#d6c7b1",
+          "#f4ede3"
+        ]
+      },
+      "sky-dusk": {
+        "role": "sky",
+        "displayName": "Dusk Violet",
+        "canonical": "#3d3470",
+        "oklch": "oklch(36.7% 0.100 287.3)",
+        "tonalRamp": [
+          "#0b0a13",
+          "#242239",
+          "#403c63",
+          "#5e5991",
+          "#7f7ab5",
+          "#a29fcd",
+          "#c7c5e4",
+          "#ededfc"
+        ]
+      },
+      "sky-night": {
+        "role": "sky",
+        "displayName": "Night Indigo",
+        "canonical": "#14122b",
+        "oklch": "oklch(20.0% 0.049 284.7)",
+        "tonalRamp": [
+          "#0b0b0f",
+          "#24242f",
+          "#404053",
+          "#5e5e79",
+          "#7f7f9c",
+          "#a2a3b9",
+          "#c7c8d7",
+          "#edeef5"
+        ]
+      },
+      "sun-core": {
+        "role": "sky",
+        "displayName": "Sun Core",
+        "canonical": "#ffe199",
+        "oklch": "oklch(91.9% 0.096 87.8)",
+        "tonalRamp": [
+          "#0f0b03",
+          "#2d240b",
+          "#504015",
+          "#755e1f",
+          "#987f43",
+          "#b6a377",
+          "#d4c8ab",
+          "#f4eee0"
+        ]
+      },
+      "sun-rim": {
+        "role": "sky",
+        "displayName": "Sun Rim",
+        "canonical": "#f6a65c",
+        "oklch": "oklch(78.9% 0.131 61.8)",
+        "tonalRamp": [
+          "#130802",
+          "#381e04",
+          "#623602",
+          "#8e4f00",
+          "#b3712f",
+          "#cc996c",
+          "#e5c2a5",
+          "#fcebdd"
+        ]
+      },
+      "sky-amber": {
+        "role": "sky",
+        "displayName": "Sky Amber",
+        "canonical": "#f4c08a",
+        "oklch": "oklch(84.6% 0.084 67.4)",
+        "tonalRamp": [
+          "#110a04",
+          "#33230f",
+          "#57401f",
+          "#7d5e31",
+          "#a07f52",
+          "#bca381",
+          "#d9c8b1",
+          "#f6ede3"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The weekly digest's headline and \"Good morning.\" on Today's morning cover. One per page at most."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The score heading on the wrap-up's dusk sky."
+      },
+      "page-title": {
+        "displayName": "Page title",
+        "purpose": "Every page's title, followed by its count."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "The selected issue's title in the reading pane."
+      },
+      "title-sm": {
+        "displayName": "Title small",
+        "purpose": "Inbox card titles, dialog headings, list headings."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "The number on an Insights tile."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "List titles, nav, buttons, digest prose."
+      },
+      "body-sm": {
+        "displayName": "Body small",
+        "purpose": "Rendered Markdown, banners, toasts, menus, the filter."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Detail lines, chips, pills, counts, IDs; tabular figures."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase section kickers only."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Keyboard shortcuts, logs, code."
+      }
+    },
+    "shadows": [
+      {
+        "name": "whisper",
+        "value": "0 1px 2px rgba(20, 30, 45, 0.06)",
+        "purpose": "Resting cards and the bulk bar in Light; none in Dark."
+      },
+      {
+        "name": "selected-row",
+        "value": "0 1px 3px rgba(27, 35, 48, 0.06)",
+        "purpose": "The selected item in a list."
+      },
+      {
+        "name": "menu",
+        "value": "0 6px 20px rgba(0, 0, 0, 0.14)",
+        "purpose": "Drop, snooze, pill and type menus."
+      },
+      {
+        "name": "toast",
+        "value": "0 4px 16px rgba(0, 0, 0, 0.18)",
+        "purpose": "Undo toasts."
+      },
+      {
+        "name": "popover",
+        "value": "0 14px 34px rgba(0, 0, 0, 0.18)",
+        "purpose": "The balance and sources popovers."
+      },
+      {
+        "name": "dialog",
+        "value": "0 10px 40px rgba(0, 0, 0, 0.3)",
+        "purpose": "Dialogs, over a 45% dark scrim."
+      },
+      {
+        "name": "ring",
+        "value": "0 0 0 1px var(--accent)",
+        "purpose": "The focused Inbox card; green or red for approved and dropped."
+      },
+      {
+        "name": "priority-edge",
+        "value": "inset 3px 0 0 var(--edge-urgent)",
+        "purpose": "Urgent rows (High uses --edge-high; the digest's landing row uses --warn-ink)."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state",
+        "value": "0.12s",
+        "purpose": "Border, background, opacity changes, and quiet fields fading in."
+      },
+      {
+        "name": "decide-swipe",
+        "value": "420ms cubic-bezier(0.5, 0, 0.85, 0.45)",
+        "purpose": "A decided Inbox card slides off the window's edge with a tilt (right to approve, left to drop), then collapses over 200ms."
+      },
+      {
+        "name": "decide-calm",
+        "value": "160ms",
+        "purpose": "With Reduce motion, the decided card just fades."
+      },
+      {
+        "name": "landing-pulse",
+        "value": "1.6s ease-out, once",
+        "purpose": "The row the weekly digest sent you to."
+      },
+      {
+        "name": "sunrise",
+        "value": "2350ms keyframed, fill both, delay -var(--elapsed)",
+        "purpose": "Start my day: night and stars fade, dawn passes, the sun rises, the sky folds into the band. Resumes mid-way on re-render; skipped under Reduce motion."
+      },
+      {
+        "name": "sun-rise",
+        "value": "0–68% of the sunrise (about 1600ms), cubic-bezier(.2, .7, .2, 1)",
+        "purpose": "The 64px sun rising from below the hills."
+      },
+      {
+        "name": "sky-fold",
+        "value": "70–100% of the sunrise (about 700ms), cubic-bezier(.2, .7, .2, 1)",
+        "purpose": "The cover's sky folding into the 46px band while the sun shrinks to 16px and the band's text fades in."
+      },
+      {
+        "name": "fold-chevron",
+        "value": "0.2s ease-out",
+        "purpose": "The chevron turning on Today's \"not on Today\" and \"done today\" folds."
+      },
+      {
+        "name": "spinner",
+        "value": "0.8s linear infinite",
+        "purpose": "Work in progress (sweeping, Claude planning)."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stack-panels",
+        "value": "760px"
+      },
+      {
+        "name": "sidebar-icons",
+        "value": "820px"
+      },
+      {
+        "name": "settings-narrow",
+        "value": "860px"
+      },
+      {
+        "name": "row-columns",
+        "value": "900px"
+      },
+      {
+        "name": "pane-under-list",
+        "value": "1000px"
+      },
+      {
+        "name": "inbox-why-line",
+        "value": "1280px"
+      }
+    ],
+    "themes": {
+      "note": "The frontmatter holds Light. Dark redefines every token; Daylight phases redefine the nine paper colors on the Light or Dark base.",
+      "dark": {
+        "bg": "#14181f",
+        "surface": "#1c222b",
+        "surface-2": "#242b36",
+        "border": "#323b48",
+        "ink": "#e7ebf0",
+        "muted": "#9aa5b4",
+        "accent": "#8fb3e3",
+        "accent-ink": "#10161f",
+        "good": "#6cc597",
+        "warn-bg": "#3a2f17",
+        "warn-ink": "#f1cf86",
+        "bad": "#f28b82",
+        "bad-bg": "#3b1f1e",
+        "slack": "#c9a7e4",
+        "gmail": "#f2a08f",
+        "grain": "#86d1c3",
+        "linear": "#aab0f2",
+        "hubspot": "#f19ad0",
+        "s-todo-bg": "#2a313c",
+        "s-todo-ink": "#c3cad3",
+        "s-prog-bg": "#1f3350",
+        "s-prog-ink": "#9cc0f0",
+        "s-pend-bg": "#31284a",
+        "s-pend-ink": "#c9b3ee",
+        "s-done-bg": "#1d3a2b",
+        "s-done-ink": "#7fd0a3",
+        "p-urgent-bg": "#c4412c",
+        "p-urgent-ink": "#ffffff",
+        "p-high-bg": "#4a2a1a",
+        "p-high-ink": "#f5b48c",
+        "p-med-bg": "#3b3420",
+        "p-med-ink": "#e3cf8f",
+        "edge-urgent": "#e0563f",
+        "edge-high": "#b8673f",
+        "urgent-tint": "rgba(209, 70, 47, 0.08)",
+        "cat-code": "#8fb3e3",
+        "cat-analysis": "#6cc597",
+        "cat-model": "#c3a5f0",
+        "cat-review": "#f0b86a",
+        "cat-meeting": "#6fc6d6",
+        "cat-email": "#f2938f",
+        "cat-writing": "#b4bcc8",
+        "cat-admin": "#d1bf96"
+      },
+      "daylight": {
+        "morning": {
+          "bg": "#fbf6ec",
+          "surface": "#fffdf8",
+          "surface-2": "#f5eddc",
+          "border": "#ecdfc6",
+          "ink": "#2a2418",
+          "muted": "#7a6a52",
+          "accent": "#a4551a",
+          "accent-ink": "#ffffff",
+          "warn-bg": "#fff1d6"
+        },
+        "day": "light",
+        "afternoon": {
+          "bg": "#f7f2ea",
+          "surface": "#fffcf7",
+          "surface-2": "#f1e9dc",
+          "border": "#e6dccb",
+          "ink": "#262019",
+          "muted": "#73675a",
+          "accent": "#7b4a2a",
+          "accent-ink": "#ffffff",
+          "warn-bg": "#f6e6d3"
+        },
+        "dusk": {
+          "bg": "#efebf5",
+          "surface": "#fbf9fd",
+          "surface-2": "#e7e1f0",
+          "border": "#ddd5ea",
+          "ink": "#231e38",
+          "muted": "#6b6688",
+          "accent": "#5b4596",
+          "accent-ink": "#ffffff",
+          "warn-bg": "#fbe7cf"
+        },
+        "night": {
+          "base": "dark",
+          "bg": "#16152a",
+          "surface": "#201e38",
+          "surface-2": "#2a2746",
+          "border": "#39355a",
+          "ink": "#e9e6f5",
+          "muted": "#a29dc0",
+          "accent": "#b9a7f0",
+          "accent-ink": "#16152a",
+          "warn-bg": "#3a2f17"
+        }
+      }
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one filled button per decision: Approve, Block, Save.",
+      "html": "<button class=\"ds-btn-primary\">Approve</button>",
+      "css": ".ds-btn-primary { font: 600 14px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; background: var(--accent, #1f3a5f); color: var(--accent-ink, #ffffff); border: 1px solid transparent; border-radius: 6px; padding: 6px 14px; cursor: pointer; } .ds-btn-primary:hover { filter: brightness(1.06); } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent, #1f3a5f); outline-offset: 1px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Every action that isn't the decision: Snooze, Drop, Copy.",
+      "html": "<button class=\"ds-btn-ghost\">Snooze</button>",
+      "css": ".ds-btn-ghost { font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; background: transparent; color: var(--muted, #5d6878); border: 1px solid var(--border, #dfe3e8); border-radius: 6px; padding: 6px 14px; cursor: pointer; } .ds-btn-ghost:hover { filter: brightness(1.06); color: var(--ink, #1b2330); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--accent, #1f3a5f); outline-offset: 1px; }"
+    },
+    {
+      "name": "Filter Field",
+      "kind": "input",
+      "refersTo": "input-filter",
+      "description": "The page filter on the tab line (/ focuses it).",
+      "html": "<input class=\"ds-filter\" placeholder=\"Filter (/)\" />",
+      "css": ".ds-filter { font: 13px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; width: 220px; padding: 5px 10px; color: var(--ink, #1b2330); background: var(--surface, #ffffff); border: 1px solid var(--border, #dfe3e8); border-radius: 6px; } .ds-filter::placeholder { color: var(--muted, #5d6878); } .ds-filter:focus-visible { outline: 2px solid var(--accent, #1f3a5f); outline-offset: 1px; }"
+    },
+    {
+      "name": "Status and Priority Pills",
+      "kind": "chip",
+      "refersTo": "pill-status-todo",
+      "description": "Clickable pills for Linear status and priority; a menu with number keys opens on click.",
+      "html": "<span class=\"ds-pill ds-todo\"><i></i>Todo</span> <span class=\"ds-pill ds-prog\"><i></i>In Progress</span> <span class=\"ds-pill ds-pend\"><i></i>Pending</span> <span class=\"ds-pill ds-done\"><i></i>Done</span> <span class=\"ds-pill ds-backlog\"><i></i>Backlog</span> <span class=\"ds-pill ds-urgent\">Urgent</span> <span class=\"ds-pill ds-high\">High</span> <span class=\"ds-pill ds-med\">Medium</span> <span class=\"ds-pill ds-low\">Low</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 6px; font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; padding: 2px 10px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; cursor: pointer; } .ds-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; } .ds-pill:hover { filter: brightness(0.97); box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 25%, transparent); } .ds-todo { background: var(--s-todo-bg, #eef1f5); color: var(--s-todo-ink, #3d4756); } .ds-prog { background: var(--s-prog-bg, #e5edf8); color: var(--s-prog-ink, #1f4f8f); } .ds-pend { background: var(--s-pend-bg, #efe9f7); color: var(--s-pend-ink, #5b3a8a); } .ds-done { background: var(--s-done-bg, #e6f2ea); color: var(--s-done-ink, #2f7d57); } .ds-backlog { border: 1px dashed var(--muted, #5d6878); color: var(--muted, #5d6878); } .ds-urgent { background: var(--p-urgent-bg, #d1462f); color: var(--p-urgent-ink, #ffffff); } .ds-high { background: var(--p-high-bg, #fde6d8); color: var(--p-high-ink, #a8420f); } .ds-med { background: var(--p-med-bg, #f1ecdc); color: var(--p-med-ink, #6b5a1d); } .ds-low { color: var(--muted, #5d6878); border-color: var(--border, #dfe3e8); }"
+    },
+    {
+      "name": "Chips",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Source, client and warning chips on an Inbox card's meta line; source colors touch only the text.",
+      "html": "<span class=\"ds-chip ds-slack\">Slack</span> <span class=\"ds-chip ds-gmail\">Gmail</span> <span class=\"ds-chip\">Globex</span> <span class=\"ds-chip ds-warn\">Same as ENG-123</span>",
+      "css": ".ds-chip { font: 500 12px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; padding: 1px 8px; border-radius: 999px; background: var(--surface-2, #f0f2f5); color: var(--ink, #1b2330); } .ds-slack { color: var(--slack, #5b3a73); } .ds-gmail { color: var(--gmail, #a8321f); } .ds-warn { background: var(--warn-bg, #fff4dc); color: var(--warn-ink, #7a4b00); }"
+    },
+    {
+      "name": "Sidebar Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "The left sidebar's pages with counts; the Inbox count turns into an accent pill when there's work.",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-item ds-active\">Inbox<span class=\"ds-count ds-hot\">4</span></button><button class=\"ds-nav-item\">Today<span class=\"ds-count\">6</span></button><button class=\"ds-nav-item\">Client<span class=\"ds-count\">18</span></button></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 204px; padding: 10px; background: var(--surface, #ffffff); } .ds-nav-item { display: flex; align-items: center; width: 100%; text-align: left; font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted, #5d6878); cursor: pointer; } .ds-nav-item:hover { background: var(--surface-2, #f0f2f5); color: var(--ink, #1b2330); } .ds-nav-item.ds-active { background: color-mix(in srgb, var(--accent, #1f3a5f) 12%, var(--surface, #ffffff)); color: var(--ink, #1b2330); font-weight: 600; } .ds-nav-item:focus-visible { outline: 2px solid var(--accent, #1f3a5f); outline-offset: 1px; } .ds-count { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted, #5d6878); } .ds-count.ds-hot { background: var(--accent, #1f3a5f); color: var(--accent-ink, #ffffff); font-weight: 600; padding: 0 7px; border-radius: 999px; }"
+    },
+    {
+      "name": "Page Header and Tabs",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Every page's title with its count, then underline tabs on a hairline.",
+      "html": "<header class=\"ds-head\"><div class=\"ds-title\"><h1>Client</h1><span>18 open</span></div><div class=\"ds-tabs\"><button class=\"ds-on\">By client</button><button>By status</button></div></header>",
+      "css": ".ds-head { display: flex; flex-direction: column; gap: 6px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; color: var(--ink, #1b2330); } .ds-title { display: flex; align-items: baseline; gap: 10px; } .ds-title h1 { margin: 0; font-size: 20px; } .ds-title span { font-size: 13px; color: var(--muted, #5d6878); } .ds-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--border, #dfe3e8); } .ds-tabs button { font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; background: none; border: 0; padding: 8px 0 9px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted, #5d6878); cursor: pointer; } .ds-tabs button:hover { color: var(--ink, #1b2330); } .ds-tabs button.ds-on { color: var(--ink, #1b2330); font-weight: 600; border-bottom-color: var(--accent, #1f3a5f); }"
+    },
+    {
+      "name": "List Item",
+      "kind": "card",
+      "refersTo": "list-item-selected",
+      "description": "A row in the Client, Dev and Inbox lists: full title, one quiet meta line; the selected one opens in the reading pane.",
+      "html": "<div class=\"ds-list\"><div class=\"ds-item ds-sel\"><span class=\"ds-n\">1</span><div><div class=\"ds-t\">Send the lead export to Globex</div><div class=\"ds-m\">ENG-123 · due <b class=\"ds-late\">Nov 6</b> · pushed 2×</div></div></div><div class=\"ds-item\"><span class=\"ds-n\">2</span><div><div class=\"ds-t\">Review the scoring PR</div><div class=\"ds-m\">ENG-130 · In Progress</div></div></div></div>",
+      "css": ".ds-list { display: flex; flex-direction: column; gap: 2px; max-width: 420px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; } .ds-item { display: flex; gap: 10px; padding: 10px 12px; border-radius: 9px; border: 1px solid transparent; cursor: pointer; color: var(--ink, #1b2330); } .ds-item:hover { background: color-mix(in srgb, var(--surface, #ffffff) 60%, transparent); } .ds-item.ds-sel { background: var(--surface, #ffffff); border-color: color-mix(in srgb, var(--accent, #1f3a5f) 35%, var(--border, #dfe3e8)); box-shadow: 0 1px 3px rgba(27, 35, 48, .06); } .ds-item.ds-sel .ds-t { font-weight: 600; } .ds-n { width: 16px; text-align: right; font-size: 12px; color: var(--muted, #5d6878); padding-top: 2px; font-variant-numeric: tabular-nums; } .ds-t { font-size: 14px; line-height: 1.35; } .ds-m { font-size: 12px; color: var(--muted, #5d6878); font-variant-numeric: tabular-nums; } .ds-late { color: var(--bad, #b3261e); font-weight: 600; }"
+    },
+    {
+      "name": "Undo Toast",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "Inverted toast at the bottom center after an action, with Undo and its shortcut.",
+      "html": "<div class=\"ds-toast\"><span>Approved: ENG-141 created</span><button>Undo <kbd>⌘Z</kbd></button></div>",
+      "css": ".ds-toast { display: inline-flex; align-items: center; gap: 12px; padding: 8px 10px 8px 14px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; background: var(--ink, #1b2330); color: var(--bg, #f6f7f9); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, .18); } .ds-toast button { display: inline-flex; align-items: center; gap: 6px; font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; border-radius: 6px; padding: 2px 10px; cursor: pointer; } .ds-toast kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; opacity: .7; } .ds-toast button:focus-visible { outline: 2px solid var(--accent, #1f3a5f); outline-offset: 1px; }"
+    },
+    {
+      "name": "Issue Chip",
+      "kind": "chip",
+      "refersTo": "chip-ref",
+      "description": "An issue Claude names in its text: the ID and a short label; opens the issue. Struck when done; light-on-dark on a sky.",
+      "html": "<p class=\"ds-p\">Send <button class=\"ds-ref\"><span class=\"ds-k\">ENG-412</span>scoring file</button> before standup, then <span class=\"ds-ref ds-struck\"><span class=\"ds-k\">ENG-388</span>endpoint removal</span>.</p><p class=\"ds-p ds-onsky\">Then <button class=\"ds-ref\"><span class=\"ds-k\">ENG-418</span>Initech's match rate</button></p>",
+      "css": ".ds-p { font: 400 14px/1.6 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; color: var(--ink, #1b2330); margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; } .ds-ref { display: inline-flex; align-items: baseline; gap: 5px; padding: 0 6px; border-radius: 6px; font: inherit; font-size: 13px; line-height: 1.5; background: var(--surface-2, #f0f2f5); border: 1px solid var(--border, #dfe3e8); color: var(--ink, #1b2330); vertical-align: 1px; cursor: pointer; } .ds-ref .ds-k { font-size: 12px; font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--muted, #5d6878) 78%, var(--ink, #1b2330)); } button.ds-ref:hover { border-color: color-mix(in srgb, var(--accent, #1f3a5f) 45%, var(--border, #dfe3e8)); } button.ds-ref:focus-visible { outline: 2px solid var(--accent, #1f3a5f); outline-offset: 1px; } .ds-struck { color: var(--muted, #5d6878); text-decoration: line-through; cursor: default; } .ds-onsky { background: #3d3470; color: #fff; } .ds-onsky .ds-ref { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.3); color: #fff; } .ds-onsky .ds-ref .ds-k { color: rgba(255,255,255,.8); }"
+    },
+    {
+      "name": "Today Band",
+      "kind": "custom",
+      "description": "The 46px sky through the day: the time, the next meeting and the one after, with a sun that follows the real one.",
+      "html": "<div class=\"ds-band\"><span class=\"ds-sun\"></span><div class=\"ds-bt\"><time>3:00 PM</time><span>Next <b>3:30 Globex model review</b> · in 30 min · external</span><span class=\"ds-then\">then 5:00 1:1 with Sam</span></div></div>",
+      "css": ".ds-band { position: relative; height: 46px; border-radius: 12px; overflow: hidden; color: #262019; display: flex; align-items: center; padding: 0 16px 3px; font: 400 13px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; background: linear-gradient(180deg, #ffdca6 0%, #ffecc9 45%, #fff8ea 100%); max-width: 760px; } .ds-sun { position: absolute; left: 80%; bottom: 12px; width: 16px; height: 16px; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(circle at 50% 42%, #fffbea 0%, #ffe199 42%, #f6a65c 100%); } .ds-bt { position: relative; display: flex; gap: 12px; white-space: nowrap; } .ds-bt time { font-size: 12px; } .ds-bt b { font-weight: 600; } .ds-then { color: #5d5145; }"
+    },
+    {
+      "name": "Start My Day",
+      "kind": "button",
+      "description": "The morning cover's one bright control, on the night sky; starts the sunrise.",
+      "html": "<div class=\"ds-night\"><button class=\"ds-start\">Start my day with 2 <kbd>↵</kbd></button></div>",
+      "css": ".ds-night { padding: 24px; border-radius: 12px; background: linear-gradient(180deg, #14122b 0%, #2c2752 38%, #5d4377 66%, #c47c7a 88%, #f0a868 100%); } .ds-start { display: inline-flex; align-items: center; gap: 10px; padding: 10px 22px; border: 0; border-radius: 999px; cursor: pointer; font: 700 15px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; color: #2a2145; background: linear-gradient(180deg, #ffd79a, #f4a65c); } .ds-start:hover { filter: brightness(1.05); } .ds-start:focus-visible { outline: 2px solid #fff; outline-offset: 2px; } .ds-start kbd { font: 400 12px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0 5px; border-radius: 4px; background: rgba(42,33,69,.12); color: #2a2145; }"
+    },
+    {
+      "name": "Today Pane Buttons",
+      "kind": "button",
+      "refersTo": "today-button-primary",
+      "description": "The selected issue's actions, each with its key; one filled (Mark done).",
+      "html": "<div class=\"ds-acts\"><button class=\"ds-tb ds-primary\">Mark done <kbd>⌘↵</kbd></button><button class=\"ds-tb\">Block 30 min at 3:00 <kbd>b</kbd></button><button class=\"ds-tb\">Move to Thu <kbd>m</kbd></button></div>",
+      "css": ".ds-acts { display: flex; flex-wrap: wrap; gap: 8px; } .ds-tb { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--border, #dfe3e8); border-radius: 6px; background: var(--surface, #ffffff); color: var(--ink, #1b2330); font: 400 14px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; white-space: nowrap; cursor: pointer; } .ds-tb:hover { background: var(--surface-2, #f0f2f5); } .ds-tb:focus-visible { outline: 2px solid var(--accent, #1f3a5f); outline-offset: 1px; } .ds-tb kbd { font: 400 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0 4px; border-radius: 4px; border: 1px solid var(--border, #dfe3e8); background: var(--surface-2, #f0f2f5); color: var(--muted, #5d6878); } .ds-primary { background: var(--accent, #1f3a5f); border-color: var(--accent, #1f3a5f); color: var(--accent-ink, #ffffff); font-weight: 600; } .ds-primary:hover { background: color-mix(in srgb, #000 10%, var(--accent, #1f3a5f)); } .ds-primary kbd { background: color-mix(in srgb, var(--accent-ink, #ffffff) 18%, var(--accent, #1f3a5f)); border-color: transparent; color: var(--accent-ink, #ffffff); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Morning Desk",
+    "overview": "**Creative North Star: \"The Morning Desk\"**\n\nTodoHub is a quiet, well-lit desk with the day laid out before you start. The desk is a pale cool grey; on it sit white sheets of paper with hairline edges, and one deep navy pen marks what you act on. Nothing on the desk is there for show. The warmth comes from the window: the light changes through the day, and the top of Today paints the sky outside: night in the morning, a thin band of daylight through the day, dusk at the wrap-up.\n\nEverything is soft and friendly but never loose. Text is the Mac's own system font at a compact 14px, with 12–13px detail lines. Corners are gently rounded, status and priority are rounded pills in gentle tints, and fields that hold nothing stay out of sight until you hover or tab to them. Attention is spent only on what is late, urgent, waiting on someone, or failing; everything else stays calm.\n\nThe light is the system's one personality. The Daylight theme moves the desk through cream (morning), clear white (day), warm sand (afternoon), lavender (dusk) and indigo (night), and Today carries a painted sky with a sun that follows the real one. The interface itself does not decorate. It is not an enterprise dashboard, it is not playful or gamified, and the colors of Slack, Gmail and the other sources never spread past their small chips.",
+    "keyCharacteristics": [
+      "Flat paper on a pale desk: hairline borders and tonal steps, shadows only for things that float.",
+      "One accent, Early-Light Navy, used for what you act on and where you are.",
+      "Morning Amber is both the warning color and the morning glow.",
+      "System font only; hierarchy from size and weight; tabular figures for every count, date and ID.",
+      "Lists on the left, a reading pane on the right, on every working page.",
+      "Quiet until needed: empty fields take no room, controls appear on hover or focus.",
+      "Every color has a Light, Dark and five Daylight values; status colors keep their meaning in all of them."
+    ],
+    "rules": [
+      {
+        "name": "The One Navy Rule",
+        "body": "The accent marks what you act on and where you are: one primary button per decision, the active nav item and tab, focus and selection rings, progress. As a background it is a tint of 12% or less (active nav 12%, a selected card 6%). It is never a panel, a header band, or a large fill.",
+        "section": "colors"
+      },
+      {
+        "name": "The Meaning Survives the Light Rule",
+        "body": "Daylight only changes the nine paper colors in the table above. Status, priority, good, bad and the source and task-type colors keep their meaning in every theme and phase; a new color that carries meaning needs a Light and a Dark value from the start.",
+        "section": "colors"
+      },
+      {
+        "name": "The Small-Chip Rule",
+        "body": "Source and task-type colors appear only as chip text, icon strokes and avatar tints of 18% or less. Never as backgrounds, borders, headings or rows.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Family Rule",
+        "body": "No webfonts and no second family. Weights are 400, 600 and 700 (650 only on the brand name); hierarchy is size and weight, never color alone.",
+        "section": "typography"
+      },
+      {
+        "name": "The Counted Rule",
+        "body": "Every count, date, ID and estimate uses tabular figures so columns of numbers line up.",
+        "section": "typography"
+      },
+      {
+        "name": "The Float-Only Shadow Rule",
+        "body": "A shadow means \"this is above the page and will go away\". Nothing that lives in the page flow gets more than the Whisper.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** read every color from the CSS custom properties (`var(--accent)`, `var(--surface)`), so all four themes and all five Daylight phases follow. Literal colors belong only in the sky.",
+      "**Do** keep one primary button per decision; everything else is ghost, secondary or a link button.",
+      "**Do** keep accent backgrounds at a 12% tint or less (`color-mix(in srgb, var(--accent) 12%, var(--surface))`).",
+      "**Do** hide an empty field's control until hover or focus, and show a set value as plain text.",
+      "**Do** use tabular figures for counts, dates, IDs and estimates.",
+      "**Do** keep gradients, glows, stars and choreographed motion in the sky: Today's morning cover, sunrise, band and dusk, and the Daylight swatch. Elsewhere, light or motion appears only when it carries meaning (a decided card swiping off, the pulse on a row you were sent to), stays under half a second for state changes (0.12s transitions), and has a Reduce-motion fallback.",
+      "**Do** give any new meaningful color a Light and a Dark value before it ships."
+    ],
+    "donts": [
+      "**Don't** build an enterprise dashboard: no walls of KPI cards, no heavy chrome or admin-panel density. Insights has one row of tiles, then charts that each answer one question.",
+      "**Don't** make it playful or gamified: no confetti, streaks, mascots or celebratory emoji. A done item gets a check and a strikethrough; that is the celebration.",
+      "**Don't** let source or task-type colors spread beyond chip text, icons and avatar tints. No Slack-purple headers, no Gmail-red rows.",
+      "**Don't** add colored left stripes beyond Urgent, High and the digest's landing highlight.",
+      "**Don't** add shadows to things in the page flow; only menus, popovers, toasts and dialogs float.",
+      "**Don't** add a webfont or a second typeface.",
+      "**Don't** add a refresh button or chrome that is only decoration."
+    ]
+  }
+}
