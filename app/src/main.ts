@@ -1965,6 +1965,7 @@ function paneKeep(): PaneKeep {
 
 /** After a re-render: the same field gets the cursor back, and the same issue's pane its scroll. */
 function paneRestore(k: PaneKeep) {
+  document.querySelectorAll<HTMLTextAreaElement>(".desc-input, .pane-title-input").forEach(fitHeight);
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
   if (pane && k.ident && pane.getAttribute("aria-label") === k.ident) pane.scrollTop = k.scroll;
   if (!k.edit) return;
@@ -1980,10 +1981,16 @@ function setDescription(id: string, text: string) {
   if (d?.issue) d.issue = { ...d.issue, description: text };
 }
 
-/** Grow a text box to fit its text, so a field opening in place keeps the text's shape. */
+/** Grow a text box to fit its text, so a field opening in place keeps the text's shape. Sizing goes
+ *  through "auto" for a moment; the pane and the page keep their scroll. */
 function fitHeight(el: HTMLTextAreaElement) {
+  const pane = el.closest<HTMLElement>(".td-st, .tl-pane");
+  const page = document.scrollingElement;
+  const paneTop = pane?.scrollTop ?? 0, pageTop = page?.scrollTop ?? 0;
   el.style.height = "auto";
   el.style.height = `${el.scrollHeight}px`;
+  if (pane) pane.scrollTop = paneTop;
+  if (page) page.scrollTop = pageTop;
 }
 
 /** The issue's title in a reading pane. Click it (or press e) to rename it in place; Enter or
@@ -2199,7 +2206,6 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
 /** Tick: the team's first done status, as Mark done uses; untick: its first not-started one (Todo). */
 async function tickSubIssue(parent: IssuePreview, sub: SubIssue) {
   const key = `${sub.id}:tick`;
-  if (state.busy.has(key)) return;
   const done = sub.state.type !== "completed";
   const to = state.meta?.states.find((s) => s.type === (done ? "completed" : "unstarted"));
   if (!to) { toast(`Couldn't find a ${done ? "done" : "to-do"} status for this team`); render(); return; }
@@ -3773,12 +3779,12 @@ function showShortcuts() {
     h("tbody", {}, ...SHORTCUTS.map(([k, v]) => h("tr", {}, h("td", {}, h("kbd", {}, k)), h("td", {}, v))))));
 }
 
-// A click anywhere outside an open Snooze or Drop menu closes it (including opening the other one).
-// Same for the balance popover.
 // Swapping what's under the pointer before it's released would lose the click.
 let pointerIsDown = false;
 document.addEventListener("pointerup", () => { pointerIsDown = false; }, true);
 document.addEventListener("pointercancel", () => { pointerIsDown = false; }, true);
+document.addEventListener("keydown", () => { pointerIsDown = false; }, true);
+document.addEventListener("pointermove", (e) => { if (e.buttons === 0) pointerIsDown = false; }, true);
 
 /** Run ``fn`` now, or once the pointer is released and its click has landed. */
 function afterPointer(fn: () => void) {
@@ -3786,6 +3792,8 @@ function afterPointer(fn: () => void) {
   else document.addEventListener("pointerup", () => setTimeout(fn), { once: true });
 }
 
+// A click anywhere outside an open Snooze or Drop menu closes it (including opening the other one).
+// Same for the balance popover.
 document.addEventListener("pointerdown", (e) => {
   pointerIsDown = true;
   // (Removed in place, not re-rendered, so the click that closed it still lands on its target.)
@@ -3841,7 +3849,7 @@ document.addEventListener("keydown", (e) => {
     void refresh(true, "force");
     return;
   }
-  // ⌘Z undoes the last action, except in a text field, where it undoes typing as usual.
+  // ⌘Z undoes the last action, except in a text field with text in it, where it undoes typing as usual.
   // In the app, Edit → Undo owns ⌘Z and calls todohubUndo(); this is for a plain browser.
   if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z"
       && !inApp && !holdsText(target) && !document.querySelector(".overlay")) {
