@@ -495,7 +495,9 @@ async function editIssue(issue: Issue | IssuePreview, change: IssueEdit): Promis
 /** Delete an issue after a confirm: Linear moves it to its trash (restorable for 30 days there),
  *  it leaves the lists and Today here, and Undo / ⌘Z brings it back. */
 function confirmDelete(i: Issue) {
-  const subs = state.issues.filter((x) => x.parent?.id === i.id).length;
+  // The pane's list from Linear (everyone's, done ones left out); your open issues if it isn't loaded yet.
+  const subs = details.get(i.id)?.issue?.sub_issues.filter(isOpen).length
+    ?? state.issues.filter((x) => x.parent?.id === i.id).length;
   const go = h("button", { class: "primary danger", onclick: () => { close(); void deleteIssue(i); } }, "Delete");
   const close = modal(`Delete ${i.identifier}?`, h("div", { class: "confirm-body" },
     h("p", {}, h("strong", {}, i.title)),
@@ -1422,7 +1424,7 @@ function listItem(kind: "client" | "dev", i: Issue, showGroupField: "client" | "
 /** The list on the left and the selected issue in the reading pane, for Client and Dev (both
  *  groupings). ``order`` is the issues as shown, for j/k and for picking the first one. */
 function listWithPane(kind: "client" | "dev", groups: (Node | string)[], order: Issue[]): HTMLElement {
-  const view = `${kind}|${state.pickedProject ?? ""}|${state.pickedClient ?? ""}|${state.filter}`;
+  const view = `${kind}|${state.listLayout[kind]}|${state.showBacklog}|${state.pickedProject ?? ""}|${state.pickedClient ?? ""}|${state.filter}`;
   // The selected issue left this list (moved, closed, deleted): select the one after it. In another
   // view (a project, a client, a filter) start from the top.
   if (!order.some((i) => i.id === state.listSel[kind])) {
@@ -1910,9 +1912,14 @@ function listWords(parts: string[]): string {
   return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 }
 
+/** The status Mark done and a ticked sub-issue use: the team's first completed one. */
+function doneStatus() {
+  return state.meta?.states.find((s) => s.type === "completed");
+}
+
 /** Check it off: moves the issue to the team's first completed status in Linear, with undo. */
 async function completeIssue(i: Issue) {
-  const done = state.meta?.states.find((s) => s.type === "completed");
+  const done = doneStatus();
   if (!done) { toast("Couldn't find a done status for this team"); return; }
   state.briefAt = 0;                 // the wrap-up's "done today" should include it
   await editIssue(i, { state_id: done.id });
@@ -2196,7 +2203,7 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
         h("span", { class: "muted small" }, s.assignee && s.assignee !== i.assignee ? `${s.state.name} · ${s.assignee}` : s.state.name));
     })) : "",
     h("input", {
-      class: "sub-add", placeholder: "+ Add sub-issue", value: paneDrafts.get(key) ?? "", readOnly: state.busy.has(key),
+      class: "sub-add", placeholder: "+ Add sub-issue", maxLength: 200, value: paneDrafts.get(key) ?? "", readOnly: state.busy.has(key),
       "aria-label": `Add a sub-issue to ${i.identifier}`, "data-pane": "sub", "data-edit": key,
       oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); },
       onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void addSubIssue(i); } },
@@ -2207,7 +2214,7 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
 async function tickSubIssue(parent: IssuePreview, sub: SubIssue) {
   const key = `${sub.id}:tick`;
   const done = sub.state.type !== "completed";
-  const to = state.meta?.states.find((s) => s.type === (done ? "completed" : "unstarted"));
+  const to = done ? doneStatus() : state.meta?.states.find((s) => s.type === "unstarted");
   if (!to) { toast(`Couldn't find a ${done ? "done" : "to-do"} status for this team`); render(); return; }
   // The pane's copy shows the new status at once; the reload after the save confirms it.
   const show = (st: SubIssue["state"]) => {
@@ -2995,7 +3002,7 @@ async function markDone(i: Issue, ctx: TodayCtx) {
   await completeIssue(i);
   const b = state.brief;
   if (b && !state.issues.some((x) => x.id === i.id) && !b.completed_today.some((x) => x.id === i.id)) {
-    const closed = state.meta?.states.find((s) => s.type === "completed");
+    const closed = doneStatus();
     b.completed_today = [{ ...i, state: { id: closed?.id ?? i.state.id, name: closed?.name ?? "Done", type: "completed" } }, ...b.completed_today];
     render();
   }
@@ -3809,19 +3816,17 @@ document.addEventListener("pointerdown", (e) => {
 
 const inApp = "__TAURI_INTERNALS__" in window;
 
-function isTextField(el: Element | null): boolean {
-  return !!el && (el.tagName === "TEXTAREA"
-    || (el.tagName === "INPUT" && ["text", "search", "url", "email", ""].includes((el as HTMLInputElement).type)));
+/** ⌘Z undoes typing in a text field, except in the comment and sub-issue boxes once a save has
+ *  emptied them: there it undoes the post. */
+function undoesTyping(el: Element | null): boolean {
+  if (!el || !(el.tagName === "TEXTAREA"
+      || (el.tagName === "INPUT" && ["text", "search", "url", "email", ""].includes((el as HTMLInputElement).type)))) return false;
+  return (el as HTMLInputElement).value !== "" || !el.matches('[data-pane="comment"], [data-pane="sub"]');
 }
 
-/** A text field with text in it: ⌘Z undoes the typing there, not the last action. */
-function holdsText(el: Element | null): boolean {
-  return isTextField(el) && (el as HTMLInputElement).value !== "";
-}
-
-/** Called by the app's Edit → Undo (⌘Z): undo typing in a text field, else the last action. */
+/** Called by the app's Edit → Undo (⌘Z): undo typing in a text field (see undoesTyping), else the last action. */
 (window as unknown as { todohubUndo: () => void }).todohubUndo = () => {
-  if (holdsText(document.activeElement)) {
+  if (undoesTyping(document.activeElement)) {
     document.execCommand("undo");
     return;
   }
@@ -3849,10 +3854,10 @@ document.addEventListener("keydown", (e) => {
     void refresh(true, "force");
     return;
   }
-  // ⌘Z undoes the last action, except in a text field with text in it, where it undoes typing as usual.
+  // ⌘Z undoes the last action, except in a text field (see undoesTyping), where it undoes typing as usual.
   // In the app, Edit → Undo owns ⌘Z and calls todohubUndo(); this is for a plain browser.
   if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z"
-      && !inApp && !holdsText(target) && !document.querySelector(".overlay")) {
+      && !inApp && !undoesTyping(target) && !document.querySelector(".overlay")) {
     e.preventDefault();
     void undo();
     return;
