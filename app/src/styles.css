@@ -311,8 +311,8 @@ select.client, select.project { max-width: 165px; }
   font-size: 15px;
   font-weight: 600;
 }
-.title-input:hover { border-color: var(--border); }
-.title-input:focus { border-color: var(--accent); background: var(--surface); outline: none; }
+.title-input:hover, .sub-add:hover { border-color: var(--border); }
+.title-input:focus, .sub-add:focus { border-color: var(--accent); background: var(--surface); outline: none; }
 
 .why { margin: 2px 0 6px; color: var(--muted); }
 blockquote {
@@ -881,7 +881,7 @@ button.theme:hover { color: var(--ink); }
 .tl-comment { display: flex; flex-direction: column; gap: 2px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
 .tl-comment-body { margin-top: 2px; }
 .tl-subs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.tl-subs li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; min-width: 0; }
+.tl-subs li { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
 .tl-subs .ident { flex: none; font-size: 12px; }
 .tl-subs .dtitle { flex: 1; min-width: 0; }
 @media (max-width: 1000px) { .tl-grid { grid-template-columns: 1fr; } .tl-pane { position: static; max-height: none; } }
@@ -1285,8 +1285,8 @@ button.ref:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--bor
 
 .pill-menu.quiet-empty:not([open]) > summary, select.quiet-empty { opacity: 0; transition: opacity .12s; }
 :is(.row, .card):hover .pill-menu.quiet-empty > summary, .card.focused .pill-menu.quiet-empty > summary,
-.pill-menu.quiet-empty:focus-within > summary, .tl-pane .pill-menu.quiet-empty > summary,
-:is(.card:hover, .card.focused) select.quiet-empty, select.quiet-empty:focus { opacity: 1; }
+.pill-menu.quiet-empty:focus-within > summary, :is(.tl-pane, .td-st) .pill-menu.quiet-empty > summary,
+:is(.card:hover, .card.focused, .tl-pane, .td-st) select.quiet-empty, select.quiet-empty:focus { opacity: 1; }
 /* On an Inbox card the empty fields take no room at rest (a table row keeps its columns). */
 .card:not(:hover):not(.focused):not(:focus-within) .card-actions :is(select.quiet-empty, .pill-menu.quiet-empty, .qdate.is-empty) { display: none; }
 
@@ -1322,31 +1322,26 @@ details.more[open] > summary { margin-bottom: 10px; }
 
 /* ---- Reading pane: editing in place ------------------------------------------------------------ */
 /* The title and description read as text and become fields where they sit, in the same type. */
-.pane-title { cursor: text; border-radius: 6px; }
-.pane-title:not(.editing):hover { background: var(--surface-2); box-shadow: 0 0 0 4px var(--surface-2); }
-.pane-title-input { display: block; box-sizing: border-box; width: calc(100% + 14px); margin: -3px -7px; padding: 2px 6px;
-  border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); font: inherit; color: inherit; outline: none; }
-.tl-desc.editable { cursor: text; border-radius: 6px; }
-.tl-desc.editable:hover { background: var(--surface-2); box-shadow: 0 0 0 6px var(--surface-2); }
-.desc-input { display: block; box-sizing: border-box; width: calc(100% + 14px); margin: -5px -7px 0; padding: 4px 6px;
-  border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); color: var(--ink);
-  font: inherit; font-size: 13px; line-height: 1.55; resize: vertical; outline: none; }
+.pane-title, .tl-desc.editable { cursor: text; border-radius: 6px; }
+.pane-title:not(.editing):hover, .tl-desc.editable:hover { outline: 1px solid var(--border); outline-offset: 4px; }
+.pane-title-input { display: block; width: calc(100% + 14px); margin: -3px -7px; padding: 2px 6px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font: inherit; line-height: inherit;
+  color: inherit; resize: none; overflow: hidden; outline: none; }
+.desc-input { display: block; width: calc(100% + 14px); margin: -5px -7px 0; padding: 4px 6px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 13px; line-height: 1.55; resize: vertical; max-height: 60vh; overflow-y: auto; outline: none; }
+.pane-title-input:focus, .desc-input:focus { border-color: var(--accent); }
 .desc-input + p { margin: 6px 0 0; }
-.add-text { padding: 0; border: 0; background: none; font: inherit; font-size: 13px; color: var(--muted); cursor: text; }
+.add-text { padding: 0; border: 0; background: none; font-size: 13px; color: var(--muted); cursor: text; }
 .add-text:hover { color: var(--ink); }
-.tl-subs li { align-items: center; }
 .tl-subs input[type="checkbox"] { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 .tl-subs .sub-gap { flex: none; width: 14px; }
 .tl-subs li.done .dtitle { color: var(--muted); text-decoration: line-through; }
-.sub-add { display: block; box-sizing: border-box; width: calc(100% + 12px); margin: 4px -6px 0; padding: 4px 6px;
-  border: 1px solid transparent; border-radius: 6px; background: transparent; font: inherit; font-size: 13px; }
-.sub-add:hover { border-color: var(--border); }
-.sub-add:focus { border-color: var(--accent); background: var(--surface); outline: none; }
+.sub-add { display: block; width: calc(100% + 14px); margin: 4px -7px 0; padding: 4px 6px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; font-size: 13px; }
 .comment-box { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
 .comment-box .comment-input { margin: 0; font-size: 13px; }
 .comment-hint { display: flex; justify-content: space-between; gap: 8px; }
-/* Client and project show in a reading pane even when unset: they're how an issue moves. */
-:is(.tl-pane, .td-st) select.quiet-empty { opacity: 1; }
 
 /* ---- Inbox: list on the left, the selected candidate in full on the right ---------------------- */
 /* Same grid, row columns and pane as Today, Client and Dev (.tl-grid, .tl-item, .tl-pane). */
