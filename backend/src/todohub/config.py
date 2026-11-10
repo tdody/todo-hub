@@ -70,6 +70,7 @@ waiting_state = "Pending"  # status for "waiting on someone" items
 done_state = "Done"        # status used when you approve "close this issue"
 followup_days = 3          # working days before a "waiting on" item comes due
 default_priority = 4       # 0 none, 1 urgent, 2 high, 3 medium, 4 low
+missions_initiative = "Q4 Missions"   # the initiative your missions live in (weekly check-in draft)
 
 # Your team's Linear labels -> task type (code, analysis, model, review, meeting, email,
 # writing, admin). Checked before the title. Bug, Feature and Improvement are built in.
@@ -122,6 +123,7 @@ class Settings:
     done_state: str = "Done"
     followup_days: int = 3
     default_priority: int = 4
+    missions_initiative: str = "Q4 Missions"
     label_types: dict[str, str] = field(default_factory=dict)
     claude_path: str = "claude"
     model: str = "sonnet"
@@ -223,6 +225,7 @@ def load_settings() -> Settings:
     s.done_state = linear.get("done_state", s.done_state)
     s.followup_days = int(linear.get("followup_days", s.followup_days))
     s.default_priority = int(linear.get("default_priority", s.default_priority))
+    s.missions_initiative = str(linear.get("missions_initiative", s.missions_initiative))
     s.label_types = {k.lower(): v for k, v in linear.get("label_types", {}).items()}
     s.claude_path = sweep.get("claude_path", s.claude_path)
     s.model = sweep.get("model", s.model)

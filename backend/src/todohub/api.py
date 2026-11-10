@@ -850,10 +850,18 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         items = db.set_today(nxt, have + [i for i in body.issue_ids if i not in have])
         return {"day": nxt, "items": items}
 
+    @app.delete("/api/today/carry", dependencies=auth)
+    def undo_carry(body: CarryIn) -> dict:
+        """Undo a carry: take these issues off the next working day's list."""
+        nxt = next_working_day(date.fromisoformat(today_str())).isoformat()
+        items = db.set_today(nxt, [i["issue_id"] for i in db.get_today(nxt) if i["issue_id"] not in body.issue_ids])
+        return {"day": nxt, "items": items}
+
     @app.get("/api/brief", dependencies=auth)
     def brief() -> dict:
         """What the morning brief and the wrap-up need beyond the issue list: today's and the next
-        working day's agendas (saved by the first sweep of the day) and the issues completed today."""
+        working day's agendas (saved by the first sweep of the day), the issues completed today, the
+        next working day's Today list, and Claude's plan, midday note and wrap-up."""
         day = today_str()
         next_day = next_working_day(date.fromisoformat(day)).isoformat()
         agendas = db.get_meta("agendas", {}) or {}
@@ -874,10 +882,55 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "next_day": next_day,
             "agenda": agendas.get(day),
             "next_agenda": agendas.get(next_day),
+            "next_today": [i["issue_id"] for i in db.get_today(next_day)],
             "completed_today": done,
             "waiting_state": settings.waiting_state,
             "error": error,
+            "plan": (db.get_meta("plans", {}) or {}).get(day),
+            "plan_run": todays_run("plan"),
+            "note": (db.get_meta("notes", {}) or {}).get(day),
+            "note_run": todays_run("note"),
+            "wrapup": (db.get_meta("wrapups", {}) or {}).get(day),
+            "wrapup_run": todays_run("wrapup"),
+            "checkin": (db.get_meta("checkins", {}) or {}).get(stats.week_start(date.fromisoformat(day)).isoformat()),
         }
+
+    def todays_run(kind: str) -> dict | None:
+        """The latest "Re-plan" (or note or wrap-up "Redo") run, if it's from today: running, or how it ended."""
+        run = db.latest_run(kind)
+        if not run or not run["started_at"] or stats.local_date(run["started_at"]).isoformat() != today_str():
+            return None
+        return {k: run.get(k) for k in ("id", "status", "error", "started_at", "finished_at")}
+
+    @app.post("/api/plan", dependencies=auth, status_code=202)
+    def replan() -> dict:
+        """Ask Claude for a fresh plan for today (a run of its own, about a minute)."""
+        clear_stale()
+        run = db.latest_run("plan")
+        if run and run["status"] == "running":
+            raise HTTPException(409, "Claude is already planning")
+        launch(["--plan"])
+        return {"started": True}
+
+    @app.post("/api/note", dependencies=auth, status_code=202)
+    def renote() -> dict:
+        """Ask Claude for a fresh midday note (a run of its own, about a minute)."""
+        clear_stale()
+        run = db.latest_run("note")
+        if run and run["status"] == "running":
+            raise HTTPException(409, "Claude is already writing a note")
+        launch(["--note"])
+        return {"started": True}
+
+    @app.post("/api/wrapup", dependencies=auth, status_code=202)
+    def rewrap() -> dict:
+        """Ask Claude for a fresh wrap-up of today (a run of its own, about a minute)."""
+        clear_stale()
+        run = db.latest_run("wrapup")
+        if run and run["status"] == "running":
+            raise HTTPException(409, "Claude is already wrapping up")
+        launch(["--wrapup"])
+        return {"started": True}
 
     @app.post("/api/today/{issue_id}/block", dependencies=auth)
     def block_time(issue_id: str, body: BlockIn) -> dict:

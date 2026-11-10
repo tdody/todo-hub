@@ -741,6 +741,75 @@ def test_unexpected_error_reaches_the_app_with_cors(env):
     assert r.headers.get("access-control-allow-origin") == "tauri://localhost"
 
 
+def test_brief_has_the_plan_and_replan_starts_a_run(env):
+    from datetime import datetime
+    from todohub import stats
+    client, db, fake, launched = env
+    day = datetime.now(stats.TZ).date().isoformat()
+    b = client.get("/api/brief").json()
+    assert b["plan"] is None and b["plan_run"] is None
+    db.set_meta("plans", {day: {"day": day, "headline": "H", "summary": "S", "picks": [], "set_aside": []}})
+    assert client.get("/api/brief").json()["plan"]["headline"] == "H"
+    assert client.post("/api/plan").status_code == 202 and launched[-1] == ["--plan"]
+    run_id = db.start_run("plan", "x")
+    assert client.get("/api/brief").json()["plan_run"]["status"] == "running"
+    assert client.post("/api/plan").status_code == 409
+    db.finish_run(run_id, "error", error="nope")
+    assert client.get("/api/brief").json()["plan_run"]["error"] == "nope"
+
+
+def test_brief_has_the_wrapup_and_checkin_and_redo_starts_a_run(env):
+    from datetime import datetime
+    from todohub import stats
+    client, db, fake, launched = env
+    today = datetime.now(stats.TZ).date()
+    b = client.get("/api/brief").json()
+    assert b["wrapup"] is None and b["wrapup_run"] is None and b["checkin"] is None
+    week = stats.week_start(today).isoformat()
+    db.set_meta("wrapups", {today.isoformat(): {"day": today.isoformat(), "summary": "S", "items": []}})
+    db.set_meta("checkins", {week: {"week": week, "work": [], "next_week": [], "review": [], "health": []}})
+    b = client.get("/api/brief").json()
+    assert b["wrapup"]["summary"] == "S" and b["checkin"]["week"] == week
+    assert client.post("/api/wrapup").status_code == 202 and launched[-1] == ["--wrapup"]
+    run_id = db.start_run("wrapup", "x")
+    assert client.get("/api/brief").json()["wrapup_run"]["status"] == "running"
+    assert client.get("/api/brief").json()["plan_run"] is None          # a wrap-up isn't a re-plan
+    assert client.post("/api/wrapup").status_code == 409
+    db.finish_run(run_id, "ok")
+    assert client.post("/api/wrapup").status_code == 202
+
+
+def test_brief_has_the_note_and_redo_starts_a_run(env):
+    from datetime import datetime
+    from todohub import stats
+    client, db, fake, launched = env
+    day = datetime.now(stats.TZ).date().isoformat()
+    b = client.get("/api/brief").json()
+    assert b["note"] is None and b["note_run"] is None
+    db.set_meta("notes", {day: {"day": day, "headline": "Finish the Globex grades.", "summary": "S"}})
+    assert client.get("/api/brief").json()["note"]["headline"] == "Finish the Globex grades."
+    assert client.post("/api/note").status_code == 202 and launched[-1] == ["--note"]
+    run_id = db.start_run("note", "x")
+    b = client.get("/api/brief").json()
+    assert b["note_run"]["status"] == "running" and b["plan_run"] is None and b["wrapup_run"] is None
+    assert client.post("/api/note").status_code == 409
+    db.finish_run(run_id, "ok")
+    assert client.post("/api/note").status_code == 202
+
+
+def test_undo_carry_and_next_today(env):
+    client, db, fake, _ = env
+    b = client.get("/api/brief").json()
+    assert b["next_today"] == []
+    client.post("/api/today/carry", json={"issue_ids": ["id-ENG-1", "id-ENG-2", "id-ENG-3"]})
+    assert client.get("/api/brief").json()["next_today"] == ["id-ENG-1", "id-ENG-2", "id-ENG-3"]
+    r = client.request("DELETE", "/api/today/carry", json={"issue_ids": ["id-ENG-3", "id-ENG-1", "id-ENG-9"]})
+    assert r.status_code == 200
+    assert r.json()["day"] == b["next_day"] and [i["issue_id"] for i in r.json()["items"]] == ["id-ENG-2"]
+    assert client.get("/api/brief").json()["next_today"] == ["id-ENG-2"]
+    assert db.get_today(client.get("/api/today").json()["day"]) == []                 # today's list untouched
+
+
 def test_linear_image_proxy_only_linear_and_cached(env):
     client, db, fake, launched = env
     url = "https://uploads.linear.app/org/a/b"

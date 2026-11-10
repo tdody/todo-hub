@@ -13,7 +13,7 @@ from typing import Any, Iterator
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id            INTEGER PRIMARY KEY,
-    trigger       TEXT NOT NULL,              -- schedule | manual (sweeps) | capture
+    trigger       TEXT NOT NULL,              -- schedule | manual (sweeps) | capture | plan | wrapup | note
     started_at    TEXT NOT NULL,
     finished_at   TEXT,
     status        TEXT NOT NULL,              -- running | ok | error
@@ -105,6 +105,9 @@ SIGNALS = ("ask", "commitment", "action_item", "deadline", "manual", "waiting_on
 SOURCES = ("slack", "gmail", "grain", "calendar", "linear", "github", "hubspot", "manual")
 SWEEP_TRIGGERS = ("schedule", "manual")
 CAPTURE_TRIGGERS = ("capture",)
+PLAN_TRIGGERS = ("plan",)
+WRAPUP_TRIGGERS = ("wrapup",)
+NOTE_TRIGGERS = ("note",)
 CANDIDATE_FIELDS = (
     "id", "run_id", "source", "source_id", "source_url", "title", "signal", "why", "excerpt", "who",
     "client_label", "due_date", "priority", "possible_duplicate", "links", "subtasks", "status", "drop_reason", "kind", "target_issue", "comment", "project", "snooze_until", "category",
@@ -239,7 +242,8 @@ class DB:
 
     def latest_run(self, kind: str = "sweep") -> dict | None:
         """Latest sweep (scheduled or manual), or latest capture when kind="capture"."""
-        triggers = CAPTURE_TRIGGERS if kind == "capture" else SWEEP_TRIGGERS
+        triggers = {"capture": CAPTURE_TRIGGERS, "plan": PLAN_TRIGGERS, "wrapup": WRAPUP_TRIGGERS,
+                    "note": NOTE_TRIGGERS}.get(kind, SWEEP_TRIGGERS)
         marks = ", ".join("?" * len(triggers))
         with self.connect() as c:
             row = c.execute(

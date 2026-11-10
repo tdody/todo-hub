@@ -111,6 +111,9 @@ class FakeLinear:
         self.fetched = getattr(self, "fetched", 0) + 1
         return b"\x89PNG", "image/png"
 
+    def initiative_projects(self, ref):
+        return getattr(self, "missions", [])
+
     def due_date_history(self):
         self.due_history_calls += 1
         return self.due_history
