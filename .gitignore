@@ -7,9 +7,18 @@ dist/
 app/src-tauri/target/
 app/src-tauri/gen/
 .DS_Store
+.claude/settings.local.json
 app/src-tauri/binaries/
 backend/packaging/build/
 backend/packaging/dist/
 
 # Client and company data lives in the settings folder, never in the repo
 backend/src/todohub/client_domains.json
+
+# Impeccable's per-run and per-developer files; the rest of .impeccable/ is committed
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/critique/*
+!.impeccable/critique/ignore.md
+.impeccable/mocks/
+.impeccable/review/
