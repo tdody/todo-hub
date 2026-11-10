@@ -741,3 +741,60 @@ def test_unexpected_error_reaches_the_app_with_cors(env):
     assert r.headers.get("access-control-allow-origin") == "tauri://localhost"
 
 
+def test_linear_image_proxy_only_linear_and_cached(env):
+    client, db, fake, launched = env
+    url = "https://uploads.linear.app/org/a/b"
+    r = client.get("/api/linear-image", params={"url": url})
+    assert r.status_code == 200 and r.content == b"\x89PNG" and r.headers["content-type"] == "image/png"
+    assert client.get("/api/linear-image", params={"url": url}).status_code == 200 and fake.fetched == 1   # cached
+    assert client.get("/api/linear-image", params={"url": "https://evil.example.com/a.png"}).status_code == 400
+
+
+def test_delete_issue_moves_to_trash_and_restores(env):
+    client, db, fake, _ = env
+    client.put("/api/today", json={"issue_ids": ["id-ENG-2", "id-ENG-1"]})
+    r = client.delete("/api/issues/id-ENG-1")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"deleted": "id-ENG-1", "today_position": 1}
+    assert fake.deleted_issues == ["id-ENG-1"]
+    assert [i["issue_id"] for i in client.get("/api/today").json()["items"]] == ["id-ENG-2"]
+    # undo: back from the trash and onto Today where it was
+    r = client.post("/api/issues/id-ENG-1/restore", json={"today_position": 1})
+    assert r.status_code == 200 and r.json()["identifier"] == "ENG-1"
+    assert fake.restored_issues == ["id-ENG-1"]
+    assert [i["issue_id"] for i in client.get("/api/today").json()["items"]] == ["id-ENG-2", "id-ENG-1"]
+    # an issue that wasn't on Today restores without touching it
+    client.delete("/api/issues/id-ENG-2")
+    assert client.post("/api/issues/id-ENG-2/restore").status_code == 200
+    assert [i["issue_id"] for i in client.get("/api/today").json()["items"]] == ["id-ENG-1"]
+
+
+def test_delete_issue_failure_keeps_today(env):
+    client, db, fake, _ = env
+    fake.fail_delete.add("id-ENG-1")
+    client.put("/api/today", json={"issue_ids": ["id-ENG-1"]})
+    assert client.delete("/api/issues/id-ENG-1").status_code == 502
+    assert [i["issue_id"] for i in client.get("/api/today").json()["items"]] == ["id-ENG-1"]
+
+
+def test_recently_decided_lists_and_restores(env):
+    client, db, fake, _ = env
+    a = seed(db, source_id="C1:1", title="Send the deck")
+    b = seed(db, source_id="C1:2", title="Thanks for the update")
+    c = seed(db, source_id="C1:3", title="Still pending")
+    client.post(f"/api/candidates/{a}/approve", json={})
+    client.post(f"/api/candidates/{b}/drop", json={"reason": "noise"})
+    with db.connect() as conn:          # an old decision falls outside the window
+        old = seed(db, source_id="C1:4", title="Old drop")
+        conn.execute("UPDATE candidates SET status = 'dropped', decided_at = '2026-01-01T00:00:00+00:00' WHERE id = ?", (old,))
+    r = client.get("/api/decided").json()
+    assert [i["title"] for i in r["items"]] == ["Thanks for the update", "Send the deck"] and r["more"] is False
+    approved = r["items"][1]
+    assert approved["status"] == "approved" and approved["linear_identifier"] == "ENG-99"
+    assert r["items"][0]["drop_reason"] == "noise" and "excerpt" not in r["items"][0]
+    assert client.get("/api/decided?limit=1").json()["more"] is True
+    # Restore brings the drop back to the Inbox; approved cards can't be restored this way.
+    assert client.post(f"/api/candidates/{b}/restore").json()["status"] == "pending"
+    assert client.post(f"/api/candidates/{a}/restore").status_code == 409
+    assert [i["title"] for i in client.get("/api/decided").json()["items"]] == ["Send the deck"]
+    assert {x["id"] for x in client.get("/api/candidates").json()} == {b, c}

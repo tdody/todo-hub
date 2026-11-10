@@ -22,6 +22,21 @@ ISSUE_FIELDS = """
 """
 
 
+UPLOAD_HOSTS = ("uploads.linear.app",)       # where images pasted into Linear are stored
+MAX_IMAGE_BYTES = 15 * 1024 * 1024
+
+
+def is_linear_upload(url: str) -> bool:
+    try:
+        u = httpx.URL(url)
+    except Exception:
+        return False
+    return u.scheme == "https" and u.host in UPLOAD_HOSTS
+
+
+STATE_ORDER = {"triage": 0, "backlog": 1, "unstarted": 2, "started": 3, "completed": 4, "canceled": 5, "duplicate": 6}
+
+
 class LinearError(RuntimeError):
     pass
 
@@ -62,6 +77,35 @@ class Linear:
         if not body.get("data"):
             raise LinearError(f"Unexpected response from Linear (HTTP {resp.status_code}).")
         return body["data"]
+
+    def fetch_upload(self, url: str) -> tuple[bytes, str]:
+        """An image pasted into Linear: (bytes, content type). Only Linear's upload server, only
+        images, at most MAX_IMAGE_BYTES. The API key goes along because those files are private;
+        httpx drops it if Linear redirects to another host (a signed storage link)."""
+        if not is_linear_upload(url):
+            raise LinearError("Only images stored on Linear can be loaded.")
+        req = self._client.build_request("GET", url, headers={"Accept": "image/*"})
+        req.headers.pop("Content-Type", None)          # the client's JSON default; a GET has no body
+        try:
+            resp = self._client.send(req, stream=True, follow_redirects=True)
+            try:
+                if resp.status_code in (401, 403):
+                    raise LinearError(f"Linear refused the image (HTTP {resp.status_code}).")
+                if resp.status_code >= 400:
+                    raise LinearError(f"Linear returned HTTP {resp.status_code} for the image.")
+                ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+                if not ctype.startswith("image/"):
+                    raise LinearError("That link isn't an image.")
+                data = bytearray()
+                for chunk in resp.iter_bytes():
+                    data += chunk
+                    if len(data) > MAX_IMAGE_BYTES:
+                        raise LinearError("The image is too large to show here.")
+            finally:
+                resp.close()
+        except httpx.HTTPError as exc:
+            raise LinearError(f"Can't reach Linear: {exc}") from exc
+        return bytes(data), ctype
 
     def _paginate(self, query: str, path: list[str], variables: dict | None = None) -> list[dict]:
         nodes: list[dict] = []
@@ -105,7 +149,8 @@ class Linear:
             ["issueLabels"],
             {"group": client_group},
         )
-        states = sorted(team["states"]["nodes"], key=lambda s: s["position"])
+        # Linear's menu order: by kind, then the team's order within it.
+        states = sorted(team["states"]["nodes"], key=lambda s: (STATE_ORDER.get(s["type"], 9), s["position"]))
         projects = self.team_projects(team["id"])
         return TeamMeta(
             team_id=team["id"],
@@ -282,6 +327,12 @@ class Linear:
         data = self.gql("mutation($id: String!) { issueDelete(id: $id) { success } }", {"id": issue_id})
         if not data["issueDelete"]["success"]:
             raise LinearError("Linear did not delete the issue.")
+
+    def restore_issue(self, issue_id: str) -> None:
+        """Bring an issue back out of Linear's trash."""
+        data = self.gql("mutation($id: String!) { issueUnarchive(id: $id) { success } }", {"id": issue_id})
+        if not data["issueUnarchive"]["success"]:
+            raise LinearError("Linear did not restore the issue.")
 
     def add_link(self, issue_id: str, url: str, title: str) -> str:
         """Attach a link to an issue; it shows in the issue's Links section. Returns its id."""

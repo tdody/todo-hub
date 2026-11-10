@@ -21,7 +21,7 @@ from typing import Callable, Literal
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import calendar_block, digest, gmail_draft, handled
@@ -30,7 +30,7 @@ from . import logos, mutes, stats, summary, tools
 from .categories import categorize
 from .config import Settings, get_linear_key, load_settings
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, shape_issue
+from .linear import Linear, LinearError, TeamMeta, is_linear_upload, shape_issue
 from .selfcmd import self_command
 from .sweep import next_working_day
 from .tools import ToolError
@@ -103,6 +103,15 @@ class IssueEdit(BaseModel):
     state_id: str | None = None
     priority: int | None = Field(default=None, ge=0, le=4)
     due_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class RestoreIn(BaseModel):
+    today_position: int | None = Field(default=None, ge=0)
+
+
+PREVIEW_DESCRIPTION = 6000   # characters of an issue's description in the reading pane
+PREVIEW_COMMENT = 1500       # characters of each of the latest three comments
+IMAGE_CACHE = 40             # Linear images kept in memory for the reading pane
 
 
 def _md(text: str) -> str:
@@ -656,6 +665,19 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             db.set_undo(cid, None)
         return {"candidate": db.decide(cid, "pending"), "warnings": warnings}
 
+    DECIDED_FIELDS = ("id", "title", "status", "kind", "drop_reason", "decided_at", "source", "source_url", "who",
+                      "client_label", "linear_identifier", "linear_url", "target_issue")
+
+    @app.get("/api/decided", dependencies=auth)
+    def decided(days: int = 30, limit: int = 300) -> dict:
+        """The Inbox's "Recently decided": approved and dropped cards of the last ``days``, newest
+        decision first. ``more`` is true when the limit cut the list short."""
+        days, limit = max(1, min(days, 365)), max(1, min(limit, 1000))
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0).isoformat()
+        rows = db.list_decided(since, limit + 1)
+        return {"days": days, "more": len(rows) > limit,
+                "items": [{k: r.get(k) for k in DECIDED_FIELDS} for r in rows[:limit]]}
+
     @app.post("/api/candidates/{cid}/restore", dependencies=auth)
     def restore(cid: int) -> dict:
         c = candidate_or_404(cid)
@@ -675,6 +697,20 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             out.append(shaped)
         return out
 
+    images: dict[str, tuple[bytes, str]] = {}     # recent Linear images, oldest first
+
+    @app.get("/api/linear-image", dependencies=auth)
+    def linear_image(url: str) -> Response:
+        """An image pasted into a Linear description or comment, fetched with the Linear API key
+        (those files are private). Only Linear's upload server; the last 40 are kept in memory."""
+        if not is_linear_upload(url):
+            raise HTTPException(400, "Only images stored on Linear can be loaded.")
+        hit = images.pop(url, None) or linear_call(lambda l: l.fetch_upload(url))
+        images[url] = hit
+        while len(images) > IMAGE_CACHE:
+            images.pop(next(iter(images)))
+        return Response(content=hit[0], media_type=hit[1], headers={"Cache-Control": "private, max-age=3600"})
+
     @app.get("/api/issues/{ident}/preview", dependencies=auth)
     def issue_preview(ident: str) -> dict:
         """A quick look at an issue: its description and latest comments."""
@@ -685,12 +721,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             **shape_issue(raw, settings),
             "assignee": (raw.get("assignee") or {}).get("name"),
             "created_at": raw.get("createdAt"),
-            "description": description[:1500],
-            "description_truncated": len(description) > 1500,
+            # Long enough to read the whole thing in the app's pane (rendered as Markdown there).
+            "description": description[:PREVIEW_DESCRIPTION],
+            "description_truncated": len(description) > PREVIEW_DESCRIPTION,
             "comment_count": len(nodes),
             "comments": [
                 {"author": (n.get("user") or {}).get("name") or "Someone", "created_at": n.get("createdAt"),
-                 "body": (n.get("body") or "").strip()[:400]}
+                 "body": (n.get("body") or "").strip()[:PREVIEW_COMMENT]}
                 for n in nodes[-3:]
             ],
         }
@@ -739,6 +776,32 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if "due_date" in fields:
             changes["dueDate"] = edit.due_date   # None clears it
         issue = linear_call(lambda l: l.update_issue(issue_id, changes))
+        return shape_issue(issue, settings)
+
+    @app.delete("/api/issues/{issue_id}", dependencies=auth)
+    def delete_issue(issue_id: str) -> dict:
+        """Move an issue to Linear's trash (restorable there for 30 days) and take it off Today.
+        Returns where it sat on Today (or null) so an undo can put it back."""
+        linear_call(lambda l: l.delete_issue(issue_id))
+        day = today_str()
+        ids = [i["issue_id"] for i in db.get_today(day)]
+        at = ids.index(issue_id) if issue_id in ids else None
+        if at is not None:
+            db.set_today(day, [i for i in ids if i != issue_id])
+        return {"deleted": issue_id, "today_position": at}
+
+    @app.post("/api/issues/{issue_id}/restore", dependencies=auth)
+    def restore_issue(issue_id: str, body: RestoreIn | None = None) -> dict:
+        """Undo a delete: bring the issue back from Linear's trash (and onto Today if it was there)."""
+        def run(l: Linear) -> dict:
+            l.restore_issue(issue_id)
+            return l.get_issue(issue_id)
+        issue = linear_call(run)
+        if body and body.today_position is not None:
+            day = today_str()
+            ids = [i["issue_id"] for i in db.get_today(day) if i["issue_id"] != issue_id]
+            ids.insert(min(body.today_position, len(ids)), issue_id)
+            db.set_today(day, ids)
         return shape_issue(issue, settings)
 
     # ---- sweeps -----------------------------------------------------------------------
