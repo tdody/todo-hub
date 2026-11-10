@@ -143,6 +143,10 @@ class RestoreIn(BaseModel):
     today_position: int | None = Field(default=None, ge=0)
 
 
+class CommentIn(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
 PREVIEW_DESCRIPTION = 6000   # characters of an issue's description in the reading pane
 PREVIEW_COMMENT = 1500       # characters of each of the latest three comments
 IMAGE_CACHE = 40             # Linear images kept in memory for the reading pane
@@ -945,6 +949,19 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             ids.insert(min(body.today_position, len(ids)), issue_id)
             db.set_today(day, ids)
         return shape_issue(issue, settings)
+
+    @app.post("/api/issues/{issue_id}/comments", dependencies=auth)
+    def add_comment(issue_id: str, body: CommentIn) -> dict:
+        """Post a comment as you. Returns its id, so Undo can delete it."""
+        text = body.body.strip()
+        if not text:
+            raise HTTPException(400, "The comment is empty")
+        return {"id": linear_call(lambda l: l.create_comment(issue_id, text))}
+
+    @app.delete("/api/comments/{comment_id}", dependencies=auth)
+    def delete_comment(comment_id: str) -> dict:
+        linear_call(lambda l: l.delete_comment(comment_id))
+        return {"deleted": comment_id}
 
     # ---- sweeps -----------------------------------------------------------------------
     @app.get("/api/runs/latest", dependencies=auth)

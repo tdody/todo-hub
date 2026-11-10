@@ -139,6 +139,19 @@ def test_edit_issue_project(env):
     assert len(fake.updated) == 2
 
 
+def test_post_and_delete_comment(env):
+    client, _, fake, _ = env
+    r = client.post("/api/issues/id-ENG-1/comments", json={"body": "  Sent the file to Sam.  "})
+    assert r.status_code == 200 and r.json() == {"id": "comment-1"}
+    assert fake.comments == [("id-ENG-1", "Sent the file to Sam.")]
+    assert client.delete("/api/comments/comment-1").json() == {"deleted": "comment-1"}
+    assert fake.deleted_comments == ["comment-1"]
+    r = client.post("/api/issues/id-ENG-1/comments", json={"body": "   "})
+    assert r.status_code == 400 and r.json()["error"] == "The comment is empty"
+    assert client.post("/api/issues/id-ENG-1/comments", json={"body": "x" * 2001}).status_code == 422
+    assert len(fake.comments) == 1
+
+
 def test_meta_and_sweep(env):
     client, db, _, launched = env
     m = client.get("/api/meta").json()
