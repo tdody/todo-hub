@@ -26,9 +26,10 @@ from pydantic import BaseModel, Field
 
 from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
-from . import logos, mutes, stats, summary, tools
+from . import logos, mutes, schedule, stats, summary, tools
 from .categories import categorize
-from .config import Settings, get_linear_key, load_settings
+from .config import (SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings,
+                     get_linear_key, load_settings, read_overrides, source_state, write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, is_linear_upload, shape_issue
 from .selfcmd import self_command
@@ -76,6 +77,35 @@ class ReplyDraftIn(BaseModel):
 
 class TodayIn(BaseModel):
     issue_ids: list[str] = Field(max_length=30)
+
+
+class SourceStateIn(BaseModel):
+    state: Literal["on", "paused", "removed"]
+
+
+class ScheduleIn(BaseModel):
+    every: int
+    start: int = Field(ge=SCHEDULE_FIRST, le=SCHEDULE_LAST)
+    end: int = Field(ge=SCHEDULE_FIRST, le=SCHEDULE_LAST)
+    days: Literal["weekdays", "every day"] = "weekdays"
+
+
+class DaylightIn(BaseModel):
+    place: str = Field(default="", max_length=80)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+# The Settings page's sources, in the order it lists them: key, name, what it reads, how.
+SOURCE_INFO = [
+    ("slack", "Slack", "Direct asks and mentions", "claude.ai connector"),
+    ("gmail", "Email", "Someone asking you for something", "Gmail · claude.ai connector"),
+    ("grain", "Grain", "Meeting action items", "claude.ai connector"),
+    ("calendar", "Calendar", "Meetings and free time", "Google Calendar · claude.ai connector"),
+    ("hubspot", "HubSpot", "Tickets and notes waiting on you", "claude.ai connector"),
+    ("linear", "Linear mentions", "Where someone @-mentions you", "Linear API"),
+    ("github", "GitHub reviews", "PRs waiting on your review", "gh command"),
+]
 
 
 class BlockIn(BaseModel):
@@ -142,7 +172,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                linear_factory: Callable[[], Linear] | None = None,
                sweep_launcher: Callable[[list[str]], None] | None = None,
                block_fn: Callable[..., str | None] | None = None,
-               draft_fn: Callable[[str, str], str | None] | None = None) -> FastAPI:
+               draft_fn: Callable[[str, str], str | None] | None = None,
+               scheduler=schedule) -> FastAPI:
     settings = settings or load_settings()
     db = db or DB(settings.db_path)
     db.release()     # approvals interrupted by a crash go back to the Inbox
@@ -245,6 +276,75 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             return {"location": None}
         return {"location": {"lat": lat, "lon": lon,
                              "place": settings.daylight_place or f"{lat:.2f}, {lon:.2f}"}}
+
+    # ---- Settings page ----------------------------------------------------------------
+    # Its choices go to settings.json in the TodoHub folder (config.toml stays as you wrote it) and
+    # apply at once: this process reloads them, and each sweep reads them when it starts.
+    def reload_settings() -> None:
+        settings.__dict__.update(load_settings().__dict__)
+
+    def save_override(section: str, value) -> None:
+        data = read_overrides()
+        if isinstance(value, dict) and isinstance(data.get(section), dict) and section == "sources":
+            data[section] = {**data[section], **value}
+        else:
+            data[section] = value
+        write_overrides(data)
+        reload_settings()
+
+    def settings_body() -> dict:
+        status = {o["source"]: o for o in db.source_overview([k for k, *_ in SOURCE_INFO])}
+        return {
+            "sources": [{"key": k, "name": name, "reads": reads, "via": via, "state": source_state(settings, k),
+                         "status": status.get(k)} for k, name, reads, via in SOURCE_INFO],
+            "schedule": schedule.describe(settings, scheduler.installed()) | {"supported": scheduler.supported()},
+            "daylight": {"place": settings.daylight_place, "latitude": settings.daylight_latitude,
+                         "longitude": settings.daylight_longitude},
+        }
+
+    @app.get("/api/settings", dependencies=auth)
+    def get_settings() -> dict:
+        return settings_body()
+
+    @app.put("/api/settings/sources/{key}", dependencies=auth)
+    def set_source(key: str, body: SourceStateIn) -> dict:
+        if key not in SOURCE_FIELDS:
+            raise HTTPException(404, f"No source called {key}")
+        save_override("sources", {key: body.state})
+        return settings_body()
+
+    @app.put("/api/settings/schedule", dependencies=auth)
+    def set_schedule(body: ScheduleIn) -> dict:
+        """Save the hours and, when the schedule is installed, reload it so they apply now."""
+        if body.every not in SCHEDULE_EVERY:
+            raise HTTPException(400, f"every must be one of {', '.join(map(str, SCHEDULE_EVERY))} hours")
+        if body.end < body.start:
+            raise HTTPException(400, "The last sweep can't be before the first")
+        if body.days not in SCHEDULE_DAYS:
+            raise HTTPException(400, "days must be weekdays or every day")
+        save_override("schedule", body.model_dump())
+        if scheduler.installed():
+            try:
+                scheduler.install(settings)
+            except schedule.ScheduleError as exc:
+                raise HTTPException(502, f"Saved, but the Mac schedule wasn't updated: {exc}")
+        return settings_body()
+
+    @app.post("/api/settings/schedule/install", dependencies=auth)
+    def install_schedule() -> dict:
+        try:
+            scheduler.install(settings)
+        except schedule.ScheduleError as exc:
+            raise HTTPException(502, str(exc))
+        return settings_body()
+
+    @app.put("/api/settings/daylight", dependencies=auth)
+    def set_daylight(body: DaylightIn) -> dict:
+        """Where Daylight follows the sun. Without both coordinates it uses the Mac's time zone."""
+        if (body.latitude is None) != (body.longitude is None):
+            raise HTTPException(400, "Give both latitude and longitude, or neither")
+        save_override("daylight", body.model_dump())
+        return settings_body()
 
     # ---- review queue -----------------------------------------------------------------
     @app.get("/api/candidates", dependencies=auth)

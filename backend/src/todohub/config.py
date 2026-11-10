@@ -4,6 +4,8 @@ Everything lives in one folder, ``~/Library/Application Support/TodoHub`` on mac
 (override with the ``TODOHUB_HOME`` environment variable, which the tests use):
 
     config.toml      settings you can edit
+    settings.json    what the app's Settings page changed (sources, schedule, Daylight place);
+                     it wins over config.toml for those keys
     todohub.db       SQLite: candidate queue, runs, source status
     sweep/           the folder Claude Code runs in (so no repo .mcp.json is picked up)
     logs/            one log file per sweep run
@@ -11,6 +13,7 @@ Everything lives in one folder, ``~/Library/Application Support/TodoHub`` on mac
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tomllib
@@ -148,6 +151,13 @@ class Settings:
     daylight_place: str = ""
     daylight_latitude: float | None = None
     daylight_longitude: float | None = None
+    # Settings page: each source's state ("on", "paused", "removed"); a source not listed follows
+    # config.toml. And when the sweep runs on its own.
+    source_states: dict[str, str] = field(default_factory=dict)
+    schedule_every: int = 2          # hours between sweeps
+    schedule_start: int = 8          # first sweep of the day (hour)
+    schedule_end: int = 16           # last possible sweep (hour)
+    schedule_days: str = "weekdays"  # or "every day"
 
     @property
     def home(self) -> Path:
@@ -168,6 +178,14 @@ class Settings:
     @property
     def config_path(self) -> Path:
         return self.home / "config.toml"
+
+    @property
+    def overrides_path(self) -> Path:
+        return self.home / "settings.json"
+
+    def schedule_hours(self) -> list[int]:
+        """The hours the sweep runs at, e.g. [8, 10, 12, 14, 16]."""
+        return list(range(self.schedule_start, self.schedule_end + 1, self.schedule_every))
 
     def only(self, source: str) -> "Settings":
         """A copy with every source but ``source`` turned off, for a one-source sweep."""
@@ -250,7 +268,78 @@ def load_settings() -> Settings:
     s.daylight_place = str(app.get("daylight_place", s.daylight_place))
     s.daylight_latitude = _coord(app.get("daylight_latitude"), 90)
     s.daylight_longitude = _coord(app.get("daylight_longitude"), 180)
+    apply_overrides(s, read_overrides())
     return s
+
+
+# ---- the Settings page's choices ---------------------------------------------------------------
+# Sources the Settings page can add, pause or remove: (key, name, Settings field, default).
+SOURCE_FIELDS = {
+    "slack": ("slack_tools", DEFAULT_SLACK_TOOLS),
+    "gmail": ("gmail_tools", DEFAULT_GMAIL_TOOLS),
+    "grain": ("grain_tools", DEFAULT_GRAIN_TOOLS),
+    "calendar": ("calendar_tools", DEFAULT_CALENDAR_TOOLS),
+    "hubspot": ("hubspot_tools", DEFAULT_HUBSPOT_TOOLS),
+    "linear": ("linear_mentions", True),
+    "github": ("github_reviews", True),
+}
+SOURCE_STATES = ("on", "paused", "removed")
+SCHEDULE_EVERY = (1, 2, 3, 4)
+SCHEDULE_DAYS = ("weekdays", "every day")
+SCHEDULE_FIRST, SCHEDULE_LAST = 5, 22      # hours the schedule may start and end at
+
+
+def read_overrides() -> dict:
+    """The Settings page's file; {} when it's missing or unreadable (config.toml then decides)."""
+    try:
+        data = json.loads((home() / "settings.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_overrides(data: dict) -> None:
+    path = ensure_home() / "settings.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
+    tmp.replace(path)
+
+
+def apply_overrides(s: Settings, data: dict) -> None:
+    """Lay the Settings page's choices over config.toml. Values that don't make sense are ignored."""
+    for key, state in (data.get("sources") or {}).items():
+        if key not in SOURCE_FIELDS or state not in SOURCE_STATES:
+            continue
+        s.source_states[key] = state
+        name, default = SOURCE_FIELDS[key]
+        if isinstance(default, bool):
+            setattr(s, name, state == "on")
+        elif state != "on":
+            setattr(s, name, [])
+        elif not getattr(s, name):            # turned off in config.toml: back to the read-only defaults
+            setattr(s, name, list(default))
+    sched = data.get("schedule") or {}
+    try:
+        every, start, end = int(sched.get("every", s.schedule_every)), int(sched.get("start", s.schedule_start)), \
+            int(sched.get("end", s.schedule_end))
+    except (TypeError, ValueError):
+        every, start, end = s.schedule_every, s.schedule_start, s.schedule_end
+    if every in SCHEDULE_EVERY and SCHEDULE_FIRST <= start <= end <= SCHEDULE_LAST:
+        s.schedule_every, s.schedule_start, s.schedule_end = every, start, end
+    if sched.get("days") in SCHEDULE_DAYS:
+        s.schedule_days = sched["days"]
+    day = data.get("daylight")
+    if isinstance(day, dict):
+        s.daylight_place = str(day.get("place") or "")[:80]
+        s.daylight_latitude = _coord(day.get("latitude"), 90)
+        s.daylight_longitude = _coord(day.get("longitude"), 180)
+
+
+def source_state(s: Settings, key: str) -> str:
+    """on, paused or removed: the Settings page's choice, else whether config.toml has it on."""
+    if key in s.source_states:
+        return s.source_states[key]
+    return "on" if getattr(s, SOURCE_FIELDS[key][0]) else "removed"
 
 
 def _coord(value, limit: float) -> float | None:
