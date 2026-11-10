@@ -450,17 +450,13 @@ async function drop(c: Candidate, reason: DropReason = "other") {
 
 /** Change an issue in Linear, with Undo. For a description edit ``issue`` is the pane's preview:
  *  its text is what Undo puts back. Returns whether Linear took the change. */
+function editIssue(issue: IssuePreview, change: IssueEdit): Promise<boolean>;
+function editIssue(issue: Issue, change: Omit<IssueEdit, "description">): Promise<boolean>;
 async function editIssue(issue: Issue | IssuePreview, change: IssueEdit): Promise<boolean> {
   try {
     const updated = await api.editIssue(issue.id, change);
     const status = state.meta?.states.find((s) => s.id === updated.state.id);
     const closed = closedType(status?.type ?? updated.state.type);
-    // In Client or Dev, an issue that moved to the other list leaves this one: select the next row.
-    const kind = state.tab === "client" || state.tab === "dev" ? state.tab : null;
-    if (kind && !state.pickedProject && updated.list !== issue.list && state.listSel[kind] === issue.id) {
-      const at = listOrder.indexOf(issue.id);
-      state.listSel[kind] = listOrder[at + 1] ?? listOrder[at - 1] ?? null;
-    }
     state.issues = closed ? state.issues.filter((i) => i.id !== issue.id)
       : state.issues.map((i) => (i.id === issue.id ? updated : i));
     if (change.description !== undefined) setDescription(issue.id, change.description);
@@ -643,7 +639,7 @@ function clientSelect(value: string | null, onChange: (v: string | null) => void
 }
 
 function projectSelect(value: string | null, onChange: (v: string | null) => void) {
-  // The list holds open projects only; an issue in a completed one still shows it.
+  // The list holds open projects only; an issue in a completed or canceled one still shows it.
   const open = state.meta?.projects ?? [];
   const projects = value && !open.includes(value) ? [value, ...open] : open;
   return quietSelect(h(
@@ -1426,7 +1422,13 @@ function listItem(kind: "client" | "dev", i: Issue, showGroupField: "client" | "
 /** The list on the left and the selected issue in the reading pane, for Client and Dev (both
  *  groupings). ``order`` is the issues as shown, for j/k and for picking the first one. */
 function listWithPane(kind: "client" | "dev", groups: (Node | string)[], order: Issue[]): HTMLElement {
-  if (!order.some((i) => i.id === state.listSel[kind])) state.listSel[kind] = order[0]?.id ?? null;
+  // The selected issue left the list (moved, closed, deleted, filtered out): select the one after it.
+  if (!order.some((i) => i.id === state.listSel[kind])) {
+    const shown = new Set(order.map((i) => i.id));
+    const at = listOrder.indexOf(state.listSel[kind] ?? "");
+    const next = at < 0 ? undefined : [...listOrder.slice(at + 1), ...listOrder.slice(0, at).reverse()].find((id) => shown.has(id));
+    state.listSel[kind] = next ?? order[0]?.id ?? null;
+  }
   listOrder = order.map((i) => i.id);
   const sel = order.find((i) => i.id === state.listSel[kind]);
   // The rows were built before the first one was picked: mark it now, so the list shows what the pane does.
@@ -1932,9 +1934,10 @@ const details = new Map<string, Detail>();           // reading pane content, by
 const paneDrafts = new Map<string, string>();
 let rebuilding = false;        // render() is replacing the page
 
-/** A field lost focus because you left it, not because a re-render removed it. */
-function left(e: Event): boolean {
-  return !rebuilding && (e.target as Element).isConnected;
+/** A field lost focus because you left it: not because a re-render removed it, and not because you
+ *  switched to another app (the field gets the focus back when you return). */
+function isLeaving(e: Event): boolean {
+  return !rebuilding && (e.target as Element).isConnected && document.hasFocus();
 }
 
 /** Open the title or description editor with ``text``, cursor at the end. */
@@ -1946,7 +1949,7 @@ function openEdit(key: string, text: string) {
   el?.setSelectionRange(el.value.length, el.value.length);
 }
 
-interface PaneKeep { edit: string | null; start: number | null; end: number | null; pane: string | null; scroll: number }
+interface PaneKeep { edit: string | null; start: number | null; end: number | null; ident: string | null; scroll: number }
 
 /** Before a re-render: the pane field holding the cursor, and how far the reading pane is scrolled. */
 function paneKeep(): PaneKeep {
@@ -1954,13 +1957,13 @@ function paneKeep(): PaneKeep {
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
   const edit = a?.dataset?.edit ?? null;
   return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null,
-    pane: pane?.getAttribute("aria-label") ?? null, scroll: pane?.scrollTop ?? 0 };
+    ident: pane?.getAttribute("aria-label") ?? null, scroll: pane?.scrollTop ?? 0 };
 }
 
 /** After a re-render: the same field gets the cursor back, and the same issue's pane its scroll. */
 function paneRestore(k: PaneKeep) {
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
-  if (pane && k.pane && pane.getAttribute("aria-label") === k.pane) pane.scrollTop = k.scroll;
+  if (pane && k.ident && pane.getAttribute("aria-label") === k.ident) pane.scrollTop = k.scroll;
   if (!k.edit) return;
   const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-edit="${CSS.escape(k.edit)}"]`);
   if (!el) return;
@@ -1980,29 +1983,34 @@ function titleField(i: Issue, tag: "h2" | "h3"): HTMLElement {
   const key = `${i.id}:title`;
   const draft = paneDrafts.get(key);
   if (draft === undefined) {
-    return h(tag, { class: "pane-title", "data-pane": "title", title: "Rename (e)", onclick: () => openEdit(key, i.title) }, i.title);
+    return h(tag, { class: "pane-title", "data-pane": "title", title: "Rename (e)", onclick: () => { if (!window.getSelection()?.toString()) openEdit(key, i.title); } }, i.title);
   }
   return h(tag, { class: "pane-title editing" }, h("input", {
     class: "pane-title-input", value: draft, maxLength: 200, readOnly: state.busy.has(key), "aria-label": "Title", "data-edit": key,
     oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); },
     onkeydown: (e: KeyboardEvent) => {
-      if (e.key === "Enter") { e.preventDefault(); void saveTitle(i); }
+      if (e.key === "Enter") { e.preventDefault(); void saveTitle(i, tag, e.target as HTMLInputElement); }
       if (e.key === "Escape") { e.stopPropagation(); paneDrafts.delete(key); render(); }
     },
-    onblur: (e: Event) => { if (left(e)) void saveTitle(i); },
+    onblur: (e: Event) => { if (isLeaving(e)) void saveTitle(i, tag, e.target as HTMLInputElement); },
   }));
 }
 
-async function saveTitle(i: Issue) {
+async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLInputElement) {
   const key = `${i.id}:title`;
   const title = paneDrafts.get(key)?.trim();
   if (title === undefined || state.busy.has(key)) return;
-  if (title && title !== i.title) {            // an empty title reverts
-    state.busy.add(key);
-    render();
-    await editIssue(i, { title });
-    state.busy.delete(key);
+  if (!title || title === i.title) {          // unchanged or empty: close the editor where it sits
+    paneDrafts.delete(key);
+    input.closest(".pane-title")?.replaceWith(titleField(i, tag));
+    return;
   }
+  // No render() before the request: this can run from a blur, and rebuilding the page under the
+  // pointer would swallow the click that moved the focus. editIssue renders when Linear answers.
+  state.busy.add(key);
+  input.readOnly = true;
+  await editIssue(i, { title });
+  state.busy.delete(key);
   paneDrafts.delete(key);
   render();
 }
@@ -2672,7 +2680,7 @@ function wrapStage(i: Issue, ctx: TodayCtx): Child[] {
   };
   return [
     stageTop(i, ""),
-    titleField(i, "h2"),
+    isOpen(i) ? titleField(i, "h2") : h("h2", {}, i.title),
     a?.why ? h("p", { class: "td-why" }, a.why) : "",
     a?.action === "ask" && a.message && !decided ? draftBox(a.message, "Drafted by Claude") : "",
     decided ? h("p", { class: "td-okline" }, checkIcon(), decided)
