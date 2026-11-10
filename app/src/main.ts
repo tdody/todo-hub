@@ -13,7 +13,7 @@ import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskA
 import type { Category } from "./avatars";
 
 applyTheme();
-import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
+import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, SubIssue, Subtask, TodayItem } from "./api";
 
 type Tab = "inbox" | "today" | "client" | "dev" | "insights" | "settings";
 
@@ -2080,19 +2080,206 @@ function detailBody(id: string): HTMLElement {
   const i = d?.issue;
   if (!i) return h("div", { class: "tl-detail", "data-id": id },
     h("p", { class: "muted small" }, d?.error ? `Couldn't load the details: ${d.error}` : "Loading…"));
+  return h("div", { class: "tl-detail", "data-id": id }, descriptionSection(i), subIssuesSection(i), commentsSection(i));
+}
+
+/** Rows for a description box: one per line (about 70 characters a row), between 4 and 24. */
+function rowsFor(text: string): number {
+  const rows = text.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / 70)), 0);
+  return Math.min(24, Math.max(4, rows + 1));
+}
+
+/** The description as Markdown. Click it (not a link or image) or press ⇧E to edit the Markdown in
+ *  place; leaving the box, ⌘↵ or Esc saves. A description cut off at the pane's limit is edited in Linear. */
+function descriptionSection(i: IssuePreview): HTMLElement {
+  const key = `${i.id}:description`;
+  const head = h("h4", {}, "Description");
+  const draft = paneDrafts.get(key);
+  if (draft !== undefined) {
+    const busy = state.busy.has(key);
+    return h("section", {}, head,
+      h("textarea", {
+        class: "desc-input", value: draft, rows: rowsFor(draft), readOnly: busy, "aria-label": "Description", "data-edit": key,
+        oninput: (e: Event) => {
+          const el = e.target as HTMLTextAreaElement;
+          paneDrafts.set(key, el.value);
+          el.rows = rowsFor(el.value);
+        },
+        onkeydown: (e: KeyboardEvent) => {
+          if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
+            e.preventDefault();
+            e.stopPropagation();
+            void saveDescription(i, e.target as HTMLTextAreaElement);
+          }
+        },
+        onblur: (e: Event) => { if (isLeaving(e)) void saveDescription(i, e.target as HTMLTextAreaElement); },
+      }),
+      h("p", { class: "muted small" }, busy ? "Saving…" : "Markdown. Saves when you leave the box (or ⌘↵)."));
+  }
+  const text = () => renderMarkdown(i.description, { image: linearImageNode });
+  if (i.description_truncated) {
+    return h("section", {}, head, h("div", { class: "tl-desc md" }, ...text()), link("Edit in Linear ↗", i.url, "link small"));
+  }
+  const open = (e: Event) => {
+    if ((e.target as HTMLElement).closest("a, img") || window.getSelection()?.toString()) return;
+    openEdit(key, i.description);
+  };
+  return h("section", {}, head, i.description.trim()
+    ? h("div", { class: "tl-desc md editable", "data-pane": "description", title: "Edit (⇧E)", onclick: open }, ...text())
+    : h("button", { class: "add-text", "data-pane": "description", onclick: open }, "Add a description"));
+}
+
+async function saveDescription(i: IssuePreview, box: HTMLTextAreaElement) {
+  const key = `${i.id}:description`;
+  const text = paneDrafts.get(key);
+  if (text === undefined || state.busy.has(key)) return;
+  if (text.trim() === i.description.trim()) {     // unchanged: close the editor where it sits
+    paneDrafts.delete(key);
+    box.closest("section")?.replaceWith(descriptionSection(i));
+    return;
+  }
+  // No render() before the request (see saveTitle): this can run from a blur.
+  state.busy.add(key);
+  box.readOnly = true;
+  box.nextElementSibling?.replaceChildren("Saving…");
+  const saved = await editIssue(i, { description: text });
+  state.busy.delete(key);
+  if (saved) paneDrafts.delete(key);          // a failed save keeps the box open with your text
+  render();
+}
+
+/** The issue's sub-issues from Linear, done ones too. Tick one to mark it done (untick: back to
+ *  Todo); a sub-issue in another team shows its status without a box. Type in "Add sub-issue"
+ *  (⇧S) and press Enter; the box stays ready for the next. */
+function subIssuesSection(i: IssuePreview): HTMLElement {
+  const today = localToday();
+  const key = `${i.id}:sub`;
+  const subs = i.sub_issues;
+  return h("section", {},
+    subs.length ? h("h4", {}, `Sub-issues · ${subs.length}`) : "",
+    subs.length ? h("ul", { class: "tl-subs" }, ...subs.map((s) => {
+      const done = s.state.type === "completed";
+      return h("li", { class: done ? "done" : "" },
+        s.own_team
+          ? h("input", { type: "checkbox", checked: done, title: done ? "Reopen" : "Mark done",
+              "aria-label": `${done ? "Reopen" : "Mark done"}: ${s.identifier}`, onchange: () => void tickSubIssue(i, s) })
+          : h("span", { class: "sub-gap", "aria-hidden": "true" }),
+        link(s.identifier, s.url, "ident"),
+        h("span", { class: "dtitle" }, s.title),
+        !done && s.due_date && s.due_date < today
+          ? h("span", { class: "late small" }, dueLabel(s.due_date, today).replace("overdue", "late")) : "",
+        h("span", { class: "muted small" }, s.assignee && s.assignee !== i.assignee ? `${s.state.name} · ${s.assignee}` : s.state.name));
+    })) : "",
+    h("input", {
+      class: "sub-add", placeholder: "+ Add sub-issue", value: paneDrafts.get(key) ?? "", readOnly: state.busy.has(key),
+      "aria-label": `Add a sub-issue to ${i.identifier}`, "data-pane": "sub", "data-edit": key,
+      oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); },
+      onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void addSubIssue(i); } },
+    }));
+}
+
+/** Tick: the team's first done status, as Mark done uses; untick: its first not-started one (Todo). */
+async function tickSubIssue(parent: IssuePreview, sub: SubIssue) {
+  const done = sub.state.type !== "completed";
+  const to = state.meta?.states.find((s) => s.type === (done ? "completed" : "unstarted"));
+  if (!to) { toast(`Couldn't find a ${done ? "done" : "to-do"} status for this team`); render(); return; }
+  if (done) state.briefAt = 0;               // the wrap-up's "done today" should include it
+  const reload = async () => { loadDetail(parent.id, true); await loadIssues().catch(() => undefined); };
+  try {
+    await api.editIssue(sub.id, { state_id: to.id });
+    offerUndo(`${sub.identifier} ${done ? "done" : `moved to ${to.name}`}`, `${sub.identifier} back to ${sub.state.name}`, async () => {
+      await api.editIssue(sub.id, { state_id: sub.state.id });
+      await reload();
+    });
+    await reload();
+  } catch (e) {
+    fail(e);
+  }
+  render();
+}
+
+async function addSubIssue(parent: IssuePreview) {
+  const key = `${parent.id}:sub`;
+  const title = paneDrafts.get(key)?.trim();
+  if (!title || state.busy.has(key)) return;
+  state.busy.add(key);
+  render();
+  try {
+    const sub = await api.addSubIssue(parent.id, title);
+    paneDrafts.delete(key);
+    state.issues = [sub, ...state.issues];
+    loadDetail(parent.id, true);
+    offerUndo(`${sub.identifier} added under ${parent.identifier}`, `${sub.identifier} deleted`, async () => {
+      await api.deleteIssue(sub.id);
+      state.issues = state.issues.filter((x) => x.id !== sub.id);
+      loadDetail(parent.id, true);
+    });
+  } catch (e) {
+    fail(e);                                   // the title stays in the box
+  } finally {
+    state.busy.delete(key);
+    render();
+  }
+}
+
+const COMMENT_MAX = 2000;      // the backend's limit, the same as an Inbox comment
+
+/** A box to comment as you (⇧C; ⌘↵ posts), then the latest comments, newest first. */
+function commentsSection(i: IssuePreview): HTMLElement {
+  const key = `${i.id}:comment`;
+  const busy = state.busy.has(key);
+  const count = h("span", { class: "small" });
+  const showCount = (text: string) => {
+    const room = COMMENT_MAX - text.length;
+    count.textContent = room <= 200 ? String(room) : "";
+    count.className = `small ${room < 0 ? "late" : "muted"}`;
+  };
+  const draft = paneDrafts.get(key) ?? "";
+  showCount(draft);
   const shown = [...i.comments].sort((x, y) => (y.created_at ?? "").localeCompare(x.created_at ?? ""));
   const older = i.comment_count - shown.length;
-  return h("div", { class: "tl-detail", "data-id": id },
-    h("section", {}, h("h4", {}, "Description"),
-      i.description.trim() ? h("div", { class: "tl-desc md" }, ...renderMarkdown(i.description, { image: linearImageNode }),
-        i.description_truncated ? link("More in Linear ↗", i.url, "link small") : "")
-        : h("p", { class: "muted small" }, "No description.")),
-    h("section", {}, h("h4", {}, `Comments${i.comment_count ? ` · ${i.comment_count}` : ""}`),
-      shown.length ? h("div", {}, ...shown.map((c) => h("div", { class: "tl-comment" },
-        h("span", {}, h("b", {}, c.author), " ", h("span", { class: "muted small" }, c.created_at ? when(c.created_at) : "")),
-        h("div", { class: "tl-comment-body md" }, ...renderMarkdown(c.body, { image: linearImageNode }))))) : h("p", { class: "muted small" }, "No comments."),
-      older > 0 ? link(`${older} older in Linear ↗`, i.url, "link small") : ""),
-  );
+  return h("section", {}, h("h4", {}, `Comments${i.comment_count ? ` · ${i.comment_count}` : ""}`),
+    h("div", { class: "comment-box" },
+      h("textarea", {
+        class: "comment-input", rows: 2, placeholder: "Comment…", value: draft, readOnly: busy,
+        "aria-label": `Comment on ${i.identifier}`, "data-pane": "comment", "data-edit": key,
+        oninput: (e: Event) => {
+          const v = (e.target as HTMLTextAreaElement).value;
+          paneDrafts.set(key, v);
+          showCount(v);
+        },
+        onkeydown: (e: KeyboardEvent) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void postComment(i); }
+        },
+      }),
+      h("span", { class: "comment-hint muted small" }, busy ? "Posting…" : "⌘↵ posts it, as you", count)),
+    shown.length ? h("div", {}, ...shown.map((c) => h("div", { class: "tl-comment" },
+      h("span", {}, h("b", {}, c.author), " ", h("span", { class: "muted small" }, c.created_at ? when(c.created_at) : "")),
+      h("div", { class: "tl-comment-body md" }, ...renderMarkdown(c.body, { image: linearImageNode }))))) : "",
+    older > 0 ? link(`${older} older in Linear ↗`, i.url, "link small") : "");
+}
+
+async function postComment(i: IssuePreview) {
+  const key = `${i.id}:comment`;
+  const body = paneDrafts.get(key)?.trim();
+  if (!body || body.length > COMMENT_MAX || state.busy.has(key)) return;
+  state.busy.add(key);
+  render();
+  try {
+    const { id } = await api.addComment(i.id, body);
+    paneDrafts.delete(key);
+    loadDetail(i.id, true);
+    offerUndo(`Comment posted on ${i.identifier}`, `comment on ${i.identifier} deleted`, async () => {
+      await api.deleteComment(id);
+      paneDrafts.set(key, body);               // back in the box, to fix and post again
+      loadDetail(i.id, true);
+    });
+  } catch (e) {
+    fail(e);                                   // the text stays in the box
+  } finally {
+    state.busy.delete(key);
+    render();
+  }
 }
 
 // ---- Today: one list, read in three moments ----------------------------------------------------
@@ -2886,10 +3073,8 @@ function todayView(): HTMLElement {
  *  the title, one row with status, priority and due date, then Block time (on Today) or Add to
  *  Today, and ⋯; below, sub-issues, the description and the latest comments. */
 function issuePane(i: Issue): HTMLElement {
-  const today = state.brief?.day ?? isoDay(new Date());
   const t = state.today.find((x) => x.issue_id === i.id);
   loadDetail(i.id);
-  const subs = state.issues.filter((x) => x.parent?.id === i.id);
   const more = h("details", { class: "drop-menu pane-menu" },
     h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
     h("div", { class: "menu" },
@@ -2909,11 +3094,6 @@ function issuePane(i: Issue): HTMLElement {
       t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
         onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
       more),
-    subs.length ? h("section", {}, h("h4", {}, `Sub-issues · ${subs.length}`),
-      h("ul", { class: "tl-subs" }, ...subs.map((x) => h("li", {}, link(x.identifier, x.url, "ident"),
-        h("span", { class: "dtitle" }, x.title),
-        x.due_date && x.due_date < today ? h("span", { class: "late small" }, dueLabel(x.due_date, today).replace("overdue", "late")) : "",
-        h("span", { class: "muted small" }, x.state.name))))) : "",
     detailBody(i.id),
   );
 }
