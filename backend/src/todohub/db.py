@@ -486,6 +486,14 @@ class DB:
         with self.connect() as c:
             c.execute("UPDATE mute_rules SET blocked = blocked + 1, last_blocked_at = ? WHERE id = ?", (now_iso(), rule_id))
 
+    def list_decided(self, since_iso: str, limit: int = 300) -> list[dict]:
+        """Approved and dropped candidates decided since ``since_iso``, latest decision first."""
+        with self.connect() as c:
+            rows = c.execute(
+                f"SELECT {', '.join(CANDIDATE_FIELDS)} FROM candidates WHERE status IN ('approved', 'dropped') "
+                "AND decided_at >= ? ORDER BY decided_at DESC, id DESC LIMIT ?", (since_iso, limit)).fetchall()
+        return [_row(r) for r in rows]
+
     def decided_since(self, source: str, since_iso: str) -> list[dict]:
         """Approved and dropped candidates from one source, decided since ``since_iso``."""
         with self.connect() as c:
