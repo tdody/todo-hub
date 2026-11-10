@@ -385,7 +385,7 @@ class Linear:
             raise LinearError("Linear did not remove the link.")
 
     def issue_preview(self, id_or_identifier: str) -> dict:
-        """An issue with its description, assignee and recent comments, for a quick look."""
+        """An issue with its description, assignee, recent comments and sub-issues, for a quick look."""
         data = self.gql(
             f"""
             query($id: String!) {{
@@ -394,6 +394,7 @@ class Linear:
                 description createdAt
                 assignee {{ name }}
                 comments(first: 50) {{ nodes {{ body createdAt user {{ name }} }} }}
+                children(first: 50) {{ nodes {{ {ISSUE_FIELDS} assignee {{ name }} }} }}
               }}
             }}
             """,
@@ -404,7 +405,8 @@ class Linear:
         return data["issue"]
 
     def update_issue(self, issue_id: str, changes: dict) -> dict:
-        """``changes`` uses Linear's field names: stateId, priority, dueDate (None clears it)."""
+        """``changes`` uses Linear's IssueUpdateInput names: stateId, priority, dueDate, title, description,
+        projectId, addedLabelIds, removedLabelIds. None clears a field."""
         data = self.gql(
             f"""
             mutation($id: String!, $input: IssueUpdateInput!) {{
@@ -419,12 +421,14 @@ class Linear:
         return result["issue"]
 
 
+def client_labels(issue: dict, client_group: str) -> list[dict]:
+    """The issue's labels in the client label group (normally one)."""
+    return [l for l in issue["labels"]["nodes"] if (l.get("parent") or {}).get("name") == client_group]
+
+
 def client_label_of(issue: dict, client_group: str) -> str | None:
-    for label in issue["labels"]["nodes"]:
-        parent = label.get("parent")
-        if parent and parent["name"] == client_group:
-            return label["name"]
-    return None
+    found = client_labels(issue, client_group)
+    return found[0]["name"] if found else None
 
 
 def shape_issue(issue: dict, settings: Settings) -> dict:

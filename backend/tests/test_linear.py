@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from todohub.config import Settings
-from todohub.linear import Linear, LinearError, shape_issue
+from todohub.linear import Linear, LinearError, client_labels, shape_issue
 from conftest import make_issue
 
 
@@ -149,3 +149,9 @@ def test_delete_and_restore_issue():
     assert sent[1]["variables"] == {"id": "i1"}
     with pytest.raises(LinearError):
         linear.restore_issue("bad")
+
+
+def test_client_labels_are_the_ones_in_the_client_group():
+    issue = make_issue("ENG-1", "Rebin Globex grades", client="Globex")
+    assert [l["id"] for l in client_labels(issue, "client")] == ["l-Globex"]
+    assert client_labels(make_issue("ENG-2", "Fix the copy"), "client") == []
