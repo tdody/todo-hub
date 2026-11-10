@@ -638,7 +638,7 @@ git commit -m "App API: issue edits, sub-issues, comments" -m "Co-Authored-By: C
 **Files:**
 - Modify: `app/src/main.ts`
 
-Why this exists: `render()` rebuilds the whole page (`main.replaceChildren`) after most actions, when a sweep finishes, and when async loads land. A field built from the DOM alone would lose its text and focus. So unsaved text lives in `paneDrafts`, the fields are rebuilt from it, and `render()` hands the cursor back. A field that loses focus to a re-render must not save: `left(e)` tells the two apart (`rebuilding` covers a blur during the rebuild; `isConnected` covers a blur fired after the node was removed).
+Why this exists: `render()` rebuilds the whole page (`main.replaceChildren`) after most actions, when a sweep finishes, and when async loads land. A field built from the DOM alone would lose its text and focus. So unsaved text lives in `paneDrafts`, the fields are rebuilt from it, and `render()` hands the cursor back. A field that loses focus to a re-render, or to a switch to another app, must not save: `isLeaving(e)` tells them apart (`rebuilding` covers a blur during the rebuild, `isConnected` a blur fired after the node was removed, `document.hasFocus()` an app switch). A save that starts from a blur never calls `render()` before its request, or the click that moved the focus would be lost.
 
 - [ ] **Step 1: Imports**
 
@@ -662,9 +662,10 @@ Immediately after those two lines, add:
 const paneDrafts = new Map<string, string>();
 let rebuilding = false;        // render() is replacing the page
 
-/** A field lost focus because you left it, not because a re-render removed it. */
-function left(e: Event): boolean {
-  return !rebuilding && (e.target as Element).isConnected;
+/** A field lost focus because you left it: not because a re-render removed it, and not because you
+ *  switched to another app (the field gets the focus back when you return). */
+function isLeaving(e: Event): boolean {
+  return !rebuilding && (e.target as Element).isConnected && document.hasFocus();
 }
 
 /** Open the title or description editor with ``text``, cursor at the end. */
@@ -836,23 +837,28 @@ function titleField(i: Issue, tag: "h2" | "h3"): HTMLElement {
     class: "pane-title-input", value: draft, maxLength: 200, readOnly: state.busy.has(key), "aria-label": "Title", "data-edit": key,
     oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); },
     onkeydown: (e: KeyboardEvent) => {
-      if (e.key === "Enter") { e.preventDefault(); void saveTitle(i); }
+      if (e.key === "Enter") { e.preventDefault(); void saveTitle(i, tag, e.target as HTMLInputElement); }
       if (e.key === "Escape") { e.stopPropagation(); paneDrafts.delete(key); render(); }
     },
-    onblur: (e: Event) => { if (left(e)) void saveTitle(i); },
+    onblur: (e: Event) => { if (isLeaving(e)) void saveTitle(i, tag, e.target as HTMLInputElement); },
   }));
 }
 
-async function saveTitle(i: Issue) {
+async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLInputElement) {
   const key = `${i.id}:title`;
   const title = paneDrafts.get(key)?.trim();
   if (title === undefined || state.busy.has(key)) return;
-  if (title && title !== i.title) {            // an empty title reverts
-    state.busy.add(key);
-    render();
-    await editIssue(i, { title });
-    state.busy.delete(key);
+  if (!title || title === i.title) {          // unchanged or empty: close the editor where it sits
+    paneDrafts.delete(key);
+    input.closest(".pane-title")?.replaceWith(titleField(i, tag));
+    return;
   }
+  // No render() before the request: this can run from a blur, and rebuilding the page under the
+  // pointer would swallow the click that moved the focus. editIssue renders when Linear answers.
+  state.busy.add(key);
+  input.readOnly = true;
+  await editIssue(i, { title });
+  state.busy.delete(key);
   paneDrafts.delete(key);
   render();
 }
@@ -996,10 +1002,10 @@ function descriptionSection(i: IssuePreview): HTMLElement {
           if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
             e.preventDefault();
             e.stopPropagation();
-            void saveDescription(i);
+            void saveDescription(i, e.target as HTMLTextAreaElement);
           }
         },
-        onblur: (e: Event) => { if (left(e)) void saveDescription(i); },
+        onblur: (e: Event) => { if (isLeaving(e)) void saveDescription(i, e.target as HTMLTextAreaElement); },
       }),
       h("p", { class: "muted small" }, busy ? "Saving…" : "Markdown. Saves when you leave the box (or ⌘↵)."));
   }
@@ -1016,13 +1022,19 @@ function descriptionSection(i: IssuePreview): HTMLElement {
     : h("button", { class: "add-text", "data-pane": "description", onclick: open }, "Add a description"));
 }
 
-async function saveDescription(i: IssuePreview) {
+async function saveDescription(i: IssuePreview, box: HTMLTextAreaElement) {
   const key = `${i.id}:description`;
   const text = paneDrafts.get(key);
   if (text === undefined || state.busy.has(key)) return;
-  if (text.trim() === i.description.trim()) { paneDrafts.delete(key); render(); return; }
+  if (text.trim() === i.description.trim()) {     // unchanged: close the editor where it sits
+    paneDrafts.delete(key);
+    box.closest("section")?.replaceWith(descriptionSection(i));
+    return;
+  }
+  // No render() before the request (see saveTitle): this can run from a blur.
   state.busy.add(key);
-  render();
+  box.readOnly = true;
+  box.nextElementSibling?.replaceChildren("Saving…");
   const saved = await editIssue(i, { description: text });
   state.busy.delete(key);
   if (saved) paneDrafts.delete(key);          // a failed save keeps the box open with your text
