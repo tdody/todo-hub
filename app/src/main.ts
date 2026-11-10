@@ -1422,14 +1422,17 @@ function listItem(kind: "client" | "dev", i: Issue, showGroupField: "client" | "
 /** The list on the left and the selected issue in the reading pane, for Client and Dev (both
  *  groupings). ``order`` is the issues as shown, for j/k and for picking the first one. */
 function listWithPane(kind: "client" | "dev", groups: (Node | string)[], order: Issue[]): HTMLElement {
-  // The selected issue left the list (moved, closed, deleted, filtered out): select the one after it.
+  const view = `${kind}|${state.pickedProject ?? ""}|${state.pickedClient ?? ""}|${state.filter}`;
+  // The selected issue left this list (moved, closed, deleted): select the one after it. In another
+  // view (a project, a client, a filter) start from the top.
   if (!order.some((i) => i.id === state.listSel[kind])) {
     const shown = new Set(order.map((i) => i.id));
-    const at = listOrder.indexOf(state.listSel[kind] ?? "");
-    const next = at < 0 ? undefined : [...listOrder.slice(at + 1), ...listOrder.slice(0, at).reverse()].find((id) => shown.has(id));
+    const at = listOrder.view === view ? listOrder.ids.indexOf(state.listSel[kind] ?? "") : -1;
+    const next = at < 0 ? undefined
+      : [...listOrder.ids.slice(at + 1), ...listOrder.ids.slice(0, at).reverse()].find((id) => shown.has(id));
     state.listSel[kind] = next ?? order[0]?.id ?? null;
   }
-  listOrder = order.map((i) => i.id);
+  listOrder = { view, ids: order.map((i) => i.id) };
   const sel = order.find((i) => i.id === state.listSel[kind]);
   // The rows were built before the first one was picked: mark it now, so the list shows what the pane does.
   for (const g of groups) {
@@ -1445,7 +1448,7 @@ function listWithPane(kind: "client" | "dev", groups: (Node | string)[], order: 
     sel ? issuePane(sel) : h("section", { class: "tl-pane" }, h("p", { class: "muted" }, "Pick an issue to read it here.")));
 }
 
-let listOrder: string[] = [];
+let listOrder = { view: "", ids: [] as string[] };   // the list as last shown, for j/k and the next row
 
 /** A group's heading in Client, Dev and Today: the client's logo (a project initial, a status dot,
  *  or nothing on Today), the name in bold, a short summary ("8 open · 2 late · 1 due today"), then
@@ -1463,9 +1466,9 @@ function groupHead(name: string, lead: Node | "", issues: Issue[], action: Node 
 /** ↑/↓ (or j/k) in Client and Dev. */
 function stepList(delta: number) {
   const kind = state.tab as "client" | "dev";
-  if (!listOrder.length) return;
-  const cur = listOrder.indexOf(state.listSel[kind] ?? "");
-  state.listSel[kind] = listOrder[Math.max(0, Math.min(listOrder.length - 1, cur < 0 ? 0 : cur + delta))];
+  if (!listOrder.ids.length) return;
+  const cur = listOrder.ids.indexOf(state.listSel[kind] ?? "");
+  state.listSel[kind] = listOrder.ids[Math.max(0, Math.min(listOrder.ids.length - 1, cur < 0 ? 0 : cur + delta))];
   render();
   document.querySelector(".ll-item.sel")?.scrollIntoView({ block: "nearest" });
 }
