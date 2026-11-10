@@ -2,9 +2,9 @@
 // dates, sweep history). Weekly digest: one week written out (backend digest.py).
 import { api, ApiError } from "./api";
 import type { ApprovalStats, BalanceStats, Digest, Run, Slips } from "./api";
-import { h, link, modal, svg } from "./dom";
+import { h, link, modal, pageHead, svg } from "./dom";
 
-type GoTab = (tab: "inbox" | "client" | "dev") => void;
+type GoTab = (tab: "inbox" | "client" | "dev", highlight?: string[]) => void;
 
 function loadPref(key: string): string | null {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -149,7 +149,7 @@ function runsTable(runs: Run[]): Node {
       const note = r.error ?? (failed.length ? `Problem: ${failed.join(", ")}` : "");
       return h("tr", {},
         h("td", {}, new Date(r.started_at!).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })),
-        h("td", {}, r.trigger === "schedule" ? "Scheduled" : r.trigger === "capture" ? "Capture" : "Run now"),
+        h("td", {}, TRIGGER_NAME[r.trigger ?? "manual"] ?? "Run now"),
         h("td", { class: `run-${r.status}` }, r.status === "ok" ? "OK" : r.status === "running" ? "Running" : "Failed"),
         h("td", { class: "num" }, String(r.added ?? 0)),
         h("td", { class: "num" }, r.cost_usd != null ? `$${r.cost_usd.toFixed(2)}` : "–"),
@@ -161,9 +161,11 @@ function runsTable(runs: Run[]): Node {
   );
 }
 
-/** Average cost of a sweep (not captures) over the last 7 days against the 7 before. */
+const TRIGGER_NAME: Record<string, string> = { schedule: "Scheduled", manual: "Run now", capture: "Capture", plan: "Re-plan", wrapup: "Wrap-up" };
+
+/** Average cost of a sweep (not captures, re-plans or wrap-up redos) over the last 7 days against the 7 before. */
 function sweepCostTrend(runs: Run[], ageDays: (r: Run) => number): string {
-  const sweeps = runs.filter((r) => r.trigger !== "capture" && r.status === "ok" && r.cost_usd != null);
+  const sweeps = runs.filter((r) => (r.trigger === "schedule" || r.trigger === "manual") && r.status === "ok" && r.cost_usd != null);
   const avg = (rs: Run[]) => rs.reduce((n, r) => n + r.cost_usd!, 0) / rs.length;
   const now = sweeps.filter((r) => ageDays(r) < 7);
   const before = sweeps.filter((r) => ageDays(r) >= 7 && ageDays(r) < 14);
@@ -203,7 +205,7 @@ function slipsPanel(s: Slips | null): Node | "" {
           h("td", { class: "num" }, `${x.count}×`),
           h("td", { class: "num" }, String(x.days)),
           h("td", {}, day(x.due_date))))))) : "",
-    clients.length ? h("div", {}, h("h3", {}, "By client"),
+    clients.length ? more("slips-client", "By client",
       h("table", { class: "stats" },
         h("thead", {}, h("tr", {}, h("th", {}, "Client"), h("th", { class: "num" }, "Issues pushed"),
           h("th", { class: "num" }, "Times"), h("th", { class: "num" }, "Days"))),
@@ -250,7 +252,9 @@ function overview(rerender: () => void): HTMLElement {
   const shareOff = doneNow >= 3 && thisWeek.client_share !== null && Math.abs(thisWeek.client_share - b.target) >= 0.15;
   const slipped = cache.slips && !cache.slips.error ? Object.values(cache.slips.slips) : null;
   const repeat = slipped?.filter((x) => x.count >= 2).length ?? null;
-  const sweepsNow = lastWeek.filter((r) => r.trigger !== "capture");
+  const sweepsNow = lastWeek.filter((r) => r.trigger === "schedule" || r.trigger === "manual");
+  const capturesNow = lastWeek.filter((r) => r.trigger === "capture").length;
+  const extraNow = lastWeek.length - sweepsNow.length - capturesNow;     // re-plans and wrap-up redos
 
   return h("div", { class: "insights" },
     cache.error ? h("div", { class: "banner error" }, cache.error) : "",
@@ -271,9 +275,10 @@ function overview(rerender: () => void): HTMLElement {
         "Open issues whose due date was moved later at least twice. Setting a first date, clearing it, or moving it earlier doesn't count.",
         "panel-slips", repeat ? "warn" : ""),
       tile("Sweep cost, 7 days", `$${cost.toFixed(2)}`,
-        `${sweepsNow.length} sweep${sweepsNow.length === 1 ? "" : "s"}, ${lastWeek.length - sweepsNow.length} capture${lastWeek.length - sweepsNow.length === 1 ? "" : "s"}`,
-        "What the sweeps and captures of the last 7 days cost, at list price.",
-        "panel-runs"),
+        `${sweepsNow.length} sweep${sweepsNow.length === 1 ? "" : "s"}, ${capturesNow} capture${capturesNow === 1 ? "" : "s"}`
+          + (extraNow ? `, ${extraNow} other` : ""),
+        "What the sweeps, captures, re-plans and wrap-up redos of the last 7 days cost, at list price. Click for the sweep history.",
+        () => void showSweepHistory()),
     ),
     h("section", { class: "panel", id: "panel-balance" },
       h("h2", {}, "Client vs dev"),
@@ -293,27 +298,23 @@ function overview(rerender: () => void): HTMLElement {
         ? `${pct(allNow.rate)} of the candidates you decided this week were kept (${allNow.approved} of ${allNow.approved + allNow.dropped}).`
         : "No decisions this week yet."),
       approvalChart(a),
-      h("div", { class: "two-col" },
-        h("div", {}, h("h3", {}, "By source, last 4 weeks"), approvalTable(a)),
-        h("div", {}, h("h3", {}, "Why you dropped, 8 weeks"), reasonBars(a)),
-      ),
+      more("approval", "By source and why you dropped",
+        h("div", { class: "two-col" },
+          h("div", {}, h("h3", {}, "By source, last 4 weeks"), approvalTable(a)),
+          h("div", {}, h("h3", {}, "Why you dropped, 8 weeks"), reasonBars(a)),
+        )),
       h("p", { class: "muted small" }, "Approved ÷ (approved + dropped), for candidates decided that week. Captured notes aren't counted."),
     ),
     slipsPanel(cache.slips ?? null),
-    h("section", { class: "panel", id: "panel-runs" },
-      h("h2", {}, "Sweep history"),
-      h("p", { class: "lead" }, `Last 7 days: ${lastWeek.length} runs, $${cost.toFixed(2)} at list price.`,
-        sweepCostTrend(cache.runs, ageDays)),
-      runsTable(cache.runs.slice(0, 30)),
-    ),
   );
 }
 
 /** A stat tile; clicking it scrolls to the panel with the detail. The tooltip says how it's counted. */
-function tile(label: string, value: string, sub: string, definition: string, target: string, tone = ""): HTMLElement {
+function tile(label: string, value: string, sub: string, definition: string, target: string | (() => void), tone = ""): HTMLElement {
   return h("button", {
     class: `tile ${tone}`, title: definition,
-    onclick: () => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    onclick: typeof target === "function" ? target
+      : () => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" }),
   }, h("span", { class: "tile-label" }, label), h("b", { class: "tile-value" }, value),
     sub ? h("span", { class: "tile-sub" }, sub) : "");
 }
@@ -417,7 +418,7 @@ function digestView(rerender: () => void, go: GoTab): HTMLElement {
       ...d.recommendations.map((r) => h("div", { class: "rec" }, h("span", {}, r.text),
         r.action === "open"
           ? link(r.label, r.url ?? null, "ghost-link")
-          : h("button", { class: "ghost small-btn", onclick: () => go(r.tab!) }, r.label)))) : "",
+          : h("button", { class: "ghost small-btn", onclick: () => go(r.tab!, r.issues) }, r.label)))) : "",
 
     h("div", { class: "digest-foot" },
       h("button", { class: "ghost", onclick: () => { mode = "overview"; savePref("todohub.insightsView", mode); rerender(); } },
@@ -436,17 +437,40 @@ function digestView(rerender: () => void, go: GoTab): HTMLElement {
   );
 }
 
+/** The sweep history, in a dialog: opened from "Sweep history →" in the sources popover and from
+ *  the sweep-cost tile. Runs of the last 7 days with their cost, then the latest 30 runs. */
+export async function showSweepHistory() {
+  let runs = cache.runs;
+  if (!runs || Date.now() - cache.at > 60_000) {
+    try {
+      runs = await api.runs(150);
+    } catch (e) {
+      modal("Sweep history", h("p", {}, e instanceof ApiError ? e.message : String(e)));
+      return;
+    }
+  }
+  const ageDays = (r: Run) => (Date.now() - Date.parse(r.started_at!)) / 864e5;
+  const lastWeek = runs.filter((r) => ageDays(r) < 7);
+  const cost = lastWeek.reduce((n, r) => n + (r.cost_usd ?? 0), 0);
+  modal("Sweep history", h("div", { class: "history" },
+    h("p", { class: "lead" }, `Last 7 days: ${lastWeek.length} runs, $${cost.toFixed(2)} at list price.`, sweepCostTrend(runs, ageDays)),
+    runsTable(runs.slice(0, 30))), [], "wide");
+}
+
+/** Details under a panel, folded by default; stays open across refreshes once opened. */
+const opened = new Set<string>();
+function more(id: string, label: string, ...children: (Node | "")[]): HTMLElement {
+  return h("details", { class: "more", open: opened.has(id),
+    ontoggle: (e: Event) => { if ((e.currentTarget as HTMLDetailsElement).open) opened.add(id); else opened.delete(id); } },
+    h("summary", {}, label), ...children);
+}
+
 export function insightsView(rerender: () => void, go: GoTab): HTMLElement {
-  const btn = (id: "overview" | "digest", label: string) => h("button", {
-    class: mode === id ? "on" : "", "aria-pressed": String(mode === id),
-    onclick: () => { mode = id; savePref("todohub.insightsView", id); rerender(); },
-  }, label);
+  const tab = (id: "overview" | "digest", label: string) => ({
+    id, label, on: mode === id, select: () => { mode = id; savePref("todohub.insightsView", id); rerender(); },
+  });
   return h("div", { class: "insights-wrap" },
-    h("div", { class: "toolbar insights-bar" },
-      h("h1", {}, "Insights"),
-      h("span", { class: "spacer" }),
-      h("div", { class: "seg", role: "group", "aria-label": "Insights view" },
-        btn("overview", "Overview"), btn("digest", "Weekly digest"))),
+    pageHead("Insights", { tabs: [tab("overview", "Overview"), tab("digest", "Weekly digest")] }),
     mode === "digest" ? digestView(rerender, go) : overview(rerender));
 }
 

@@ -33,8 +33,26 @@ export interface Subtask {
   due_date: string | null;
 }
 
+/** A card approved or dropped recently (the Inbox's "Recently decided"). */
+export interface DecidedItem {
+  id: number;
+  title: string;
+  status: "approved" | "dropped";
+  kind: Kind | null;
+  drop_reason: DropReason | null;
+  decided_at: string;
+  source: Source;
+  source_url: string | null;
+  who: string | null;
+  client_label: string | null;
+  linear_identifier: string | null;
+  linear_url: string | null;
+  target_issue: string | null;
+}
+
 export interface Candidate {
   id: number;
+  run_id?: number | null;      // the sweep or capture that proposed it
   source: Source;
   source_id: string;
   source_url: string | null;
@@ -133,6 +151,62 @@ export interface Brief {
   completed_today: Issue[];
   waiting_state: string;
   error: string | null;
+  /** Claude's plan for today (saved by the first morning sweep or by Re-plan); null until then. */
+  plan: DayPlan | null;
+  /** Today's latest Re-plan run: running, or how it ended. */
+  plan_run: RunState | null;
+  /** Claude's wrap-up of today (written by the 4 PM sweep or by Redo); null until then. */
+  wrapup: Wrapup | null;
+  /** Today's latest wrap-up Redo run: running, or how it ended. */
+  wrapup_run: RunState | null;
+  /** Claude's note for the rest of the day (written by the first sweep from noon, or by Redo); null until then. */
+  note: DayNote | null;
+  /** Today's latest note Redo run: running, or how it ended. */
+  note_run: RunState | null;
+  /** The next working day's Today list (issue ids, in order): what the wrap-up moved there. */
+  next_today: string[];
+  /** This week's mission check-in draft, rebuilt by each wrap-up; null until the first one. */
+  checkin: Checkin | null;
+}
+
+export type RunState = { id: number; status: string; error: string | null; started_at: string; finished_at: string | null };
+
+export interface Wrapup {
+  day: string;
+  made_at: string;
+  summary: string;
+  items: { identifier: string; action: "carry" | "move" | "ask" | "close"; why: string; move_to?: string; message?: string }[];
+  start_with: { identifier: string; why: string } | null;
+  notes: string[];
+}
+
+export interface Checkin {
+  week: string;
+  through: string;
+  made_at: string;
+  work: { mission: string; items: string[] }[];
+  next_week: string[];
+  review: string[];
+  health: { mission: string; status: "on_track" | "at_risk" | "off_track"; why: string }[];
+}
+
+/** Claude's text marks each issue it names as `[label](ENG-123)`; the app shows those as chips. */
+export interface DayPlan {
+  day: string;
+  made_at: string;
+  headline: string;
+  summary: string;
+  /** The last working day in a sentence or two; plans made before the recap existed have none. */
+  recap?: string;
+  picks: { identifier: string; why: string; minutes: number }[];
+  set_aside: { identifier: string; action: "move" | "ask" | "clear_date"; why: string; move_to?: string; message?: string }[];
+}
+
+export interface DayNote {
+  day: string;
+  made_at: string;
+  headline: string;
+  summary: string;
 }
 
 /** A due date moved later: both dates set, the new one after the old. */
@@ -192,6 +266,37 @@ export interface SourceOverview {
   detail: string | null;
   at: string | null;           // start of the sweep that made the latest report
   last_ok_at: string | null;
+  fail_streak?: number;        // how many of its latest reports failed in a row
+  failing_since?: string | null;
+}
+
+export type SourceState = "on" | "paused" | "removed";
+
+export interface SettingsSource {
+  key: Exclude<Source, "manual">;
+  name: string;
+  reads: string;               // what it looks for, one line
+  via: string;                 // "claude.ai connector", "gh command", ...
+  state: SourceState;
+  status: SourceOverview | null;
+}
+
+export interface Schedule {
+  every: number;               // hours between sweeps
+  start: number;               // first sweep (hour)
+  end: number;                 // last possible sweep (hour)
+  days: "weekdays" | "every day";
+  hours: number[];             // the hours it runs at
+  plan_hour: number | null;    // the run that writes the morning plan
+  wrapup_hour: number | null;  // the run that writes the wrap-up
+  installed: boolean;          // the Mac schedule is set up
+  supported: boolean;
+}
+
+export interface AppSettings {
+  sources: SettingsSource[];
+  schedule: Schedule;
+  daylight: { place: string; latitude: number | null; longitude: number | null };
 }
 
 export interface RateCell {
@@ -221,6 +326,7 @@ export interface DigestRec {
   label: string;
   url?: string | null;
   tab?: "inbox" | "client" | "dev";
+  issues?: string[];     // identifiers to highlight on that tab
 }
 
 /** One week written out; see backend digest.py for how each number is counted. */
@@ -311,6 +417,27 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return data as T;
 }
 
+/** An image pasted into Linear, fetched by the backend with the Linear key, as a data: URL (the
+ *  app's content policy allows data: images, and the bytes never touch the page as markup). */
+export async function linearImage(url: string): Promise<string> {
+  const b = await info();
+  const resp = await fetch(`${b.url}/api/linear-image?url=${encodeURIComponent(url)}`, { headers: { "X-TodoHub-Token": b.token } });
+  if (!resp.ok) {
+    const text = await resp.text();
+    let msg = `HTTP ${resp.status}`;
+    try { msg = JSON.parse(text)?.error ?? msg; } catch { /* not JSON */ }
+    throw new ApiError(msg);
+  }
+  const blob = await resp.blob();
+  if (!blob.type.startsWith("image/")) throw new ApiError("That link isn't an image.");
+  return new Promise((ok, no) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result));
+    r.onerror = () => no(new ApiError("Couldn't read the image."));
+    r.readAsDataURL(blob);
+  });
+}
+
 /** Wait for the backend to answer, for up to ~15 seconds after launch. */
 export async function waitForBackend(): Promise<void> {
   const b = await info();
@@ -346,16 +473,29 @@ export const api = {
   declineMute: (key: MuteKey) => call<{ declined: boolean }>("POST", "/api/mutes/decline", key),
   muteSuggestion: (id: number) =>
     call<{ suggestion: (MuteKey & { drops: number }) | null }>("GET", `/api/candidates/${id}/mute-suggestion`),
+  settings: () => call<AppSettings>("GET", "/api/settings"),
+  setSource: (key: string, state: SourceState) =>
+    call<AppSettings>("PUT", `/api/settings/sources/${encodeURIComponent(key)}`, { state }),
+  setSchedule: (s: Pick<Schedule, "every" | "start" | "end" | "days">) => call<AppSettings>("PUT", "/api/settings/schedule", s),
+  installSchedule: () => call<AppSettings>("POST", "/api/settings/schedule/install"),
+  setDaylightPlace: (d: AppSettings["daylight"]) => call<AppSettings>("PUT", "/api/settings/daylight", d),
   daylight: () => call<{ location: { lat: number; lon: number; place: string } | null }>("GET", "/api/daylight"),
   recheck: () => call<{ flagged: number }>("POST", "/api/candidates/recheck"),
   keep: (id: number) => call<Candidate>("POST", `/api/candidates/${id}/keep`),
   drop: (id: number, reason: DropReason) => call<Candidate>("POST", `/api/candidates/${id}/drop`, { reason }),
   restore: (id: number) => call<Candidate>("POST", `/api/candidates/${id}/restore`),
+  decided: (days = 30) => call<{ days: number; more: boolean; items: DecidedItem[] }>("GET", `/api/decided?days=${days}`),
   /** Back to the Inbox, reversing what an approval did in Linear. */
   undo: (id: number) => call<{ candidate: Candidate; warnings: string[] }>("POST", `/api/candidates/${id}/undo`),
   issues: () => call<Issue[]>("GET", "/api/issues"),
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
   editIssue: (id: string, edit: IssueEdit) => call<Issue>("PATCH", `/api/issues/${encodeURIComponent(id)}`, edit),
+  /** Move an issue to Linear's trash (restorable there for 30 days); it also leaves Today. */
+  deleteIssue: (id: string) =>
+    call<{ deleted: string; today_position: number | null }>("DELETE", `/api/issues/${encodeURIComponent(id)}`),
+  /** Undo a delete: back from Linear's trash, and onto Today at ``todayPosition`` if given. */
+  restoreIssue: (id: string, todayPosition: number | null) =>
+    call<Issue>("POST", `/api/issues/${encodeURIComponent(id)}/restore`, { today_position: todayPosition }),
   today: () => call<Today>("GET", "/api/today"),
   logos: (clients: string[]) =>
     call<Record<string, string | null>>("GET", `/api/logos?clients=${encodeURIComponent(clients.join("|"))}`),
@@ -367,8 +507,16 @@ export const api = {
   clientSummary: (client: string) =>
     call<{ client: string; text: string }>("GET", `/api/clients/${encodeURIComponent(client)}/summary`),
   brief: () => call<Brief>("GET", "/api/brief"),
+  /** Ask Claude for a fresh plan for today; it runs in the background (about a minute). */
+  replan: () => call<{ started: boolean }>("POST", "/api/plan"),
+  /** Ask Claude to write today's wrap-up again; it runs in the background (about a minute). */
+  rewrap: () => call<{ started: boolean }>("POST", "/api/wrapup"),
+  /** Ask Claude to write today's midday note again; it runs in the background (about a minute). */
+  renote: () => call<{ started: boolean }>("POST", "/api/note"),
   /** Put unfinished Today items on the next working day's list. */
   carryOver: (issueIds: string[]) => call<Today>("POST", "/api/today/carry", { issue_ids: issueIds }),
+  /** Take items back off the next working day's list (undoes carryOver). */
+  uncarry: (issueIds: string[]) => call<Today>("DELETE", "/api/today/carry", { issue_ids: issueIds }),
   setToday: (issueIds: string[]) => call<Today>("PUT", "/api/today", { issue_ids: issueIds }),
   block: (issueId: string, start: string, minutes: number) =>
     call<Today>("POST", `/api/today/${encodeURIComponent(issueId)}/block`, { start, minutes }),
