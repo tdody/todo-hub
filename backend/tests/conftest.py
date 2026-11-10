@@ -129,7 +129,8 @@ class FakeLinear:
         issue.update(description="Rebin the grades per channel.\n\n- use deciles", createdAt="2026-11-01T10:00:00Z",
                      assignee={"name": "Thibault"},
                      comments={"nodes": [{"body": f"note {n}", "createdAt": f"2026-11-0{n}T09:00:00Z",
-                                          "user": {"name": "Jordan"}} for n in (4, 2, 3, 1)]})
+                                          "user": {"name": "Jordan"}} for n in (4, 2, 3, 1)]},
+                     children={"nodes": [i for i in self.issues if (i.get("parent") or {}).get("id") == issue["id"]]})
         return issue
 
     def update_issue(self, issue_id, changes):

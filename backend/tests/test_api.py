@@ -510,6 +510,20 @@ def test_issue_preview(env):
 
 
 # ---- reply drafts -------------------------------------------------------------------------------
+def test_issue_preview_lists_sub_issues(env):
+    client, _, fake, _ = env
+    parent = {"id": "id-ENG-1", "identifier": "ENG-1", "title": "Rebin Globex grades"}
+    mine = make_issue("ENG-5", "Check the CSV", state="Done")
+    mine.update(parent=parent, team={"id": "team-eng"}, assignee={"name": "Sam"})
+    other = make_issue("OPS-7", "Rotate the key")
+    other.update(parent=parent, team={"id": "team-ops"})
+    fake.issues += [mine, other]
+    subs = client.get("/api/issues/ENG-1/preview").json()["sub_issues"]
+    assert [(s["identifier"], s["state"]["name"], s["assignee"], s["own_team"]) for s in subs] == [
+        ("ENG-5", "Done", "Sam", True), ("OPS-7", "Todo", None, False)]
+    assert client.get("/api/issues/ENG-2/preview").json()["sub_issues"] == []
+
+
 def test_reply_drafts_kept_for_asks_and_saved_to_gmail(tmp_path):
     from todohub import gmail_draft
     settings = load_settings()
