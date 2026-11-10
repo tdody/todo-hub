@@ -56,7 +56,7 @@ Editing is inline: fields edit in place and save when you leave them, like the s
 
 **Description.** Click it (anywhere but a link or image) or press **⇧E**. It becomes an auto-growing text box with the raw Markdown, which is what Linear stores. Leaving the field, ⌘↵ or Esc all save, so a long edit is never thrown away. An empty description shows "Add a description". A description over 6,000 characters (the pane only loads that much) isn't editable here and shows "Edit in Linear ↗".
 
-**Sub-issues.** All of the issue's sub-issues, done ones and other people's included, read from Linear with the preview. Each has a checkbox: ticking marks it done (the `done_state` setting), unticking puts it back in Todo (`todo_state`). A sub-issue in another team shows its status without a checkbox, since the app only knows its own team's statuses. "Add sub-issue" (or **⇧S**) opens a text box; Enter creates it and leaves the box open for the next.
+**Sub-issues.** All of the issue's sub-issues, done ones and other people's included, read from Linear with the preview. Each has a checkbox: ticking marks it done with the status Mark done uses (the team's first completed status), unticking puts it in the team's first not-started status (Todo). A sub-issue in another team shows its status without a checkbox, since the app only knows its own team's statuses. "Add sub-issue" (or **⇧S**) opens a text box; Enter creates it and leaves the box open for the next.
 
 **Comments.** A comment box above the latest comments. **⇧C** focuses it, **⌘↵** posts it as you. It counts down near 2,000 characters and won't post past that.
 
@@ -80,7 +80,7 @@ The UI sends names and text. Linear's ids and label groups stay in `api.py` and 
 | Endpoint | Change |
 | --- | --- |
 | `PATCH /api/issues/{id}` | Adds `title` (1–200 characters), `description` (empty clears it), `client` (a client label name, or null for Dev), `project` (a project name, or null). |
-| `GET /api/issues/{ident}/preview` | Adds `sub_issues`: the issue's children (up to 50), each shaped like an issue plus its assignee and team id. |
+| `GET /api/issues/{ident}/preview` | Adds `sub_issues`: the issue's children (up to 50), each shaped like an issue plus `assignee` and `own_team` (it's in TodoHub's team, so the app's statuses apply). |
 | `POST /api/issues/{id}/comments` | New. `{body}`, 1–2,000 characters. Returns `{id}`. |
 | `DELETE /api/comments/{id}` | New. Deletes a comment (for undo). |
 | `POST /api/issues/{id}/sub-issues` | New. `{title}`. Returns the new issue. |
@@ -94,7 +94,7 @@ The UI sends names and text. Linear's ids and label groups stay in `api.py` and 
 ## Data flow in the app
 
 - Title, client and project saves replace the issue in memory with the `PATCH` response; the lists re-sort from its `client` and `list`.
-- Description, comment and sub-issue saves reload the issue's preview in the background. The pane keeps showing what it has while it reloads.
+- A description save updates the pane's copy of the text. Comment and sub-issue saves, and ticks, reload the issue's preview in the background; the pane keeps showing what it has meanwhile.
 - The undo for a description edit uses the preview text loaded before the edit.
 - A background reload never replaces a block holding the focused field; it's applied when you leave the field. (The minute refresh already waits like this.)
 
