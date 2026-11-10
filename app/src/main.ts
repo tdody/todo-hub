@@ -2282,6 +2282,18 @@ async function postComment(i: IssuePreview) {
   }
 }
 
+/** e, ⇧E, ⇧S and ⇧C in Today, Client and Dev: rename, edit the description, add a sub-issue, comment. */
+const PANE_KEYS: Record<string, string> = { e: "title", E: "description", S: "sub", C: "comment" };
+
+function paneKey(key: string): boolean {
+  const target = PANE_KEYS[key];
+  const el = target ? document.querySelector<HTMLElement>(`:is(.td-st, .tl-pane) [data-pane="${target}"]`) : null;
+  if (!el) return false;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.focus();
+  else el.click();
+  return true;
+}
+
 // ---- Today: one list, read in three moments ----------------------------------------------------
 // The morning, until you start the day: a night sky with yesterday's recap, Claude's suggestion and
 // its picks to check; "Start my day" puts what you checked on Today, and the sun rises. Through the
@@ -3680,7 +3692,8 @@ const SHORTCUTS: [string, string][] = [
   ["⌘Z", "Undo the last action (approve, drop, snooze, issue edit)"],
   ["⌘R", "Reload from Linear now (it also reloads every minute)"],
   ["⇧⌘R", "Reload: restart the backend and the window after a code change"],
-  ["e", "Edit the title"],
+  ["e", "Edit the title (an Inbox card, or the issue in Today, Client and Dev)"],
+  ["⇧E · ⇧S · ⇧C", "Today, Client, Dev: edit the description · add a sub-issue · comment (⌘↵ posts)"],
   ["c", "Capture a task"],
   ["/", "Filter"],
   ["⌘1 – ⌘6", "Inbox, Today, Client, Dev, Insights, Settings (also ⌘,)"],
@@ -3806,6 +3819,8 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".overlay")) return;
+  // preventDefault: the key must not also type into the field it just focused.
+  if ((state.tab === "today" || issueList) && paneKey(e.key)) { e.preventDefault(); return; }
 
   // An open status or priority menu takes the next digit.
   const pill = document.querySelector<HTMLDetailsElement>("details.pill-menu[open]");
