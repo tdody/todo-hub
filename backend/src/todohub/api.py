@@ -147,6 +147,10 @@ class CommentIn(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
 
 
+class SubIssueIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
 PREVIEW_DESCRIPTION = 6000   # characters of an issue's description in the reading pane
 PREVIEW_COMMENT = 1500       # characters of each of the latest three comments
 IMAGE_CACHE = 40             # Linear images kept in memory for the reading pane
@@ -962,6 +966,29 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     def delete_comment(comment_id: str) -> dict:
         linear_call(lambda l: l.delete_comment(comment_id))
         return {"deleted": comment_id}
+
+    @app.post("/api/issues/{issue_id}/sub-issues", dependencies=auth)
+    def add_sub_issue(issue_id: str, body: SubIssueIn) -> dict:
+        """A sub-issue made the way Inbox makes sub-tasks: your team, assigned to you, in Todo, with
+        the parent's client label, project and priority. Undo deletes it like any issue."""
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(400, "The title can't be empty")
+        m = team_meta()
+        todo = next((s for s in m.states if s["name"] == settings.todo_state), None)
+        if not todo:
+            raise HTTPException(500, f"Team {settings.team_key} has no {settings.todo_state!r} status")
+
+        def run(l: Linear) -> dict:
+            parent = l.get_issue(issue_id)
+            return l.create_issue(
+                team_id=m.team_id, title=title, description=f"Part of {parent['identifier']}: {parent['title']}",
+                assignee_id=m.viewer_id, state_id=todo["id"], priority=parent["priority"], due_date=None,
+                label_ids=[x["id"] for x in client_labels(parent, settings.client_label_group)],
+                parent_id=parent["id"], project_id=(parent.get("project") or {}).get("id"),
+            )
+
+        return shape_issue(linear_call(run), settings)
 
     # ---- sweeps -----------------------------------------------------------------------
     @app.get("/api/runs/latest", dependencies=auth)

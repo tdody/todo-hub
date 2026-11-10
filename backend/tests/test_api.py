@@ -152,6 +152,26 @@ def test_post_and_delete_comment(env):
     assert len(fake.comments) == 1
 
 
+def test_add_sub_issue_takes_the_parents_client_project_and_priority(env):
+    client, _, fake, _ = env
+    fake.issues[0].update(priority=2, project={"id": "p-globex", "name": "Globex"})
+    r = client.post("/api/issues/id-ENG-1/sub-issues", json={"title": " Check the CSV "})
+    assert r.status_code == 200, r.text
+    assert r.json()["parent"]["id"] == "id-ENG-1"
+    assert fake.created[-1] == {
+        "team_id": "team-eng", "title": "Check the CSV", "description": "Part of ENG-1: Rebin Globex grades",
+        "assignee_id": "me", "state_id": "s-Todo", "priority": 2, "due_date": None,
+        "label_ids": ["l-Globex"], "parent_id": "id-ENG-1", "project_id": "p-globex",
+    }
+    # a Dev parent without a project: no labels, no project
+    client.post("/api/issues/id-ENG-2/sub-issues", json={"title": "Read the logs"})
+    assert fake.created[-1]["label_ids"] == [] and fake.created[-1]["project_id"] is None
+    r = client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "   "})
+    assert r.status_code == 400 and r.json()["error"] == "The title can't be empty"
+    assert client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "x" * 201}).status_code == 422
+    assert len(fake.created) == 2
+
+
 def test_meta_and_sweep(env):
     client, db, _, launched = env
     m = client.get("/api/meta").json()
