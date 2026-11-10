@@ -1980,32 +1980,48 @@ function setDescription(id: string, text: string) {
   if (d?.issue) d.issue = { ...d.issue, description: text };
 }
 
+/** Grow a text box to fit its text, so a field opening in place keeps the text's shape. */
+function fitHeight(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 /** The issue's title in a reading pane. Click it (or press e) to rename it in place; Enter or
  *  leaving the field saves, Esc cancels. */
 function titleField(i: Issue, tag: "h2" | "h3"): HTMLElement {
   const key = `${i.id}:title`;
   const draft = paneDrafts.get(key);
   if (draft === undefined) {
-    return h(tag, { class: "pane-title", "data-pane": "title", title: "Rename (e)", onclick: () => { if (!window.getSelection()?.toString()) openEdit(key, i.title); } }, i.title);
+    return h(tag, { class: "pane-title", "data-pane": "title", title: "Rename (e)", onclick: (e: Event) => {
+      if ((e as MouseEvent).detail > 0 && window.getSelection()?.toString()) return;
+      openEdit(key, i.title);
+    } }, i.title);
   }
-  return h(tag, { class: "pane-title editing" }, h("input", {
-    class: "pane-title-input", value: draft, maxLength: 200, readOnly: state.busy.has(key), "aria-label": "Title", "data-edit": key,
-    oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); },
+  const box = h("textarea", {
+    class: "pane-title-input", value: draft, rows: 1, maxLength: 200, readOnly: state.busy.has(key), "aria-label": "Title",
+    "data-edit": key, "data-pane": "title",
+    oninput: (e: Event) => {
+      const el = e.target as HTMLTextAreaElement;
+      paneDrafts.set(key, el.value);
+      fitHeight(el);
+    },
     onkeydown: (e: KeyboardEvent) => {
-      if (e.key === "Enter") { e.preventDefault(); void saveTitle(i, tag, e.target as HTMLInputElement); }
+      if (e.key === "Enter") { e.preventDefault(); void saveTitle(i, tag, e.target as HTMLTextAreaElement); }
       if (e.key === "Escape") { e.stopPropagation(); paneDrafts.delete(key); render(); }
     },
-    onblur: (e: Event) => { if (isLeaving(e)) void saveTitle(i, tag, e.target as HTMLInputElement); },
-  }));
+    onblur: (e: Event) => { if (isLeaving(e)) void saveTitle(i, tag, e.target as HTMLTextAreaElement); },
+  }) as HTMLTextAreaElement;
+  requestAnimationFrame(() => fitHeight(box));
+  return h(tag, { class: "pane-title editing" }, box);
 }
 
-async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLInputElement) {
+async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLTextAreaElement) {
   const key = `${i.id}:title`;
-  const title = paneDrafts.get(key)?.trim();
+  const title = paneDrafts.get(key)?.replace(/\s*\n\s*/g, " ").trim();
   if (title === undefined || state.busy.has(key)) return;
   if (!title || title === i.title) {          // unchanged or empty: close the editor where it sits
     paneDrafts.delete(key);
-    input.closest(".pane-title")?.replaceWith(titleField(i, tag));
+    afterPointer(() => input.closest(".pane-title")?.replaceWith(titleField(i, tag)));
     return;
   }
   // No render() before the request: this can run from a blur, and rebuilding the page under the
@@ -2032,10 +2048,16 @@ function issueFields(i: Issue): HTMLElement[] {
 function loadDetail(id: string, force = false) {
   const d = details.get(id);
   if (!force && d && (d.loading || Date.now() - d.at < 2 * 60_000)) return;
-  details.set(id, { ...d, at: Date.now(), loading: true });
+  const at = Date.now();                // also marks this load: an older one answering later is dropped
+  details.set(id, { ...d, at, loading: true });
   api.issuePreview(id)
-    .then((issue) => details.set(id, { at: Date.now(), issue }))
-    .catch((e) => details.set(id, { at: Date.now(), error: e instanceof ApiError ? e.message : String(e) }))
+    .then((issue) => { if (details.get(id)?.at === at) details.set(id, { at, issue }); })
+    .catch((e) => {
+      // Keep showing what the pane has; say what went wrong only when it has nothing.
+      const now = details.get(id);
+      if (now?.at !== at) return;
+      details.set(id, now.issue ? { at, issue: now.issue } : { at, error: e instanceof ApiError ? e.message : String(e) });
+    })
     .finally(() => {
       const shown = [...document.querySelectorAll<HTMLElement>(`.tl-detail[data-id="${id}"]`)];
       // While you type in it, re-render the page instead: that keeps your cursor where it was.
@@ -2083,12 +2105,6 @@ function detailBody(id: string): HTMLElement {
   return h("div", { class: "tl-detail", "data-id": id }, descriptionSection(i), subIssuesSection(i), commentsSection(i));
 }
 
-/** Rows for a description box: one per line (about 70 characters a row), between 4 and 24. */
-function rowsFor(text: string): number {
-  const rows = text.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / 70)), 0);
-  return Math.min(24, Math.max(4, rows + 1));
-}
-
 /** The description as Markdown. Click it (not a link or image) or press ⇧E to edit the Markdown in
  *  place; leaving the box, ⌘↵ or Esc saves. A description cut off at the pane's limit is edited in Linear. */
 function descriptionSection(i: IssuePreview): HTMLElement {
@@ -2097,13 +2113,12 @@ function descriptionSection(i: IssuePreview): HTMLElement {
   const draft = paneDrafts.get(key);
   if (draft !== undefined) {
     const busy = state.busy.has(key);
-    return h("section", {}, head,
-      h("textarea", {
-        class: "desc-input", value: draft, rows: rowsFor(draft), readOnly: busy, "aria-label": "Description", "data-edit": key,
+    const box = h("textarea", {
+        class: "desc-input", value: draft, rows: 4, readOnly: busy, "aria-label": "Description", "data-edit": key, "data-pane": "description",
         oninput: (e: Event) => {
           const el = e.target as HTMLTextAreaElement;
           paneDrafts.set(key, el.value);
-          el.rows = rowsFor(el.value);
+          fitHeight(el);
         },
         onkeydown: (e: KeyboardEvent) => {
           if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
@@ -2113,19 +2128,21 @@ function descriptionSection(i: IssuePreview): HTMLElement {
           }
         },
         onblur: (e: Event) => { if (isLeaving(e)) void saveDescription(i, e.target as HTMLTextAreaElement); },
-      }),
+      }) as HTMLTextAreaElement;
+    requestAnimationFrame(() => fitHeight(box));
+    return h("section", {}, head, box,
       h("p", { class: "muted small" }, busy ? "Saving…" : "Markdown. Saves when you leave the box (or ⌘↵)."));
   }
-  const text = () => renderMarkdown(i.description, { image: linearImageNode });
+  const md = renderMarkdown(i.description, { image: linearImageNode });
   if (i.description_truncated) {
-    return h("section", {}, head, h("div", { class: "tl-desc md" }, ...text()), link("Edit in Linear ↗", i.url, "link small"));
+    return h("section", {}, head, h("div", { class: "tl-desc md" }, ...md), link("Edit in Linear ↗", i.url, "link small"));
   }
   const open = (e: Event) => {
-    if ((e.target as HTMLElement).closest("a, img") || window.getSelection()?.toString()) return;
+    if ((e.target as HTMLElement).closest("a, img") || ((e as MouseEvent).detail > 0 && window.getSelection()?.toString())) return;
     openEdit(key, i.description);
   };
   return h("section", {}, head, i.description.trim()
-    ? h("div", { class: "tl-desc md editable", "data-pane": "description", title: "Edit (⇧E)", onclick: open }, ...text())
+    ? h("div", { class: "tl-desc md editable", "data-pane": "description", title: "Edit (⇧E)", onclick: open }, ...md)
     : h("button", { class: "add-text", "data-pane": "description", onclick: open }, "Add a description"));
 }
 
@@ -2135,7 +2152,7 @@ async function saveDescription(i: IssuePreview, box: HTMLTextAreaElement) {
   if (text === undefined || state.busy.has(key)) return;
   if (text.trim() === i.description.trim()) {     // unchanged: close the editor where it sits
     paneDrafts.delete(key);
-    box.closest("section")?.replaceWith(descriptionSection(i));
+    afterPointer(() => box.closest("section")?.replaceWith(descriptionSection(i)));
     return;
   }
   // No render() before the request (see saveTitle): this can run from a blur.
@@ -2159,14 +2176,15 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
     subs.length ? h("h4", {}, `Sub-issues · ${subs.length}`) : "",
     subs.length ? h("ul", { class: "tl-subs" }, ...subs.map((s) => {
       const done = s.state.type === "completed";
-      return h("li", { class: done ? "done" : "" },
+      const open = !closedType(s.state.type);
+      return h("li", { class: open ? "" : "done" },
         s.own_team
-          ? h("input", { type: "checkbox", checked: done, title: done ? "Reopen" : "Mark done",
+          ? h("input", { type: "checkbox", checked: done, disabled: state.busy.has(`${s.id}:tick`), title: done ? "Reopen" : "Mark done",
               "aria-label": `${done ? "Reopen" : "Mark done"}: ${s.identifier}`, onchange: () => void tickSubIssue(i, s) })
           : h("span", { class: "sub-gap", "aria-hidden": "true" }),
         link(s.identifier, s.url, "ident"),
         h("span", { class: "dtitle" }, s.title),
-        !done && s.due_date && s.due_date < today
+        open && s.due_date && s.due_date < today
           ? h("span", { class: "late small" }, dueLabel(s.due_date, today).replace("overdue", "late")) : "",
         h("span", { class: "muted small" }, s.assignee && s.assignee !== i.assignee ? `${s.state.name} · ${s.assignee}` : s.state.name));
     })) : "",
@@ -2180,22 +2198,36 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
 
 /** Tick: the team's first done status, as Mark done uses; untick: its first not-started one (Todo). */
 async function tickSubIssue(parent: IssuePreview, sub: SubIssue) {
+  const key = `${sub.id}:tick`;
+  if (state.busy.has(key)) return;
   const done = sub.state.type !== "completed";
   const to = state.meta?.states.find((s) => s.type === (done ? "completed" : "unstarted"));
   if (!to) { toast(`Couldn't find a ${done ? "done" : "to-do"} status for this team`); render(); return; }
-  if (done) state.briefAt = 0;               // the wrap-up's "done today" should include it
+  // The pane's copy shows the new status at once; the reload after the save confirms it.
+  const show = (st: SubIssue["state"]) => {
+    const d = details.get(parent.id);
+    if (d?.issue) d.issue = { ...d.issue, sub_issues: d.issue.sub_issues.map((x) => (x.id === sub.id ? { ...x, state: st } : x)) };
+  };
   const reload = async () => { loadDetail(parent.id, true); await loadIssues().catch(() => undefined); };
+  if (done) state.briefAt = 0;               // the wrap-up's "done today" should include it
+  state.busy.add(key);
+  show(to);
+  render();
   try {
     await api.editIssue(sub.id, { state_id: to.id });
     offerUndo(`${sub.identifier} ${done ? "done" : `moved to ${to.name}`}`, `${sub.identifier} back to ${sub.state.name}`, async () => {
       await api.editIssue(sub.id, { state_id: sub.state.id });
+      show(sub.state);
       await reload();
     });
     await reload();
   } catch (e) {
+    show(sub.state);
     fail(e);
+  } finally {
+    state.busy.delete(key);
+    render();
   }
-  render();
 }
 
 async function addSubIssue(parent: IssuePreview) {
@@ -2230,7 +2262,7 @@ function commentsSection(i: IssuePreview): HTMLElement {
   const busy = state.busy.has(key);
   const count = h("span", { class: "small" });
   const showCount = (text: string) => {
-    const room = COMMENT_MAX - text.length;
+    const room = COMMENT_MAX - text.trim().length;
     count.textContent = room <= 200 ? String(room) : "";
     count.className = `small ${room < 0 ? "late" : "muted"}`;
   };
@@ -2271,7 +2303,7 @@ async function postComment(i: IssuePreview) {
     loadDetail(i.id, true);
     offerUndo(`Comment posted on ${i.identifier}`, `comment on ${i.identifier} deleted`, async () => {
       await api.deleteComment(id);
-      paneDrafts.set(key, body);               // back in the box, to fix and post again
+      if (!paneDrafts.get(key)?.trim()) paneDrafts.set(key, body);   // back in the box, to fix and post again
       loadDetail(i.id, true);
     });
   } catch (e) {
@@ -3082,8 +3114,8 @@ function todayView(): HTMLElement {
 }
 
 /** The reading pane for one issue (Today, Client and Dev): its ID, client or project and slips,
- *  the title, one row with status, priority and due date, then Block time (on Today) or Add to
- *  Today, and ⋯; below, sub-issues, the description and the latest comments. */
+ *  the title, one row with status, priority, due date, client and project, then Block time (on
+ *  Today) or Add to Today, and ⋯; below, the description, sub-issues and comments. */
 function issuePane(i: Issue): HTMLElement {
   const t = state.today.find((x) => x.issue_id === i.id);
   loadDetail(i.id);
@@ -3743,7 +3775,19 @@ function showShortcuts() {
 
 // A click anywhere outside an open Snooze or Drop menu closes it (including opening the other one).
 // Same for the balance popover.
+// Swapping what's under the pointer before it's released would lose the click.
+let pointerIsDown = false;
+document.addEventListener("pointerup", () => { pointerIsDown = false; }, true);
+document.addEventListener("pointercancel", () => { pointerIsDown = false; }, true);
+
+/** Run ``fn`` now, or once the pointer is released and its click has landed. */
+function afterPointer(fn: () => void) {
+  if (!pointerIsDown) fn();
+  else document.addEventListener("pointerup", () => setTimeout(fn), { once: true });
+}
+
 document.addEventListener("pointerdown", (e) => {
+  pointerIsDown = true;
   // (Removed in place, not re-rendered, so the click that closed it still lands on its target.)
   if (state.balanceOpen && !(e.target as Element).closest?.(".bal-anchor")) {
     state.balanceOpen = false;
@@ -3762,9 +3806,14 @@ function isTextField(el: Element | null): boolean {
     || (el.tagName === "INPUT" && ["text", "search", "url", "email", ""].includes((el as HTMLInputElement).type)));
 }
 
+/** A text field with text in it: ⌘Z undoes the typing there, not the last action. */
+function holdsText(el: Element | null): boolean {
+  return isTextField(el) && (el as HTMLInputElement).value !== "";
+}
+
 /** Called by the app's Edit → Undo (⌘Z): undo typing in a text field, else the last action. */
 (window as unknown as { todohubUndo: () => void }).todohubUndo = () => {
-  if (isTextField(document.activeElement)) {
+  if (holdsText(document.activeElement)) {
     document.execCommand("undo");
     return;
   }
@@ -3795,7 +3844,7 @@ document.addEventListener("keydown", (e) => {
   // ⌘Z undoes the last action, except in a text field, where it undoes typing as usual.
   // In the app, Edit → Undo owns ⌘Z and calls todohubUndo(); this is for a plain browser.
   if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z"
-      && !inApp && !isTextField(target) && !document.querySelector(".overlay")) {
+      && !inApp && !holdsText(target) && !document.querySelector(".overlay")) {
     e.preventDefault();
     void undo();
     return;
