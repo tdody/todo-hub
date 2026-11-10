@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -149,6 +150,18 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     launch = sweep_launcher or default_launcher
     block = block_fn or (lambda **kw: calendar_block.block_time(settings, **kw))
     app = FastAPI(title="TodoHub", docs_url=None, redoc_url=None)
+
+    # An unexpected error would otherwise come back as a bare 500 from the outermost layer,
+    # without the CORS headers, and the app's web view would only say "Load failed". Catch it
+    # here, inside CORS, so the app shows what went wrong; the traceback goes to api.log.
+    @app.middleware("http")
+    async def unexpected_errors(request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as exc:  # noqa: BLE001 - reported to the app, logged in full
+            traceback.print_exc()
+            return JSONResponse({"error": f"{request.url.path} failed: {type(exc).__name__}: {exc}"}, status_code=500)
+
     app.add_middleware(
         CORSMiddleware, allow_origins=TAURI_ORIGINS, allow_methods=["*"], allow_headers=["*"],
     )

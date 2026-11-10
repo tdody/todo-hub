@@ -88,7 +88,8 @@ def test_weekly_digest():
     recs = d["recommendations"]
     assert len(recs) == 3 and recs[0]["url"] == "u/B-1" and "pushed 3 times (9 days)" in recs[0]["text"]
     assert recs[1]["tab"] == "client" and "25%" in recs[1]["text"]
-    assert recs[2]["tab"] == "client" and "1 open issue is overdue" in recs[2]["text"]
+    assert recs[2]["tab"] == "client" and "1 open issue is overdue. Re-date or close it." in recs[2]["text"]
+    assert recs[2]["issues"] == ["B-1"] and recs[2]["label"] == "Show B-1"
 
     last = digest.build(week_offset=1, completed=completed, open_issues=open_issues, slips=slips,
                         decisions=decisions, runs=runs, today=today)
