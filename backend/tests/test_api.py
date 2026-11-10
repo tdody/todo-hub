@@ -628,6 +628,17 @@ def test_due_date_slips(env):
     assert fake.due_history_calls == 2
 
 
+
+def test_due_date_slips_with_timestamps():
+    """Linear's history can send due dates as midnight UTC timestamps, not plain dates."""
+    from todohub import stats
+    issue = {"id": "id-ENG-3", "identifier": "ENG-3", "title": "Deck", "dueDate": "2026-11-09", "labels": {"nodes": []},
+             "history": {"nodes": [{"createdAt": "2026-11-02T10:00:00Z", "fromDueDate": "2026-11-06T00:00:00.000Z",
+                                    "toDueDate": "2026-11-09T00:00:00.000Z", "actor": {"name": "Thibault"}}]}}
+    s = stats.due_slips([issue])["id-ENG-3"]
+    assert (s["count"], s["days"]) == (1, 3)
+    assert (s["changes"][0]["from"], s["changes"][0]["to"]) == ("2026-11-06", "2026-11-09")
+
 def test_digest_endpoint(env):
     from datetime import datetime, timezone
     from conftest import make_issue
@@ -713,3 +724,20 @@ def test_hubspot_cards_link_back_and_can_be_muted(env):
     r = client.post("/api/mutes", json={**key, "drop_pending": True})
     assert r.status_code == 200 and r.json()["dropped_ids"] == [cid]
     assert "sender Monica Hall (HubSpot)" in mutes.prompt_section(db.list_mutes())
+
+
+def test_unexpected_error_reaches_the_app_with_cors(env):
+    """A bug in an endpoint comes back as JSON the app can show, not a bare 500 the web view
+    reports as "Load failed"."""
+    client, _db, fake, _ = env
+    client.raise_server_exceptions = False
+
+    def boom():
+        raise ValueError("bad date")
+    fake.my_open_issues = boom
+    r = client.get("/api/digest", headers={"Origin": "tauri://localhost"})
+    assert r.status_code == 500
+    assert r.json()["error"] == "/api/digest failed: ValueError: bad date"
+    assert r.headers.get("access-control-allow-origin") == "tauri://localhost"
+
+

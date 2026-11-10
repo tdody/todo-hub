@@ -264,18 +264,28 @@ class DB:
                 "ORDER BY r.id DESC LIMIT 1", (source,)).fetchone()
         return row["started_at"] if row else None
 
+    FAIL_STREAK_LOOKBACK = 20      # reports looked at when counting failures in a row
+
     def source_overview(self, sources: list[str]) -> list[dict]:
-        """Per source: its latest report in any sweep (full or one-source), and when it last worked."""
+        """Per source: its latest report in any sweep (full or one-source), when it last worked, and
+        how many of its latest reports failed in a row (``fail_streak``, from ``failing_since``)."""
         out = []
         with self.connect() as c:
             for source in sources:
-                row = c.execute(
+                rows = c.execute(
                     "SELECT s.ok, s.detail, s.items_scanned, r.started_at, r.id FROM source_status s "
                     "JOIN runs r ON r.id = s.run_id WHERE s.source = ? AND r.trigger IN ('schedule', 'manual') "
-                    "ORDER BY r.id DESC LIMIT 1", (source,)).fetchone()
+                    "ORDER BY r.id DESC LIMIT ?", (source, self.FAIL_STREAK_LOOKBACK)).fetchall()
+                row = rows[0] if rows else None
+                streak = 0
+                for r in rows:
+                    if r["ok"]:
+                        break
+                    streak += 1
                 out.append({"source": source, "ok": bool(row["ok"]) if row else None,
                             "detail": row["detail"] if row else None, "at": row["started_at"] if row else None,
-                            "run_id": row["id"] if row else None, "last_ok_at": self.last_ok_start(source)})
+                            "run_id": row["id"] if row else None, "last_ok_at": self.last_ok_start(source),
+                            "fail_streak": streak, "failing_since": rows[streak - 1]["started_at"] if streak else None})
         return out
 
     def has_reported(self, source: str) -> bool:
