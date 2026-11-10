@@ -123,6 +123,8 @@ def test_edit_issue_client_swaps_only_the_client_label(env):
     assert fake.updated[-1] == ("id-ENG-1", {"removedLabelIds": ["l-Globex"]})
     client.patch("/api/issues/id-ENG-2", json={"client": "Globex"})      # from Dev
     assert fake.updated[-1] == ("id-ENG-2", {"addedLabelIds": ["l-Globex"]})
+    r = client.patch("/api/issues/id-ENG-1", json={"client": "Globex"})  # already Globex: nothing to send
+    assert r.status_code == 200 and r.json()["client"] == "Globex"
     r = client.patch("/api/issues/id-ENG-1", json={"client": "Vandelay"})
     assert r.status_code == 400 and r.json()["error"] == "No client label 'Vandelay' in Linear"
     assert len(fake.updated) == 3
@@ -542,21 +544,21 @@ def test_issue_preview(env):
     assert client.get("/api/issues/ENG-404/preview").status_code == 502
 
 
-# ---- reply drafts -------------------------------------------------------------------------------
 def test_issue_preview_lists_sub_issues(env):
     client, _, fake, _ = env
     parent = {"id": "id-ENG-1", "identifier": "ENG-1", "title": "Rebin Globex grades"}
     mine = make_issue("ENG-5", "Check the CSV", state="Done")
-    mine.update(parent=parent, team={"id": "team-eng"}, assignee={"name": "Sam"})
+    mine.update(parent=parent, team={"id": "team-eng"}, assignee={"name": "Sam"}, createdAt="2026-11-05T10:00:00Z")
     other = make_issue("OPS-7", "Rotate the key")
-    other.update(parent=parent, team={"id": "team-ops"})
+    other.update(parent=parent, team={"id": "team-ops"}, createdAt="2026-11-04T10:00:00Z")
     fake.issues += [mine, other]
     subs = client.get("/api/issues/ENG-1/preview").json()["sub_issues"]
     assert [(s["identifier"], s["state"]["name"], s["assignee"], s["own_team"]) for s in subs] == [
-        ("ENG-5", "Done", "Sam", True), ("OPS-7", "Todo", None, False)]
+        ("OPS-7", "Todo", None, False), ("ENG-5", "Done", "Sam", True)]
     assert client.get("/api/issues/ENG-2/preview").json()["sub_issues"] == []
 
 
+# ---- reply drafts -------------------------------------------------------------------------------
 def test_reply_drafts_kept_for_asks_and_saved_to_gmail(tmp_path):
     from todohub import gmail_draft
     settings = load_settings()

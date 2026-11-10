@@ -405,8 +405,7 @@ class Linear:
         return data["issue"]
 
     def update_issue(self, issue_id: str, changes: dict) -> dict:
-        """``changes`` uses Linear's IssueUpdateInput names: stateId, priority, dueDate, title, description,
-        projectId, addedLabelIds, removedLabelIds. None clears a field."""
+        """``changes`` is an IssueUpdateInput, in Linear's field names."""
         data = self.gql(
             f"""
             mutation($id: String!, $input: IssueUpdateInput!) {{
@@ -421,13 +420,13 @@ class Linear:
         return result["issue"]
 
 
-def client_labels(issue: dict, client_group: str) -> list[dict]:
+def client_labels_of(issue: dict, client_group: str) -> list[dict]:
     """The issue's labels in the client label group (normally one)."""
     return [l for l in issue["labels"]["nodes"] if (l.get("parent") or {}).get("name") == client_group]
 
 
 def client_label_of(issue: dict, client_group: str) -> str | None:
-    found = client_labels(issue, client_group)
+    found = client_labels_of(issue, client_group)
     return found[0]["name"] if found else None
 
 

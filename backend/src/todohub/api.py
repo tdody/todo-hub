@@ -31,7 +31,7 @@ from .categories import categorize
 from .config import (SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings,
                      get_linear_key, load_settings, read_overrides, source_state, write_overrides)
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, client_labels, is_linear_upload, shape_issue
+from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
 from .selfcmd import self_command
 from .sweep import next_working_day
 from .tools import ToolError
@@ -834,7 +834,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.get("/api/issues/{ident}/preview", dependencies=auth)
     def issue_preview(ident: str) -> dict:
-        """A quick look at an issue: its description and latest comments."""
+        """A quick look at an issue: its description, latest comments and sub-issues."""
         raw = linear_call(lambda l: l.issue_preview(ident))
         nodes = sorted((raw.get("comments") or {}).get("nodes", []), key=lambda n: n.get("createdAt") or "")
         description = (raw.get("description") or "").strip()
@@ -857,7 +857,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "sub_issues": [
                 {**shape_issue(n, settings), "assignee": (n.get("assignee") or {}).get("name"),
                  "own_team": (n.get("team") or {}).get("id") == own_team}
-                for n in (raw.get("children") or {}).get("nodes", [])
+                for n in sorted((raw.get("children") or {}).get("nodes", []), key=lambda n: n.get("createdAt") or "")
             ],
         }
 
@@ -916,15 +916,19 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         new_client = id_by_name(team_meta().client_labels, edit.client, "client label") if "client" in fields else None
 
         def run(l: Linear) -> dict:
+            labels: dict = {}
             # A client change swaps the label in the client group and keeps every other label.
             if "client" in fields:
-                old = [x["id"] for x in client_labels(l.get_issue(issue_id), settings.client_label_group)]
+                current = l.get_issue(issue_id)
+                old = [x["id"] for x in client_labels_of(current, settings.client_label_group)]
                 new = [new_client] if new_client else []
                 if removed := [x for x in old if x not in new]:
-                    changes["removedLabelIds"] = removed
+                    labels["removedLabelIds"] = removed
                 if added := [x for x in new if x not in old]:
-                    changes["addedLabelIds"] = added
-            return l.update_issue(issue_id, changes)
+                    labels["addedLabelIds"] = added
+                if not changes and not labels:      # it already has that client: nothing to send
+                    return current
+            return l.update_issue(issue_id, changes | labels)
 
         return shape_issue(linear_call(run), settings)
 
@@ -969,7 +973,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.post("/api/issues/{issue_id}/sub-issues", dependencies=auth)
     def add_sub_issue(issue_id: str, body: SubIssueIn) -> dict:
-        """A sub-issue made the way Inbox makes sub-tasks: your team, assigned to you, in Todo, with
+        """A sub-issue made the way approving an Inbox task makes its subtasks: your team, assigned to you, in Todo, with
         the parent's client label, project and priority. Undo deletes it like any issue."""
         title = body.title.strip()
         if not title:
@@ -984,7 +988,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             return l.create_issue(
                 team_id=m.team_id, title=title, description=f"Part of {parent['identifier']}: {parent['title']}",
                 assignee_id=m.viewer_id, state_id=todo["id"], priority=parent["priority"], due_date=None,
-                label_ids=[x["id"] for x in client_labels(parent, settings.client_label_group)],
+                label_ids=[x["id"] for x in client_labels_of(parent, settings.client_label_group)],
                 parent_id=parent["id"], project_id=(parent.get("project") or {}).get("id"),
             )
 
