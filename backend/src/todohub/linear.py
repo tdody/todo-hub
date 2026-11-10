@@ -181,6 +181,32 @@ class Linear:
             ]
         return []
 
+    def initiative_projects(self, ref: str) -> list[dict]:
+        """Projects in an initiative, found by its name or id (``Q4 Missions``, or an id Linear
+        accepts): [{name, mine (I lead it), status}], canceled ones left out. [] when the initiative
+        isn't found or the query fails: the weekly check-in draft then groups by project instead."""
+        fields = "projects(first: 100) { nodes { name lead { isMe } status { type name } } }"
+        attempts = (
+            (f"query($ref: String!) {{ initiative(id: $ref) {{ {fields} }} }}", lambda d: [d.get("initiative")]),
+            (f"query($ref: String!) {{ initiatives(first: 5, filter: {{ name: {{ eqIgnoreCase: $ref }} }}) {{ nodes {{ {fields} }} }} }}",
+             lambda d: (d.get("initiatives") or {}).get("nodes") or []),
+        )
+        for query, initiatives in attempts:
+            try:
+                data = self.gql(query, {"ref": ref})
+            except LinearError:
+                continue
+            found = [i for i in initiatives(data) if i]
+            if not found:
+                continue
+            return [
+                {"name": p["name"], "mine": bool((p.get("lead") or {}).get("isMe")),
+                 "status": ((p.get("status") or {}).get("name") or "")}
+                for i in found for p in i["projects"]["nodes"]
+                if ((p.get("status") or {}).get("type") or "") != "canceled"
+            ]
+        return []
+
     def my_open_issues(self) -> list[dict]:
         return self._paginate(
             f"""

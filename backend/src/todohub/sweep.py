@@ -26,7 +26,7 @@ from .config import Settings, get_linear_key, load_settings
 from .db import DB, now_iso
 from .linear import Linear, LinearError, client_label_of
 from .selfcmd import self_command
-from . import handled, mutes, sources
+from . import handled, mutes, note, plan, sources, wrapup
 
 log = logging.getLogger("todohub.sweep")
 
@@ -39,6 +39,9 @@ TODO_DB_TOOLS = [
     "mcp__todo-db__propose_update",
     "mcp__todo-db__report_source_status",
     "mcp__todo-db__report_agenda",
+    "mcp__todo-db__report_plan",
+    "mcp__todo-db__report_wrapup",
+    "mcp__todo-db__report_note",
 ]
 # Belt and braces. Headless mode already refuses tools that aren't allowed, but an "allow" rule
 # in ~/.claude/settings.json would still apply. A deny always wins, so the risky built-ins and
@@ -257,7 +260,9 @@ def build_prompt(settings: Settings, since: datetime, client_labels: list[str],
                  open_issues: list[dict], pending: list[dict], decisions: dict | None = None,
                  watched: list[dict] | None = None, projects: list[str] | None = None,
                  mentions: str | None = None, sinces: dict[str, datetime] | None = None,
-                 meeting_prep: bool = True, muted: list[dict] | None = None) -> str:
+                 meeting_prep: bool = True, muted: list[dict] | None = None,
+                 plan_section: str | None = None, wrapup_section: str | None = None,
+                 note_section: str | None = None) -> str:
     template = Template(resources.files("todohub").joinpath("sweep_prompt.md").read_text())
     now = datetime.now(timezone.utc)
     issues = "\n".join(
@@ -271,7 +276,8 @@ def build_prompt(settings: Settings, since: datetime, client_labels: list[str],
         now=now.replace(microsecond=0).isoformat(),
         now_local=_fmt(now),
         source_sections="\n\n".join(part for part in (
-            mutes.prompt_section(muted or []), source_sections(settings, since, mentions, sinces, meeting_prep)) if part),
+            mutes.prompt_section(muted or []), source_sections(settings, since, mentions, sinces, meeting_prep),
+            plan_section, note_section, wrapup_section) if part),
         client_labels=", ".join(client_labels) or "(no client labels loaded)",
         projects=", ".join(projects or []) or "(no projects loaded)",
         open_issues=issues,
@@ -502,11 +508,21 @@ def run_sweep(settings: Settings, trigger: str = "manual", only: str | None = No
         prep = meeting_prep_due(db) or only == "calendar"   # asked for: read the calendar again
         if settings.calendar_tools and not prep:
             db.report_source_status(run_id, "calendar", True, "Meeting prep already done today", 0)
+        # The first sweep of a working morning also plans the day (see plan.py).
+        plan_ctx = plan.gather(settings, db) if not only and plan.plan_due(db) else None
+        # The first sweep from noon, before the wrap-up, also writes the midday note (see note.py).
+        note_ctx = note.gather(settings, db) if not only and note.note_due(db) else None
+        # The first sweep from 3 PM (the 4 PM one) also writes the wrap-up (see wrapup.py).
+        wrap_ctx = wrapup.gather(settings, db) if not only and wrapup.wrapup_due(db) else None
+        agenda_from_this_run = prep and bool(settings.calendar_tools)
         prompt = build_prompt(settings, since, db.get_meta("client_labels", []), open_issues,
                               db.list_candidates("pending"), db.recent_decisions(),
                               db.watched_issues([i["identifier"] for i in open_issues]),
                               db.get_meta("projects", []), mentions, sinces, meeting_prep=prep,
-                              muted=db.list_mutes())
+                              muted=db.list_mutes(),
+                              plan_section=plan.section(plan_ctx, agenda_from_this_run) if plan_ctx else None,
+                              wrapup_section=wrapup.section(wrap_ctx) if wrap_ctx else None,
+                              note_section=note.section(note_ctx, agenda_from_this_run) if note_ctx else None)
         out = _invoke_claude(settings, run_id, prompt, log_path, f"sweep {run_id}, since {since.isoformat()}")
 
         reported = {s["source"] for s in (db.get_run(run_id, with_sources=True) or {}).get("sources", [])}
@@ -534,6 +550,95 @@ def recheck_pending(settings: Settings, db: DB, open_issues: list[dict]) -> int:
         log.warning("Couldn't read closed issues; skipping the handled check: %s", exc)
         return 0
     return handled.recheck(db, open_issues, closed)
+
+
+def agenda_step(today: date) -> str:
+    """For a plan or note run without today's calendar saved: read it first."""
+    return ("## First: today's calendar\n"
+            f"List the events on Thibault's primary calendar today ({today.isoformat()}, America/New_York) and call "
+            "`report_agenda` once with every timed event he hasn't declined (start and end as HH:MM, title, "
+            "htmlLink, and whether people outside his domain attend).")
+
+
+def build_plan_prompt(settings: Settings, ctx: dict) -> str:
+    template = Template(resources.files("todohub").joinpath("plan_prompt.md").read_text())
+    needs_agenda = ctx["agenda"] is None and bool(settings.calendar_tools)
+    return template.substitute(now_local=_fmt(datetime.now(timezone.utc)),
+                               agenda_step=agenda_step(ctx["today"]) if needs_agenda else "",
+                               plan_section=plan.section(ctx, agenda_from_this_run=needs_agenda))
+
+
+def run_plan(settings: Settings) -> dict:
+    """Plan the day on its own ("Re-plan" in the app). Runs beside a sweep; one plan at a time."""
+    with _exclusive(settings, "plan"):
+        db = DB(settings.db_path)
+        log_path = _log_path(settings, "plan")
+        run_id = db.start_run("plan", now_iso(), str(log_path))
+        refresh_linear_context(settings, db)          # the identifiers report_plan checks against
+        ctx = plan.gather(settings, db)
+        if ctx is None:
+            db.finish_run(run_id, "error", error="Couldn't read Linear, so there's nothing to plan from.")
+            return db.get_run(run_id) or {}
+        out = _invoke_claude(settings, run_id, build_plan_prompt(settings, ctx), log_path, f"plan {run_id}")
+        saved = (db.get_meta("plans", {}) or {}).get(ctx["today"].isoformat(), {}).get("run_id") == run_id
+        status, error = out["status"], out["error"]
+        if status == "ok" and not saved:
+            status, error = "error", "Claude finished without saving a plan. See the log for why."
+        db.finish_run(run_id, status, cost_usd=out["cost"], num_turns=out["turns"], error=error)
+        return db.get_run(run_id) or {}
+
+
+def build_note_prompt(settings: Settings, ctx: dict) -> str:
+    template = Template(resources.files("todohub").joinpath("note_prompt.md").read_text())
+    needs_agenda = ctx["agenda_left"] is None and bool(settings.calendar_tools)
+    return template.substitute(now_local=_fmt(datetime.now(timezone.utc)),
+                               agenda_step=agenda_step(ctx["today"]) if needs_agenda else "",
+                               note_section=note.section(ctx, agenda_from_this_run=needs_agenda))
+
+
+def run_note(settings: Settings) -> dict:
+    """Write the midday note on its own ("Redo" in the app). Runs beside a sweep; one at a time."""
+    with _exclusive(settings, "note"):
+        db = DB(settings.db_path)
+        log_path = _log_path(settings, "note")
+        run_id = db.start_run("note", now_iso(), str(log_path))
+        refresh_linear_context(settings, db)          # the identifiers report_note checks refs against
+        ctx = note.gather(settings, db)
+        if ctx is None:
+            db.finish_run(run_id, "error", error="Couldn't read Linear, so there's nothing to write the note from.")
+            return db.get_run(run_id) or {}
+        out = _invoke_claude(settings, run_id, build_note_prompt(settings, ctx), log_path, f"note {run_id}")
+        saved = (db.get_meta("notes", {}) or {}).get(ctx["today"].isoformat(), {}).get("run_id") == run_id
+        status, error = out["status"], out["error"]
+        if status == "ok" and not saved:
+            status, error = "error", "Claude finished without saving a note. See the log for why."
+        db.finish_run(run_id, status, cost_usd=out["cost"], num_turns=out["turns"], error=error)
+        return db.get_run(run_id) or {}
+
+
+def build_wrapup_prompt(settings: Settings, ctx: dict) -> str:
+    template = Template(resources.files("todohub").joinpath("wrapup_prompt.md").read_text())
+    return template.substitute(now_local=_fmt(datetime.now(timezone.utc)), wrapup_section=wrapup.section(ctx))
+
+
+def run_wrapup(settings: Settings) -> dict:
+    """Write the wrap-up on its own ("Redo" in the app). Runs beside a sweep; one at a time."""
+    with _exclusive(settings, "wrapup"):
+        db = DB(settings.db_path)
+        log_path = _log_path(settings, "wrapup")
+        run_id = db.start_run("wrapup", now_iso(), str(log_path))
+        refresh_linear_context(settings, db)          # the identifiers report_wrapup checks against
+        ctx = wrapup.gather(settings, db)
+        if ctx is None:
+            db.finish_run(run_id, "error", error="Couldn't read Linear, so there's nothing to wrap up.")
+            return db.get_run(run_id) or {}
+        out = _invoke_claude(settings, run_id, build_wrapup_prompt(settings, ctx), log_path, f"wrap-up {run_id}")
+        saved = (db.get_meta("wrapups", {}) or {}).get(ctx["today"].isoformat(), {}).get("run_id") == run_id
+        status, error = out["status"], out["error"]
+        if status == "ok" and not saved:
+            status, error = "error", "Claude finished without saving a wrap-up. See the log for why."
+        db.finish_run(run_id, status, cost_usd=out["cost"], num_turns=out["turns"], error=error)
+        return db.get_run(run_id) or {}
 
 
 def build_capture_prompt(settings: Settings, text: str, client_labels: list[str], open_issues: list[dict]) -> str:
@@ -568,6 +673,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one TodoHub sweep, or capture one pasted item.")
     parser.add_argument("--trigger", choices=["schedule", "manual"], default="manual")
     parser.add_argument("--capture", metavar="TEXT", help="capture this link or note instead of sweeping")
+    parser.add_argument("--plan", action="store_true", help="plan the day instead of sweeping")
+    parser.add_argument("--wrapup", action="store_true", help="write the day's wrap-up instead of sweeping")
+    parser.add_argument("--note", action="store_true", help="write the midday note instead of sweeping")
     parser.add_argument("--source", choices=["slack", "gmail", "grain", "calendar", "hubspot", "linear", "github"],
                         help="sweep only this source")
     args = parser.parse_args(argv)
@@ -575,6 +683,9 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings()
     try:
         run = (run_capture(settings, args.capture) if args.capture is not None
+               else run_plan(settings) if args.plan
+               else run_wrapup(settings) if args.wrapup
+               else run_note(settings) if args.note
                else run_sweep(settings, args.trigger, args.source))
     except AlreadyRunning as exc:
         print(exc, file=sys.stderr)
