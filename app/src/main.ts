@@ -2176,7 +2176,7 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
     subs.length ? h("h4", {}, `Sub-issues · ${subs.length}`) : "",
     subs.length ? h("ul", { class: "tl-subs" }, ...subs.map((s) => {
       const done = s.state.type === "completed";
-      const open = !closedType(s.state.type);
+      const open = isOpen(s);
       return h("li", { class: open ? "" : "done" },
         s.own_team
           ? h("input", { type: "checkbox", checked: done, disabled: state.busy.has(`${s.id}:tick`), title: done ? "Reopen" : "Mark done",
