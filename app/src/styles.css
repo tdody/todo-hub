@@ -1318,8 +1318,35 @@ details.more[open] > summary { margin-bottom: 10px; }
 .block.done { font-size: 12px; white-space: nowrap; }
 .tl-pane > .tl-meta .slip { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 .tl-pane > .tl-meta .slip.repeat { background: var(--warn-bg); color: var(--warn-ink); }
-.tl-fields { flex-wrap: nowrap; }
 .tl-fields .qdate { min-width: 0; }
+
+/* ---- Reading pane: editing in place ------------------------------------------------------------ */
+/* The title and description read as text and become fields where they sit, in the same type. */
+.pane-title { cursor: text; border-radius: 6px; }
+.pane-title:not(.editing):hover { background: var(--surface-2); box-shadow: 0 0 0 4px var(--surface-2); }
+.pane-title-input { display: block; box-sizing: border-box; width: calc(100% + 14px); margin: -3px -7px; padding: 2px 6px;
+  border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); font: inherit; color: inherit; outline: none; }
+.tl-desc.editable { cursor: text; border-radius: 6px; }
+.tl-desc.editable:hover { background: var(--surface-2); box-shadow: 0 0 0 6px var(--surface-2); }
+.desc-input { display: block; box-sizing: border-box; width: calc(100% + 14px); margin: -5px -7px 0; padding: 4px 6px;
+  border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 13px; line-height: 1.55; resize: vertical; outline: none; }
+.desc-input + p { margin: 6px 0 0; }
+.add-text { padding: 0; border: 0; background: none; font: inherit; font-size: 13px; color: var(--muted); cursor: text; }
+.add-text:hover { color: var(--ink); }
+.tl-subs li { align-items: center; }
+.tl-subs input[type="checkbox"] { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.tl-subs .sub-gap { flex: none; width: 14px; }
+.tl-subs li.done .dtitle { color: var(--muted); text-decoration: line-through; }
+.sub-add { display: block; box-sizing: border-box; width: calc(100% + 12px); margin: 4px -6px 0; padding: 4px 6px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; font: inherit; font-size: 13px; }
+.sub-add:hover { border-color: var(--border); }
+.sub-add:focus { border-color: var(--accent); background: var(--surface); outline: none; }
+.comment-box { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.comment-box .comment-input { margin: 0; font-size: 13px; }
+.comment-hint { display: flex; justify-content: space-between; gap: 8px; }
+/* Client and project show in a reading pane even when unset: they're how an issue moves. */
+:is(.tl-pane, .td-st) select.quiet-empty { opacity: 1; }
 
 /* ---- Inbox: list on the left, the selected candidate in full on the right ---------------------- */
 /* Same grid, row columns and pane as Today, Client and Dev (.tl-grid, .tl-item, .tl-pane). */
