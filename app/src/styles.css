@@ -1339,6 +1339,7 @@ details.more[open] > summary { margin-bottom: 10px; }
 .tl-subs li.done .dtitle { color: var(--muted); text-decoration: line-through; }
 .sub-add { display: block; width: calc(100% + 14px); margin: 4px -7px 0; padding: 4px 6px;
   border: 1px solid transparent; border-radius: 6px; background: transparent; font-size: 13px; }
+.sub-add::placeholder, .comment-input::placeholder { color: var(--muted); }
 .comment-box { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
 .comment-box .comment-input { margin: 0; font-size: 13px; }
 .comment-hint { display: flex; justify-content: space-between; gap: 8px; }
