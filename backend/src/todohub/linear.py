@@ -37,6 +37,11 @@ def is_linear_upload(url: str) -> bool:
 STATE_ORDER = {"triage": 0, "backlog": 1, "unstarted": 2, "started": 3, "completed": 4, "canceled": 5, "duplicate": 6}
 
 
+def in_linear_order(states: list[dict]) -> list[dict]:
+    """A team's statuses in Linear's menu order: by kind, then the team's order within it."""
+    return sorted(states, key=lambda s: (STATE_ORDER.get(s["type"], 9), s["position"]))
+
+
 class LinearError(RuntimeError):
     pass
 
@@ -149,12 +154,10 @@ class Linear:
             ["issueLabels"],
             {"group": client_group},
         )
-        # Linear's menu order: by kind, then the team's order within it.
-        states = sorted(team["states"]["nodes"], key=lambda s: (STATE_ORDER.get(s["type"], 9), s["position"]))
         projects = self.team_projects(team["id"])
         return TeamMeta(
             team_id=team["id"],
-            states=states,
+            states=in_linear_order(team["states"]["nodes"]),
             client_labels=sorted(labels, key=lambda l: l["name"].lower()),
             viewer_id=data["viewer"]["id"],
             projects=sorted(projects, key=lambda p: p["name"].lower()),
@@ -331,7 +334,7 @@ class Linear:
     def team_states(self, team_id: str) -> list[dict]:
         data = self.gql("query($id: String!) { team(id: $id) { states { nodes { id name type position } } } }",
                         {"id": team_id})
-        return data["team"]["states"]["nodes"]
+        return in_linear_order(data["team"]["states"]["nodes"])
 
     def create_comment(self, issue_id: str, body: str) -> str:
         """Add a comment; returns its id."""
