@@ -264,6 +264,20 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return next((s for s in states if s["name"] == settings.todo_state), None) or \
             next((s for s in states if s["type"] == "unstarted"), None)
 
+    def create_sub_issue(l: Linear, m: TeamMeta, parent: dict, title: str, *, label_ids: list[str], priority: int,
+                         due_date: str | None = None) -> dict:
+        """A sub-issue under ``parent``, an issue already in Linear: in the parent's team and project, assigned
+        to you, in Todo (todo_status). Raises LinearError when that team has no not-started status."""
+        team_id = (parent.get("team") or {}).get("id") or m.team_id
+        todo = todo_status(m.states if team_id == m.team_id else l.team_states(team_id))
+        if not todo:
+            raise LinearError("the parent's team has no not-started status")
+        return l.create_issue(
+            team_id=team_id, title=title, description=f"Part of {parent['identifier']}: {parent['title']}",
+            assignee_id=m.viewer_id, state_id=todo["id"], priority=priority, due_date=due_date,
+            label_ids=label_ids, parent_id=parent["id"], project_id=(parent.get("project") or {}).get("id"),
+        )
+
     def candidate_or_404(cid: int) -> dict:
         c = db.get_candidate(cid)
         if not c:
@@ -611,25 +625,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                     warnings.append(f"Link not attached ({link['title']}): {exc}")
 
             if c["subtasks"]:
-                team_id = (target.get("team") or {}).get("id") or m.team_id
-                try:
-                    states = m.states if team_id == m.team_id else client.team_states(team_id)
-                except LinearError:
-                    states = []
-                todo = todo_status(states)
                 label_ids = [l["id"] for l in m.client_labels if l["name"] == c["client_label"]]
                 for sub in c["subtasks"]:
-                    if not todo:
-                        warnings.append(f"Subtask not created ({sub['title']}): no Todo status on that team")
-                        continue
                     try:
-                        child = client.create_issue(
-                            team_id=team_id, title=sub["title"],
-                            description=f"Part of {target['identifier']}: {target['title']}",
-                            assignee_id=m.viewer_id, state_id=todo["id"],
+                        child = create_sub_issue(
+                            client, m, target, sub["title"], label_ids=label_ids, due_date=sub.get("due_date"),
                             priority=c["priority"] or target.get("priority") or settings.default_priority,
-                            due_date=sub.get("due_date"), label_ids=label_ids, parent_id=target["id"],
-                            project_id=(target.get("project") or {}).get("id"),
                         )
                         created.append(shape_issue(child, settings))
                         undo["issues"].append(child["id"])
@@ -979,24 +980,17 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.post("/api/issues/{issue_id}/sub-issues", dependencies=auth)
     def add_sub_issue(issue_id: str, body: SubIssueIn) -> dict:
-        """A sub-issue made the way approving an Inbox task makes its subtasks: your team, assigned to you, in Todo
-        (see todo_status), with the parent's client label, project and priority. Undo deletes it like any issue."""
+        """A sub-issue made as merging an Inbox task makes them (create_sub_issue), with the parent's client label
+        and priority. Undo deletes it like any issue."""
         title = body.title.strip()
         if not title:
             raise HTTPException(400, "The title can't be empty")
         m = team_meta()
-        todo = todo_status(m.states)
-        if not todo:
-            raise HTTPException(500, f"Team {settings.team_key} has no not-started status")
 
         def run(l: Linear) -> dict:
             parent = l.get_issue(issue_id)
-            return l.create_issue(
-                team_id=m.team_id, title=title, description=f"Part of {parent['identifier']}: {parent['title']}",
-                assignee_id=m.viewer_id, state_id=todo["id"], priority=parent["priority"], due_date=None,
-                label_ids=[x["id"] for x in client_labels_of(parent, settings.client_label_group)],
-                parent_id=parent["id"], project_id=(parent.get("project") or {}).get("id"),
-            )
+            return create_sub_issue(l, m, parent, title, priority=parent["priority"],
+                                    label_ids=[x["id"] for x in client_labels_of(parent, settings.client_label_group)])
 
         return shape_issue(linear_call(run), settings)
 
