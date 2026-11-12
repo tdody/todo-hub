@@ -5,6 +5,7 @@ from todohub import tools
 from todohub.api import PREVIEW_DESCRIPTION, create_app, issue_description
 from todohub.config import load_settings
 from todohub.db import DB
+from todohub.linear import LinearError
 from conftest import FakeLinear, make_issue
 
 
@@ -556,6 +557,29 @@ def test_merge_adds_comment_links_and_subtasks_then_undoes(env):
     assert fake.deleted_comments == ["comment-1"] and fake.deleted_attachments == ["att-1"]
     assert fake.deleted_issues == ["id-ENG-99"]
     assert r.json()["candidate"]["status"] == "pending"
+
+
+def test_merge_sub_issues_follow_the_target(env):
+    client, db, fake, _ = env
+    dup_env(db)
+    fake.issues[0].update(team={"id": "team-ops"}, project={"id": "p-ops", "name": "Ops"})
+    fake.team_states = lambda team_id: [{"id": "ops-next", "name": "Next", "type": "unstarted", "position": 1}]
+    cid = seed(db, title="Send Jordan the table", possible_duplicate="ENG-1", priority=2,
+               subtasks=[{"title": "Export the table", "due_date": "2026-11-12"}])
+    r = client.post(f"/api/candidates/{cid}/merge")
+    assert r.status_code == 200, r.text
+    made = fake.created[0]
+    assert (made["team_id"], made["state_id"], made["project_id"]) == ("team-ops", "ops-next", "p-ops")
+    assert (made["label_ids"], made["priority"], made["due_date"]) == (["l-Initech & Co"], 2, "2026-11-12")
+
+    def unreachable(team_id):
+        raise LinearError("Can't reach Linear")
+    fake.team_states = unreachable
+    cid = seed(db, source_id="C1:z", title="Another", possible_duplicate="ENG-1", subtasks=[{"title": "Export the table"}])
+    r = client.post(f"/api/candidates/{cid}/merge")
+    assert r.status_code == 200, r.text
+    assert r.json()["warnings"] == ["Subtask not created (Export the table): Can't reach Linear"]
+    assert len(fake.created) == 1
 
 
 def test_merge_needs_a_flagged_duplicate(env):
