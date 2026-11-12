@@ -94,9 +94,13 @@ def build(*, week_offset: int, completed: list[dict], open_issues: list[dict], s
                              f"Start next week with {behind} work.",
                      "action": "tab", "tab": behind, "label": f"Show {behind} work"})
     if overdue:
+        # Opens the tab of the most overdue one with the overdue issues there highlighted.
+        tab = overdue[0]["list"]
+        here = [i["identifier"] for i in overdue if i["list"] == tab]
         recs.append({"text": f"{len(overdue)} open issue{'s are' if len(overdue) != 1 else ' is'} overdue. "
-                             "Re-date or close them.",
-                     "action": "tab", "tab": overdue[0]["list"], "label": "Review"})
+                             f"Re-date or close {'it' if len(overdue) == 1 else 'them'}.",
+                     "action": "tab", "tab": tab, "issues": here,
+                     "label": f"Show {here[0]}" if len(here) == 1 else f"Show {len(here)} in {tab.capitalize()}"})
     if noisy:
         src, r = noisy
         recs.append({"text": f"{SOURCE_NAME.get(src, src)}: you dropped {r['dropped']} of {r['approved'] + r['dropped']} "

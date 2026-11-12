@@ -215,6 +215,102 @@ def report_agenda(day: str, events: list[AgendaEvent]) -> dict:
     return _call(tools.report_agenda, _get_db(), _run_id(), day=day, events=[e.model_dump() for e in events])
 
 
+class PlanPick(BaseModel):
+    identifier: str = Field(description="the issue identifier, e.g. ENG-123")
+    why: str = Field(description="one sentence, at most 25 words: why today, with the concrete reason")
+    minutes: int = Field(description="your estimate of the time it takes, 5 to 240")
+
+
+class PlanAside(BaseModel):
+    identifier: str = Field(description="a late issue you didn't pick")
+    action: Literal["move", "ask", "clear_date"]
+    why: str = Field(description="one sentence")
+    move_to: str | None = Field(default=None, description="move only: the new due date, YYYY-MM-DD")
+    message: str | None = Field(default=None, description="ask only: a short note he could send, in his voice")
+
+
+@server.tool()
+def report_plan(day: str, headline: str, recap: str, summary: str, picks: list[PlanPick],
+                set_aside: list[PlanAside] | None = None) -> dict:
+    """Save today's plan for Thibault: what to do today, most important first, each with why and
+    how long; and a next step for each late issue you left out. Call once. These are suggestions
+    he reviews; nothing is changed in Linear.
+
+    day: YYYY-MM-DD (America/New_York).
+    headline: one line, e.g. "About 5 h free around 3 meetings. Here's a plan for 3½ h."
+    recap: one or two short sentences (about 30 words) on the last working day: what he closed,
+        what carried over, what slipped, who still hasn't answered.
+    summary: two short sentences (about 35 words) about the shape of today, as a colleague would say it.
+    In recap and summary, mark each issue you name as [short label](ENG-123).
+    """
+    return _call(tools.report_plan, _get_db(), _run_id(), day=day, headline=headline, recap=recap,
+                 summary=summary, picks=[p.model_dump() for p in picks],
+                 set_aside=[a.model_dump() for a in set_aside or []])
+
+
+class WrapupItem(BaseModel):
+    identifier: str = Field(description="an issue under \"Still open\", e.g. ENG-123")
+    action: Literal["carry", "move", "ask", "close"]
+    why: str = Field(description="one sentence, at most 25 words, with the concrete reason")
+    move_to: str | None = Field(default=None, description="move only: the new due date, YYYY-MM-DD")
+    message: str | None = Field(default=None, description="ask only: a short note he could send, in his voice")
+
+
+class StartWith(BaseModel):
+    identifier: str = Field(description="the open issue to start the next working day with")
+    why: str = Field(description="one sentence")
+
+
+class CheckinGroup(BaseModel):
+    mission: str = Field(description="a mission name exactly as listed, or \"Other\"")
+    items: list[str] = Field(description="plain first-person accomplishments (releases, client results), each ending with the issue identifier in parentheses")
+
+
+class CheckinHealth(BaseModel):
+    mission: str = Field(description="a mission he leads, exactly as listed")
+    status: Literal["on_track", "at_risk", "off_track"]
+    why: str = Field(description="one sentence")
+
+
+class Checkin(BaseModel):
+    work: list[CheckinGroup] = Field(default_factory=list, description="accomplishments this week, by mission; no meetings or communication")
+    next_week: list[str] = Field(default_factory=list, description="results he expects next week, plain lines with identifiers")
+    review: list[str] = Field(default_factory=list, description="documents, decks or dashboards to look at, \"title: link\"; never a pull request")
+    health: list[CheckinHealth] = Field(default_factory=list, description="one per mission he leads")
+
+
+@server.tool()
+def report_wrapup(day: str, summary: str, items: list[WrapupItem], start_with: StartWith | None = None,
+                  notes: list[str] | None = None, checkin: Checkin | None = None) -> dict:
+    """Save today's wrap-up for Thibault: a short summary, a next step for each issue still open on
+    today's list, what to start the next working day with, notes on today's work kept for the
+    week, and the week's mission check-in draft. Call once. These are suggestions he reviews;
+    nothing is changed in Linear and nothing is sent.
+
+    day: YYYY-MM-DD (America/New_York).
+    summary: two or three short sentences (one idea each, under 15 words): what moved, what's stuck,
+        how the next day starts, shown as one short paragraph. Mark each issue you name as
+        [short label](ENG-123).
+    """
+    return _call(tools.report_wrapup, _get_db(), _run_id(), day=day, summary=summary,
+                 items=[i.model_dump() for i in items], start_with=start_with.model_dump() if start_with else None,
+                 notes=notes or [], checkin=checkin.model_dump() if checkin else None)
+
+
+@server.tool()
+def report_note(day: str, headline: str, summary: str) -> dict:
+    """Save Thibault's midday note: a fresh look at the rest of his day. Call once. It's a
+    suggestion he reads; nothing is changed in Linear and nothing is sent.
+
+    day: YYYY-MM-DD (America/New_York).
+    headline: one plain line on what to do next.
+    summary: at most two short sentences (about 35 words): what's still open on today's list, the
+        next meeting and what to do before it, who to nudge. Mark each issue you name as
+        [short label](ENG-123).
+    """
+    return _call(tools.report_note, _get_db(), _run_id(), day=day, headline=headline, summary=summary)
+
+
 @server.tool()
 def report_source_status(
     source: Literal["slack", "gmail", "grain", "calendar", "linear", "hubspot"],

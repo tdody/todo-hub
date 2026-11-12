@@ -13,44 +13,18 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
-import os
-import plistlib
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from . import schedule
 from .config import ensure_home, get_linear_key, load_settings, set_linear_key
 from .linear import Linear, LinearError
 from .selfcmd import self_command
 
-LABEL = "com.todohub.sweep"
-SCHEDULE_HOURS = (8, 10, 12, 14, 16)
-WEEKDAYS = (1, 2, 3, 4, 5)   # launchd: 0 and 7 are Sunday
 CONNECTORS = {"gmail": "claude.ai Gmail", "slack": "claude.ai Slack", "grain": "claude.ai Grain",
               "hubspot": "claude.ai HubSpot"}
-
-
-def plist_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
-
-
-def schedule_plist() -> dict:
-    settings = load_settings()
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
-    if os.environ.get("TODOHUB_HOME"):
-        env["TODOHUB_HOME"] = os.environ["TODOHUB_HOME"]
-    return {
-        "Label": LABEL,
-        "ProgramArguments": [*self_command("sweep"), "--trigger", "schedule"],
-        "StartCalendarInterval": [
-            {"Weekday": d, "Hour": h, "Minute": 0} for d in WEEKDAYS for h in SCHEDULE_HOURS
-        ],
-        "EnvironmentVariables": env,
-        "StandardOutPath": str(settings.log_dir / "launchd.log"),
-        "StandardErrorPath": str(settings.log_dir / "launchd.log"),
-        "ProcessType": "Background",
-    }
 
 
 def broad_allow_rules(settings, path: Path | None = None) -> list[str]:
@@ -146,7 +120,7 @@ def cmd_check(_: argparse.Namespace) -> int:
                   f"GitHub (gh): not signed in. Run `gh auth login`. {gh.stderr.strip()[:200]}")
         except (FileNotFoundError, subprocess.TimeoutExpired):
             print(f"GitHub (gh): not found as {settings.gh_path!r}. Install it, or set github_reviews = false.")
-    print(f"Schedule: {'installed' if plist_path().exists() else 'not installed'}")
+    print(f"Schedule: {schedule.summary(settings) if schedule.installed() else 'not installed'}")
     print(f"Dead Man's Snitch: {'set' if settings.snitch_url else 'not set'}")
     return 0 if ok else 1
 
@@ -165,24 +139,59 @@ def cmd_list_tools(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_connectors(args: argparse.Namespace) -> int:
+    """The claude.ai connectors a sweep can see, and which of their tools only read (by name)."""
+    from . import connectors
+    settings = load_settings()
+    if args.probe:
+        for label, result in connectors.probe(settings):
+            print(f"\n{label}:")
+            if isinstance(result, str):
+                print(f"   failed: {result}")
+                continue
+            print("   servers: " + (", ".join(f"{n} ({st})" for n, st in result["servers"]) or "none"))
+            print("   tools:   " + ", ".join(f"{k} {v}" for k, v in sorted(result["tools"].items())))
+        return 0
+    report: dict = {}
+    try:
+        found = connectors.discover(settings, report=report)
+    except connectors.DiscoveryError as exc:
+        print(exc)
+        return 1
+    if args.debug:
+        print("Start-up message, MCP servers: " + (", ".join(f"{n} ({st})" for n, st in report["servers"]) or "none"))
+        print("Start-up message, tools: " + ", ".join(f"{k} {v}" for k, v in sorted(report["tools"].items())))
+    if args.json:
+        print(json.dumps(found, indent=2))
+        return 0
+    if not found:
+        print("No claude.ai connectors found. Connect apps at claude.ai/settings/connectors, then try again.")
+        return 1
+    for c in found:
+        tag = (f"built in as {c['builtin']}" if c["builtin"] else "blocked for sweeps" if c["denied"]
+               else "no tools a sweep can see" if not c["tools"] else "not read by TodoHub yet")
+        counts = {k: sum(t["kind"] == k for t in c["tools"]) for k in ("read", "unclear", "write")}
+        print(f"\n{c['name']} ({tag}; status: {c['status'] or 'unknown'}): {len(c['tools'])} tools, "
+              f"{counts['read']} read, {counts['unclear']} unclear, {counts['write']} write")
+        if args.tools or not (c["builtin"] or c["denied"]):
+            for t in c["tools"]:
+                print(f"   {t['kind']:<8} {t['name']}")
+    return 0
+
+
 def cmd_install_schedule(_: argparse.Namespace) -> int:
-    path = plist_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as fh:
-        plistlib.dump(schedule_plist(), fh)
-    domain = f"gui/{os.getuid()}"
-    subprocess.call(["launchctl", "bootout", domain, str(path)], stderr=subprocess.DEVNULL)
-    code = subprocess.call(["launchctl", "bootstrap", domain, str(path)])
-    if code == 0:
-        hours = ", ".join(f"{h}:00" for h in SCHEDULE_HOURS)
-        print(f"Scheduled: weekdays at {hours} (your Mac's local time). If the Mac is asleep, the run happens on wake.")
-    return code
+    settings = load_settings()
+    try:
+        schedule.install(settings)
+    except schedule.ScheduleError as exc:
+        print(exc)
+        return 1
+    print(f"Scheduled: {schedule.summary(settings)} (your Mac's local time). If the Mac is asleep, the run happens on wake.")
+    return 0
 
 
 def cmd_uninstall_schedule(_: argparse.Namespace) -> int:
-    path = plist_path()
-    subprocess.call(["launchctl", "bootout", f"gui/{os.getuid()}", str(path)], stderr=subprocess.DEVNULL)
-    path.unlink(missing_ok=True)
+    schedule.uninstall()
     print("Schedule removed.")
     return 0
 
@@ -196,6 +205,12 @@ def main(argv: list[str] | None = None) -> int:
     lt = sub.add_parser("list-tools")
     lt.add_argument("source", choices=sorted(CONNECTORS))
     lt.set_defaults(fn=cmd_list_tools)
+    cn = sub.add_parser("connectors", help="claude.ai connectors the sweep can see, and their tools")
+    cn.add_argument("--json", action="store_true")
+    cn.add_argument("--tools", action="store_true", help="list tools for built-in and blocked connectors too")
+    cn.add_argument("--debug", action="store_true", help="show what Claude Code reported at start-up")
+    cn.add_argument("--probe", action="store_true", help="compare what Claude Code loads when started four ways")
+    cn.set_defaults(fn=cmd_connectors)
     sub.add_parser("install-schedule").set_defaults(fn=cmd_install_schedule)
     sub.add_parser("uninstall-schedule").set_defaults(fn=cmd_uninstall_schedule)
     args = parser.parse_args(argv)

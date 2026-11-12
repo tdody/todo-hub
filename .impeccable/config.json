@@ -1,0 +1,42 @@
+{
+  "hook": {
+    "enabled": true,
+    "limits": {
+      "maxFindings": 5,
+      "maxChars": 8000
+    }
+  },
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "cream-palette",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/*.html"
+        ],
+        "createdAt": "2026-11-09T23:41:21.836Z",
+        "reason": "Agent: sketches use the Daylight theme's Afternoon phase (app/src/daylight.ts PALETTE, DESIGN.md Themes), the product's own palette"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/*.html"
+        ],
+        "createdAt": "2026-11-09T23:41:21.907Z",
+        "reason": "Agent: the 3px edge marks a High-priority row, which DESIGN.md Shapes reserves stripes for"
+      },
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/today-hybrid.html"
+        ],
+        "createdAt": "2026-11-10T13:06:53.620Z",
+        "reason": "Agent: the sunrise sun's glow; DESIGN.md Do's keep glows in the sky, and app/src/styles.css .pl-sun uses the same glow"
+      }
+    ]
+  }
+}

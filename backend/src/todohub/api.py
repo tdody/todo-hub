@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -20,16 +21,17 @@ from typing import Callable, Literal
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
-from . import logos, mutes, stats, summary, tools
+from . import logos, mutes, schedule, stats, summary, tools
 from .categories import categorize
-from .config import Settings, get_linear_key, load_settings
+from .config import (SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings,
+                     get_linear_key, load_settings, read_overrides, source_state, write_overrides)
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, shape_issue
+from .linear import Linear, LinearError, TeamMeta, is_linear_upload, shape_issue
 from .selfcmd import self_command
 from .sweep import next_working_day
 from .tools import ToolError
@@ -77,6 +79,35 @@ class TodayIn(BaseModel):
     issue_ids: list[str] = Field(max_length=30)
 
 
+class SourceStateIn(BaseModel):
+    state: Literal["on", "paused", "removed"]
+
+
+class ScheduleIn(BaseModel):
+    every: int
+    start: int = Field(ge=SCHEDULE_FIRST, le=SCHEDULE_LAST)
+    end: int = Field(ge=SCHEDULE_FIRST, le=SCHEDULE_LAST)
+    days: Literal["weekdays", "every day"] = "weekdays"
+
+
+class DaylightIn(BaseModel):
+    place: str = Field(default="", max_length=80)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+# The Settings page's sources, in the order it lists them: key, name, what it reads, how.
+SOURCE_INFO = [
+    ("slack", "Slack", "Direct asks and mentions", "claude.ai connector"),
+    ("gmail", "Email", "Someone asking you for something", "Gmail · claude.ai connector"),
+    ("grain", "Grain", "Meeting action items", "claude.ai connector"),
+    ("calendar", "Calendar", "Meetings and free time", "Google Calendar · claude.ai connector"),
+    ("hubspot", "HubSpot", "Tickets and notes waiting on you", "claude.ai connector"),
+    ("linear", "Linear mentions", "Where someone @-mentions you", "Linear API"),
+    ("github", "GitHub reviews", "PRs waiting on your review", "gh command"),
+]
+
+
 class BlockIn(BaseModel):
     start: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")    # HH:MM today, America/New_York
     minutes: int = Field(ge=15, le=240)
@@ -102,6 +133,15 @@ class IssueEdit(BaseModel):
     state_id: str | None = None
     priority: int | None = Field(default=None, ge=0, le=4)
     due_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class RestoreIn(BaseModel):
+    today_position: int | None = Field(default=None, ge=0)
+
+
+PREVIEW_DESCRIPTION = 6000   # characters of an issue's description in the reading pane
+PREVIEW_COMMENT = 1500       # characters of each of the latest three comments
+IMAGE_CACHE = 40             # Linear images kept in memory for the reading pane
 
 
 def _md(text: str) -> str:
@@ -132,7 +172,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                linear_factory: Callable[[], Linear] | None = None,
                sweep_launcher: Callable[[list[str]], None] | None = None,
                block_fn: Callable[..., str | None] | None = None,
-               draft_fn: Callable[[str, str], str | None] | None = None) -> FastAPI:
+               draft_fn: Callable[[str, str], str | None] | None = None,
+               scheduler=schedule) -> FastAPI:
     settings = settings or load_settings()
     db = db or DB(settings.db_path)
     db.release()     # approvals interrupted by a crash go back to the Inbox
@@ -149,6 +190,18 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     launch = sweep_launcher or default_launcher
     block = block_fn or (lambda **kw: calendar_block.block_time(settings, **kw))
     app = FastAPI(title="TodoHub", docs_url=None, redoc_url=None)
+
+    # An unexpected error would otherwise come back as a bare 500 from the outermost layer,
+    # without the CORS headers, and the app's web view would only say "Load failed". Catch it
+    # here, inside CORS, so the app shows what went wrong; the traceback goes to api.log.
+    @app.middleware("http")
+    async def unexpected_errors(request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as exc:  # noqa: BLE001 - reported to the app, logged in full
+            traceback.print_exc()
+            return JSONResponse({"error": f"{request.url.path} failed: {type(exc).__name__}: {exc}"}, status_code=500)
+
     app.add_middleware(
         CORSMiddleware, allow_origins=TAURI_ORIGINS, allow_methods=["*"], allow_headers=["*"],
     )
@@ -223,6 +276,75 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             return {"location": None}
         return {"location": {"lat": lat, "lon": lon,
                              "place": settings.daylight_place or f"{lat:.2f}, {lon:.2f}"}}
+
+    # ---- Settings page ----------------------------------------------------------------
+    # Its choices go to settings.json in the TodoHub folder (config.toml stays as you wrote it) and
+    # apply at once: this process reloads them, and each sweep reads them when it starts.
+    def reload_settings() -> None:
+        settings.__dict__.update(load_settings().__dict__)
+
+    def save_override(section: str, value) -> None:
+        data = read_overrides()
+        if isinstance(value, dict) and isinstance(data.get(section), dict) and section == "sources":
+            data[section] = {**data[section], **value}
+        else:
+            data[section] = value
+        write_overrides(data)
+        reload_settings()
+
+    def settings_body() -> dict:
+        status = {o["source"]: o for o in db.source_overview([k for k, *_ in SOURCE_INFO])}
+        return {
+            "sources": [{"key": k, "name": name, "reads": reads, "via": via, "state": source_state(settings, k),
+                         "status": status.get(k)} for k, name, reads, via in SOURCE_INFO],
+            "schedule": schedule.describe(settings, scheduler.installed()) | {"supported": scheduler.supported()},
+            "daylight": {"place": settings.daylight_place, "latitude": settings.daylight_latitude,
+                         "longitude": settings.daylight_longitude},
+        }
+
+    @app.get("/api/settings", dependencies=auth)
+    def get_settings() -> dict:
+        return settings_body()
+
+    @app.put("/api/settings/sources/{key}", dependencies=auth)
+    def set_source(key: str, body: SourceStateIn) -> dict:
+        if key not in SOURCE_FIELDS:
+            raise HTTPException(404, f"No source called {key}")
+        save_override("sources", {key: body.state})
+        return settings_body()
+
+    @app.put("/api/settings/schedule", dependencies=auth)
+    def set_schedule(body: ScheduleIn) -> dict:
+        """Save the hours and, when the schedule is installed, reload it so they apply now."""
+        if body.every not in SCHEDULE_EVERY:
+            raise HTTPException(400, f"every must be one of {', '.join(map(str, SCHEDULE_EVERY))} hours")
+        if body.end < body.start:
+            raise HTTPException(400, "The last sweep can't be before the first")
+        if body.days not in SCHEDULE_DAYS:
+            raise HTTPException(400, "days must be weekdays or every day")
+        save_override("schedule", body.model_dump())
+        if scheduler.installed():
+            try:
+                scheduler.install(settings)
+            except schedule.ScheduleError as exc:
+                raise HTTPException(502, f"Saved, but the Mac schedule wasn't updated: {exc}")
+        return settings_body()
+
+    @app.post("/api/settings/schedule/install", dependencies=auth)
+    def install_schedule() -> dict:
+        try:
+            scheduler.install(settings)
+        except schedule.ScheduleError as exc:
+            raise HTTPException(502, str(exc))
+        return settings_body()
+
+    @app.put("/api/settings/daylight", dependencies=auth)
+    def set_daylight(body: DaylightIn) -> dict:
+        """Where Daylight follows the sun. Without both coordinates it uses the Mac's time zone."""
+        if (body.latitude is None) != (body.longitude is None):
+            raise HTTPException(400, "Give both latitude and longitude, or neither")
+        save_override("daylight", body.model_dump())
+        return settings_body()
 
     # ---- review queue -----------------------------------------------------------------
     @app.get("/api/candidates", dependencies=auth)
@@ -643,6 +765,19 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             db.set_undo(cid, None)
         return {"candidate": db.decide(cid, "pending"), "warnings": warnings}
 
+    DECIDED_FIELDS = ("id", "title", "status", "kind", "drop_reason", "decided_at", "source", "source_url", "who",
+                      "client_label", "linear_identifier", "linear_url", "target_issue")
+
+    @app.get("/api/decided", dependencies=auth)
+    def decided(days: int = 30, limit: int = 300) -> dict:
+        """The Inbox's "Recently decided": approved and dropped cards of the last ``days``, newest
+        decision first. ``more`` is true when the limit cut the list short."""
+        days, limit = max(1, min(days, 365)), max(1, min(limit, 1000))
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0).isoformat()
+        rows = db.list_decided(since, limit + 1)
+        return {"days": days, "more": len(rows) > limit,
+                "items": [{k: r.get(k) for k in DECIDED_FIELDS} for r in rows[:limit]]}
+
     @app.post("/api/candidates/{cid}/restore", dependencies=auth)
     def restore(cid: int) -> dict:
         c = candidate_or_404(cid)
@@ -662,6 +797,20 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             out.append(shaped)
         return out
 
+    images: dict[str, tuple[bytes, str]] = {}     # recent Linear images, oldest first
+
+    @app.get("/api/linear-image", dependencies=auth)
+    def linear_image(url: str) -> Response:
+        """An image pasted into a Linear description or comment, fetched with the Linear API key
+        (those files are private). Only Linear's upload server; the last 40 are kept in memory."""
+        if not is_linear_upload(url):
+            raise HTTPException(400, "Only images stored on Linear can be loaded.")
+        hit = images.pop(url, None) or linear_call(lambda l: l.fetch_upload(url))
+        images[url] = hit
+        while len(images) > IMAGE_CACHE:
+            images.pop(next(iter(images)))
+        return Response(content=hit[0], media_type=hit[1], headers={"Cache-Control": "private, max-age=3600"})
+
     @app.get("/api/issues/{ident}/preview", dependencies=auth)
     def issue_preview(ident: str) -> dict:
         """A quick look at an issue: its description and latest comments."""
@@ -672,12 +821,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             **shape_issue(raw, settings),
             "assignee": (raw.get("assignee") or {}).get("name"),
             "created_at": raw.get("createdAt"),
-            "description": description[:1500],
-            "description_truncated": len(description) > 1500,
+            # Long enough to read the whole thing in the app's pane (rendered as Markdown there).
+            "description": description[:PREVIEW_DESCRIPTION],
+            "description_truncated": len(description) > PREVIEW_DESCRIPTION,
             "comment_count": len(nodes),
             "comments": [
                 {"author": (n.get("user") or {}).get("name") or "Someone", "created_at": n.get("createdAt"),
-                 "body": (n.get("body") or "").strip()[:400]}
+                 "body": (n.get("body") or "").strip()[:PREVIEW_COMMENT]}
                 for n in nodes[-3:]
             ],
         }
@@ -728,6 +878,32 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         issue = linear_call(lambda l: l.update_issue(issue_id, changes))
         return shape_issue(issue, settings)
 
+    @app.delete("/api/issues/{issue_id}", dependencies=auth)
+    def delete_issue(issue_id: str) -> dict:
+        """Move an issue to Linear's trash (restorable there for 30 days) and take it off Today.
+        Returns where it sat on Today (or null) so an undo can put it back."""
+        linear_call(lambda l: l.delete_issue(issue_id))
+        day = today_str()
+        ids = [i["issue_id"] for i in db.get_today(day)]
+        at = ids.index(issue_id) if issue_id in ids else None
+        if at is not None:
+            db.set_today(day, [i for i in ids if i != issue_id])
+        return {"deleted": issue_id, "today_position": at}
+
+    @app.post("/api/issues/{issue_id}/restore", dependencies=auth)
+    def restore_issue(issue_id: str, body: RestoreIn | None = None) -> dict:
+        """Undo a delete: bring the issue back from Linear's trash (and onto Today if it was there)."""
+        def run(l: Linear) -> dict:
+            l.restore_issue(issue_id)
+            return l.get_issue(issue_id)
+        issue = linear_call(run)
+        if body and body.today_position is not None:
+            day = today_str()
+            ids = [i["issue_id"] for i in db.get_today(day) if i["issue_id"] != issue_id]
+            ids.insert(min(body.today_position, len(ids)), issue_id)
+            db.set_today(day, ids)
+        return shape_issue(issue, settings)
+
     # ---- sweeps -----------------------------------------------------------------------
     @app.get("/api/runs/latest", dependencies=auth)
     def latest_run(kind: str = "sweep") -> dict:
@@ -774,10 +950,18 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         items = db.set_today(nxt, have + [i for i in body.issue_ids if i not in have])
         return {"day": nxt, "items": items}
 
+    @app.delete("/api/today/carry", dependencies=auth)
+    def undo_carry(body: CarryIn) -> dict:
+        """Undo a carry: take these issues off the next working day's list."""
+        nxt = next_working_day(date.fromisoformat(today_str())).isoformat()
+        items = db.set_today(nxt, [i["issue_id"] for i in db.get_today(nxt) if i["issue_id"] not in body.issue_ids])
+        return {"day": nxt, "items": items}
+
     @app.get("/api/brief", dependencies=auth)
     def brief() -> dict:
         """What the morning brief and the wrap-up need beyond the issue list: today's and the next
-        working day's agendas (saved by the first sweep of the day) and the issues completed today."""
+        working day's agendas (saved by the first sweep of the day), the issues completed today, the
+        next working day's Today list, and Claude's plan, midday note and wrap-up."""
         day = today_str()
         next_day = next_working_day(date.fromisoformat(day)).isoformat()
         agendas = db.get_meta("agendas", {}) or {}
@@ -798,10 +982,55 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "next_day": next_day,
             "agenda": agendas.get(day),
             "next_agenda": agendas.get(next_day),
+            "next_today": [i["issue_id"] for i in db.get_today(next_day)],
             "completed_today": done,
             "waiting_state": settings.waiting_state,
             "error": error,
+            "plan": (db.get_meta("plans", {}) or {}).get(day),
+            "plan_run": todays_run("plan"),
+            "note": (db.get_meta("notes", {}) or {}).get(day),
+            "note_run": todays_run("note"),
+            "wrapup": (db.get_meta("wrapups", {}) or {}).get(day),
+            "wrapup_run": todays_run("wrapup"),
+            "checkin": (db.get_meta("checkins", {}) or {}).get(stats.week_start(date.fromisoformat(day)).isoformat()),
         }
+
+    def todays_run(kind: str) -> dict | None:
+        """The latest "Re-plan" (or note or wrap-up "Redo") run, if it's from today: running, or how it ended."""
+        run = db.latest_run(kind)
+        if not run or not run["started_at"] or stats.local_date(run["started_at"]).isoformat() != today_str():
+            return None
+        return {k: run.get(k) for k in ("id", "status", "error", "started_at", "finished_at")}
+
+    @app.post("/api/plan", dependencies=auth, status_code=202)
+    def replan() -> dict:
+        """Ask Claude for a fresh plan for today (a run of its own, about a minute)."""
+        clear_stale()
+        run = db.latest_run("plan")
+        if run and run["status"] == "running":
+            raise HTTPException(409, "Claude is already planning")
+        launch(["--plan"])
+        return {"started": True}
+
+    @app.post("/api/note", dependencies=auth, status_code=202)
+    def renote() -> dict:
+        """Ask Claude for a fresh midday note (a run of its own, about a minute)."""
+        clear_stale()
+        run = db.latest_run("note")
+        if run and run["status"] == "running":
+            raise HTTPException(409, "Claude is already writing a note")
+        launch(["--note"])
+        return {"started": True}
+
+    @app.post("/api/wrapup", dependencies=auth, status_code=202)
+    def rewrap() -> dict:
+        """Ask Claude for a fresh wrap-up of today (a run of its own, about a minute)."""
+        clear_stale()
+        run = db.latest_run("wrapup")
+        if run and run["status"] == "running":
+            raise HTTPException(409, "Claude is already wrapping up")
+        launch(["--wrapup"])
+        return {"started": True}
 
     @app.post("/api/today/{issue_id}/block", dependencies=auth)
     def block_time(issue_id: str, body: BlockIn) -> dict:

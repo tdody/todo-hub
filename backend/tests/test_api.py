@@ -628,6 +628,17 @@ def test_due_date_slips(env):
     assert fake.due_history_calls == 2
 
 
+
+def test_due_date_slips_with_timestamps():
+    """Linear's history can send due dates as midnight UTC timestamps, not plain dates."""
+    from todohub import stats
+    issue = {"id": "id-ENG-3", "identifier": "ENG-3", "title": "Deck", "dueDate": "2026-11-09", "labels": {"nodes": []},
+             "history": {"nodes": [{"createdAt": "2026-11-02T10:00:00Z", "fromDueDate": "2026-11-06T00:00:00.000Z",
+                                    "toDueDate": "2026-11-09T00:00:00.000Z", "actor": {"name": "Thibault"}}]}}
+    s = stats.due_slips([issue])["id-ENG-3"]
+    assert (s["count"], s["days"]) == (1, 3)
+    assert (s["changes"][0]["from"], s["changes"][0]["to"]) == ("2026-11-06", "2026-11-09")
+
 def test_digest_endpoint(env):
     from datetime import datetime, timezone
     from conftest import make_issue
@@ -713,3 +724,146 @@ def test_hubspot_cards_link_back_and_can_be_muted(env):
     r = client.post("/api/mutes", json={**key, "drop_pending": True})
     assert r.status_code == 200 and r.json()["dropped_ids"] == [cid]
     assert "sender Ana Tapsieva (HubSpot)" in mutes.prompt_section(db.list_mutes())
+
+
+def test_unexpected_error_reaches_the_app_with_cors(env):
+    """A bug in an endpoint comes back as JSON the app can show, not a bare 500 the web view
+    reports as "Load failed"."""
+    client, _db, fake, _ = env
+    client.raise_server_exceptions = False
+
+    def boom():
+        raise ValueError("bad date")
+    fake.my_open_issues = boom
+    r = client.get("/api/digest", headers={"Origin": "tauri://localhost"})
+    assert r.status_code == 500
+    assert r.json()["error"] == "/api/digest failed: ValueError: bad date"
+    assert r.headers.get("access-control-allow-origin") == "tauri://localhost"
+
+
+def test_brief_has_the_plan_and_replan_starts_a_run(env):
+    from datetime import datetime
+    from todohub import stats
+    client, db, fake, launched = env
+    day = datetime.now(stats.TZ).date().isoformat()
+    b = client.get("/api/brief").json()
+    assert b["plan"] is None and b["plan_run"] is None
+    db.set_meta("plans", {day: {"day": day, "headline": "H", "summary": "S", "picks": [], "set_aside": []}})
+    assert client.get("/api/brief").json()["plan"]["headline"] == "H"
+    assert client.post("/api/plan").status_code == 202 and launched[-1] == ["--plan"]
+    run_id = db.start_run("plan", "x")
+    assert client.get("/api/brief").json()["plan_run"]["status"] == "running"
+    assert client.post("/api/plan").status_code == 409
+    db.finish_run(run_id, "error", error="nope")
+    assert client.get("/api/brief").json()["plan_run"]["error"] == "nope"
+
+
+def test_brief_has_the_wrapup_and_checkin_and_redo_starts_a_run(env):
+    from datetime import datetime
+    from todohub import stats
+    client, db, fake, launched = env
+    today = datetime.now(stats.TZ).date()
+    b = client.get("/api/brief").json()
+    assert b["wrapup"] is None and b["wrapup_run"] is None and b["checkin"] is None
+    week = stats.week_start(today).isoformat()
+    db.set_meta("wrapups", {today.isoformat(): {"day": today.isoformat(), "summary": "S", "items": []}})
+    db.set_meta("checkins", {week: {"week": week, "work": [], "next_week": [], "review": [], "health": []}})
+    b = client.get("/api/brief").json()
+    assert b["wrapup"]["summary"] == "S" and b["checkin"]["week"] == week
+    assert client.post("/api/wrapup").status_code == 202 and launched[-1] == ["--wrapup"]
+    run_id = db.start_run("wrapup", "x")
+    assert client.get("/api/brief").json()["wrapup_run"]["status"] == "running"
+    assert client.get("/api/brief").json()["plan_run"] is None          # a wrap-up isn't a re-plan
+    assert client.post("/api/wrapup").status_code == 409
+    db.finish_run(run_id, "ok")
+    assert client.post("/api/wrapup").status_code == 202
+
+
+def test_brief_has_the_note_and_redo_starts_a_run(env):
+    from datetime import datetime
+    from todohub import stats
+    client, db, fake, launched = env
+    day = datetime.now(stats.TZ).date().isoformat()
+    b = client.get("/api/brief").json()
+    assert b["note"] is None and b["note_run"] is None
+    db.set_meta("notes", {day: {"day": day, "headline": "Finish the Globex grades.", "summary": "S"}})
+    assert client.get("/api/brief").json()["note"]["headline"] == "Finish the Globex grades."
+    assert client.post("/api/note").status_code == 202 and launched[-1] == ["--note"]
+    run_id = db.start_run("note", "x")
+    b = client.get("/api/brief").json()
+    assert b["note_run"]["status"] == "running" and b["plan_run"] is None and b["wrapup_run"] is None
+    assert client.post("/api/note").status_code == 409
+    db.finish_run(run_id, "ok")
+    assert client.post("/api/note").status_code == 202
+
+
+def test_undo_carry_and_next_today(env):
+    client, db, fake, _ = env
+    b = client.get("/api/brief").json()
+    assert b["next_today"] == []
+    client.post("/api/today/carry", json={"issue_ids": ["id-ENG-1", "id-ENG-2", "id-ENG-3"]})
+    assert client.get("/api/brief").json()["next_today"] == ["id-ENG-1", "id-ENG-2", "id-ENG-3"]
+    r = client.request("DELETE", "/api/today/carry", json={"issue_ids": ["id-ENG-3", "id-ENG-1", "id-ENG-9"]})
+    assert r.status_code == 200
+    assert r.json()["day"] == b["next_day"] and [i["issue_id"] for i in r.json()["items"]] == ["id-ENG-2"]
+    assert client.get("/api/brief").json()["next_today"] == ["id-ENG-2"]
+    assert db.get_today(client.get("/api/today").json()["day"]) == []                 # today's list untouched
+
+
+def test_linear_image_proxy_only_linear_and_cached(env):
+    client, db, fake, launched = env
+    url = "https://uploads.linear.app/org/a/b"
+    r = client.get("/api/linear-image", params={"url": url})
+    assert r.status_code == 200 and r.content == b"\x89PNG" and r.headers["content-type"] == "image/png"
+    assert client.get("/api/linear-image", params={"url": url}).status_code == 200 and fake.fetched == 1   # cached
+    assert client.get("/api/linear-image", params={"url": "https://evil.example.com/a.png"}).status_code == 400
+
+
+def test_delete_issue_moves_to_trash_and_restores(env):
+    client, db, fake, _ = env
+    client.put("/api/today", json={"issue_ids": ["id-ENG-2", "id-ENG-1"]})
+    r = client.delete("/api/issues/id-ENG-1")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"deleted": "id-ENG-1", "today_position": 1}
+    assert fake.deleted_issues == ["id-ENG-1"]
+    assert [i["issue_id"] for i in client.get("/api/today").json()["items"]] == ["id-ENG-2"]
+    # undo: back from the trash and onto Today where it was
+    r = client.post("/api/issues/id-ENG-1/restore", json={"today_position": 1})
+    assert r.status_code == 200 and r.json()["identifier"] == "ENG-1"
+    assert fake.restored_issues == ["id-ENG-1"]
+    assert [i["issue_id"] for i in client.get("/api/today").json()["items"]] == ["id-ENG-2", "id-ENG-1"]
+    # an issue that wasn't on Today restores without touching it
+    client.delete("/api/issues/id-ENG-2")
+    assert client.post("/api/issues/id-ENG-2/restore").status_code == 200
+    assert [i["issue_id"] for i in client.get("/api/today").json()["items"]] == ["id-ENG-1"]
+
+
+def test_delete_issue_failure_keeps_today(env):
+    client, db, fake, _ = env
+    fake.fail_delete.add("id-ENG-1")
+    client.put("/api/today", json={"issue_ids": ["id-ENG-1"]})
+    assert client.delete("/api/issues/id-ENG-1").status_code == 502
+    assert [i["issue_id"] for i in client.get("/api/today").json()["items"]] == ["id-ENG-1"]
+
+
+def test_recently_decided_lists_and_restores(env):
+    client, db, fake, _ = env
+    a = seed(db, source_id="C1:1", title="Send the deck")
+    b = seed(db, source_id="C1:2", title="Thanks for the update")
+    c = seed(db, source_id="C1:3", title="Still pending")
+    client.post(f"/api/candidates/{a}/approve", json={})
+    client.post(f"/api/candidates/{b}/drop", json={"reason": "noise"})
+    with db.connect() as conn:          # an old decision falls outside the window
+        old = seed(db, source_id="C1:4", title="Old drop")
+        conn.execute("UPDATE candidates SET status = 'dropped', decided_at = '2026-01-01T00:00:00+00:00' WHERE id = ?", (old,))
+    r = client.get("/api/decided").json()
+    assert [i["title"] for i in r["items"]] == ["Thanks for the update", "Send the deck"] and r["more"] is False
+    approved = r["items"][1]
+    assert approved["status"] == "approved" and approved["linear_identifier"] == "ENG-99"
+    assert r["items"][0]["drop_reason"] == "noise" and "excerpt" not in r["items"][0]
+    assert client.get("/api/decided?limit=1").json()["more"] is True
+    # Restore brings the drop back to the Inbox; approved cards can't be restored this way.
+    assert client.post(f"/api/candidates/{b}/restore").json()["status"] == "pending"
+    assert client.post(f"/api/candidates/{a}/restore").status_code == 409
+    assert [i["title"] for i in client.get("/api/decided").json()["items"]] == ["Send the deck"]
+    assert {x["id"] for x in client.get("/api/candidates").json()} == {b, c}

@@ -77,3 +77,75 @@ def test_shape_issue_buckets():
     assert shape_issue(make_issue("ENG-1", "a", client="Globex"), settings)["list"] == "client"
     shaped = shape_issue(make_issue("ENG-2", "b"), settings)
     assert shaped["list"] == "dev" and shaped["client"] is None
+
+
+def test_team_meta_orders_states_like_linear():
+    def handler(request: httpx.Request):
+        body = json.loads(request.content)
+        if "teams" in body["query"]:
+            return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": [{"id": "t1", "states": {"nodes": [
+                {"id": "c", "name": "Canceled", "type": "canceled", "position": 0},
+                {"id": "d", "name": "Duplicate", "type": "duplicate", "position": 1},
+                {"id": "p", "name": "In Progress", "type": "started", "position": 2},
+                {"id": "t", "name": "Todo", "type": "unstarted", "position": 3},
+                {"id": "w", "name": "Pending", "type": "unstarted", "position": 1.5},
+                {"id": "x", "name": "Done", "type": "completed", "position": -1},
+                {"id": "b", "name": "Backlog", "type": "backlog", "position": 9}]}}]}}})
+        if "projects" in body["query"]:
+            return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": []}}}})
+        return httpx.Response(200, json={"data": {"issueLabels": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}})
+
+    meta = Linear("k", transport=transport(handler)).team_meta("ENG", "client")
+    assert [s["name"] for s in meta.states] == ["Backlog", "Pending", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]
+
+
+def test_fetch_upload_only_linear_images_and_key_stays_with_linear():
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append((request.url.host, request.headers.get("authorization"), request.headers.get("content-type")))
+        if request.url.host == "uploads.linear.app":
+            if request.url.path.endswith("/moved"):
+                return httpx.Response(302, headers={"location": "https://storage.example.com/signed/abc"})
+            if request.url.path.endswith("/page"):
+                return httpx.Response(200, headers={"content-type": "text/html"}, content=b"<html>")
+            if request.url.path.endswith("/huge"):
+                return httpx.Response(200, headers={"content-type": "image/png"}, content=b"x" * (16 * 1024 * 1024))
+            if request.url.path.endswith("/gone"):
+                return httpx.Response(403)
+            return httpx.Response(200, headers={"content-type": "image/png; charset=binary"}, content=b"\x89PNG")
+        return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"jpeg")
+
+    lin = Linear("lin_key", transport=transport(handler))
+    assert lin.fetch_upload("https://uploads.linear.app/org/a/b") == (b"\x89PNG", "image/png")
+    assert seen[-1] == ("uploads.linear.app", "lin_key", None)            # the key, and no JSON content type
+    assert lin.fetch_upload("https://uploads.linear.app/org/moved") == (b"jpeg", "image/jpeg")
+    assert seen[-1][0] == "storage.example.com" and seen[-1][1] is None    # never sent to another host
+    for bad in ("https://evil.example.com/x.png", "http://uploads.linear.app/a", "javascript:alert(1)",
+                "https://uploads.linear.app.evil.com/a"):
+        with pytest.raises(LinearError, match="Only images stored on Linear"):
+            lin.fetch_upload(bad)
+    with pytest.raises(LinearError, match="isn't an image"):
+        lin.fetch_upload("https://uploads.linear.app/org/page")
+    with pytest.raises(LinearError, match="too large"):
+        lin.fetch_upload("https://uploads.linear.app/org/huge")
+    with pytest.raises(LinearError, match="refused"):
+        lin.fetch_upload("https://uploads.linear.app/org/gone")
+
+
+def test_delete_and_restore_issue():
+    sent = []
+
+    def handler(request: httpx.Request):
+        body = json.loads(request.content)
+        sent.append(body)
+        key = "issueDelete" if "issueDelete" in body["query"] else "issueUnarchive"
+        return httpx.Response(200, json={"data": {key: {"success": body["variables"]["id"] != "bad"}}})
+
+    linear = Linear("lin_key", transport=transport(handler))
+    linear.delete_issue("i1")
+    linear.restore_issue("i1")
+    assert "issueDelete" in sent[0]["query"] and "issueUnarchive" in sent[1]["query"]
+    assert sent[1]["variables"] == {"id": "i1"}
+    with pytest.raises(LinearError):
+        linear.restore_issue("bad")

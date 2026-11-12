@@ -96,6 +96,9 @@ class FakeLinear:
             raise LinearError("nope")
         self.deleted_issues.append(issue_id)
 
+    def restore_issue(self, issue_id):
+        self.restored_issues = getattr(self, "restored_issues", []) + [issue_id]
+
     def add_link(self, issue_id, url, title):
         self.links.append((issue_id, url, title))
         return f"att-{len(self.links)}"
@@ -103,6 +106,13 @@ class FakeLinear:
     existing_links: dict = {}
     due_history: list = []
     due_history_calls = 0
+
+    def fetch_upload(self, url):
+        self.fetched = getattr(self, "fetched", 0) + 1
+        return b"\x89PNG", "image/png"
+
+    def initiative_projects(self, ref):
+        return getattr(self, "missions", [])
 
     def due_date_history(self):
         self.due_history_calls += 1

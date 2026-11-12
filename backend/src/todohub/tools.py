@@ -334,6 +334,19 @@ def propose_update(db: DB, run_id: int | None, *, source: str, source_id: str, s
 
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _CAL_URL_RE = re.compile(r"^https://(www\.)?(calendar\.google\.com|meet\.google\.com)/\S+$")
+_IDENT_RE = re.compile(r"[A-Z][A-Z0-9]*-\d+")
+_LINK_RE = re.compile(r"\[([^\[\]\n]+)\]\(([^()\n]*)\)")
+
+
+def clean_refs(text: str, known: set[str]) -> str:
+    """Keep each issue ref ``[label](ENG-123)`` to one of his open issues; any other markdown link
+    becomes its plain label."""
+    def keep(m: re.Match) -> str:
+        label, target = m.group(1).strip(), m.group(2).strip().upper()
+        if _IDENT_RE.fullmatch(target) and (not known or target in known):
+            return f"[{label}]({target})"
+        return label
+    return _LINK_RE.sub(keep, text)
 
 
 def report_agenda(db: DB, run_id: int | None, *, day: str, events: list) -> dict:
@@ -363,6 +376,204 @@ def report_agenda(db: DB, run_id: int | None, *, day: str, events: list) -> dict
     agendas[day] = rows
     db.set_meta("agendas", {d: agendas[d] for d in sorted(agendas)[-4:]})
     return {"status": "recorded", "events": len(rows)}
+
+
+PLAN_ACTIONS = ("move", "ask", "clear_date")
+MAX_PICKS = 6
+
+
+def report_plan(db: DB, run_id: int | None, *, day: str, headline: str, recap: str, summary: str, picks: list,
+                set_aside: list | None = None) -> dict:
+    """Save Claude's plan for a day: a recap of the last working day, picks with a reason and a
+    time estimate, and a next step for each late issue left out. Only suggestions: the app shows
+    them and Thibault decides."""
+    if run_id is None:
+        raise ToolError("no active run")
+    try:
+        when = date.fromisoformat(day)
+    except (TypeError, ValueError):
+        raise ToolError("day must be YYYY-MM-DD")
+    known = set(db.get_meta("open_issue_identifiers", []) or [])
+
+    def ident(x: object) -> str:
+        v = str(x or "").strip().upper()
+        if not _IDENT_RE.fullmatch(v):
+            raise ToolError(f"{x!r} isn't an issue identifier like ENG-123")
+        if known and v not in known:
+            raise ToolError(f"{v} isn't one of his open issues")
+        return v
+
+    rows, seen = [], set()
+    for p in (picks or []):
+        i = ident(p.get("identifier"))
+        if i in seen:
+            continue
+        seen.add(i)
+        try:
+            minutes = int(p.get("minutes") or 0)
+        except (TypeError, ValueError):
+            raise ToolError(f"{i}: minutes must be a number")
+        rows.append({"identifier": i, "why": _clip(str(p.get("why") or ""), 300) or "",
+                     "minutes": max(5, min(minutes or 30, 480))})
+    if not rows:
+        raise ToolError("picks needs at least one issue")
+    if len(rows) > MAX_PICKS:
+        raise ToolError(f"at most {MAX_PICKS} picks")
+
+    aside = []
+    for a in (set_aside or [])[:20]:
+        i = ident(a.get("identifier"))
+        if i in seen:
+            continue
+        seen.add(i)
+        action = str(a.get("action") or "")
+        if action not in PLAN_ACTIONS:
+            raise ToolError(f"{i}: action must be one of {', '.join(PLAN_ACTIONS)}")
+        row = {"identifier": i, "action": action, "why": _clip(str(a.get("why") or ""), 300) or ""}
+        if action == "move":
+            try:
+                to = date.fromisoformat(str(a.get("move_to") or ""))
+            except ValueError:
+                raise ToolError(f"{i}: move needs move_to as YYYY-MM-DD")
+            if to <= when:
+                raise ToolError(f"{i}: move_to must be after {day}")
+            row["move_to"] = to.isoformat()
+        if action == "ask":
+            msg = _clip(str(a.get("message") or ""), 600)
+            if not msg:
+                raise ToolError(f"{i}: ask needs a message")
+            row["message"] = msg
+        aside.append(row)
+
+    plans = dict(db.get_meta("plans", {}) or {})
+    plans[when.isoformat()] = {
+        "day": when.isoformat(), "made_at": datetime.now(TZ).replace(microsecond=0).isoformat(), "run_id": run_id,
+        "headline": _clip(str(headline or ""), 200) or "",
+        "recap": clean_refs(_clip(str(recap or ""), 700) or "", known),
+        "summary": clean_refs(_clip(str(summary or ""), 700) or "", known),
+        "picks": rows, "set_aside": aside,
+    }
+    db.set_meta("plans", {d: plans[d] for d in sorted(plans)[-4:]})
+    return {"status": "recorded", "picks": len(rows), "set_aside": len(aside)}
+
+
+WRAPUP_ACTIONS = ("carry", "move", "ask", "close")
+HEALTH = ("on_track", "at_risk", "off_track")
+
+
+def _lines(value: object, most: int, limit: int = 300) -> list[str]:
+    """A list of short non-empty lines, clipped."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ToolError("expected a list of strings")
+    out = [_clip(str(v).strip(), limit) or "" for v in value]
+    return [v for v in out if v][:most]
+
+
+def report_wrapup(db: DB, run_id: int | None, *, day: str, summary: str, items: list | None = None,
+                  start_with: dict | None = None, notes: list | None = None, checkin: dict | None = None) -> dict:
+    """Save Claude's wrap-up for a day: a short summary, a next step for each open item, what to
+    start the next working day with, notes kept for the week, and the week's mission check-in
+    draft. Only suggestions: the app shows them and Thibault decides."""
+    if run_id is None:
+        raise ToolError("no active run")
+    try:
+        when = date.fromisoformat(day)
+    except (TypeError, ValueError):
+        raise ToolError("day must be YYYY-MM-DD")
+    known = set(db.get_meta("open_issue_identifiers", []) or [])
+
+    def ident(x: object) -> str:
+        v = str(x or "").strip().upper()
+        if not _IDENT_RE.fullmatch(v):
+            raise ToolError(f"{x!r} isn't an issue identifier like ENG-123")
+        if known and v not in known:
+            raise ToolError(f"{v} isn't one of his open issues")
+        return v
+
+    rows, seen = [], set()
+    for it in (items or [])[:30]:
+        i = ident(it.get("identifier"))
+        if i in seen:
+            continue
+        seen.add(i)
+        action = str(it.get("action") or "")
+        if action not in WRAPUP_ACTIONS:
+            raise ToolError(f"{i}: action must be one of {', '.join(WRAPUP_ACTIONS)}")
+        row = {"identifier": i, "action": action, "why": _clip(str(it.get("why") or ""), 300) or ""}
+        if action == "move":
+            try:
+                to = date.fromisoformat(str(it.get("move_to") or ""))
+            except ValueError:
+                raise ToolError(f"{i}: move needs move_to as YYYY-MM-DD")
+            if to <= when:
+                raise ToolError(f"{i}: move_to must be after {day}")
+            row["move_to"] = to.isoformat()
+        if action == "ask":
+            msg = _clip(str(it.get("message") or ""), 600)
+            if not msg:
+                raise ToolError(f"{i}: ask needs a message")
+            row["message"] = msg
+        rows.append(row)
+
+    first = None
+    if start_with and start_with.get("identifier"):
+        first = {"identifier": ident(start_with["identifier"]), "why": _clip(str(start_with.get("why") or ""), 300) or ""}
+
+    c = checkin or {}
+    if not isinstance(c, dict):
+        raise ToolError("checkin must be an object")
+    work = []
+    for g in (c.get("work") or [])[:12]:
+        lines = _lines(g.get("items"), 10)
+        name = _clip(str(g.get("mission") or "").strip(), 120) or ""
+        if name and lines:
+            work.append({"mission": name, "items": lines})
+    health = []
+    for x in (c.get("health") or [])[:6]:
+        status = str(x.get("status") or "")
+        if status not in HEALTH:
+            raise ToolError(f"health status must be one of {', '.join(HEALTH)}")
+        health.append({"mission": _clip(str(x.get("mission") or ""), 120) or "", "status": status,
+                       "why": _clip(str(x.get("why") or ""), 300) or ""})
+
+    made = datetime.now(TZ).replace(microsecond=0).isoformat()
+    wrapups = dict(db.get_meta("wrapups", {}) or {})
+    wrapups[when.isoformat()] = {
+        "day": when.isoformat(), "made_at": made, "run_id": run_id,
+        "summary": clean_refs(_clip(str(summary or ""), 700) or "", known), "items": rows, "start_with": first,
+        "notes": _lines(notes, 6),
+    }
+    db.set_meta("wrapups", {d: wrapups[d] for d in sorted(wrapups)[-10:]})
+
+    week = (when - timedelta(days=when.weekday())).isoformat()
+    checkins = dict(db.get_meta("checkins", {}) or {})
+    checkins[week] = {
+        "week": week, "through": when.isoformat(), "made_at": made, "run_id": run_id, "work": work,
+        "next_week": _lines(c.get("next_week"), 10), "review": _lines(c.get("review"), 8), "health": health,
+    }
+    db.set_meta("checkins", {w: checkins[w] for w in sorted(checkins)[-4:]})
+    return {"status": "recorded", "items": len(rows), "work_groups": len(work)}
+
+
+def report_note(db: DB, run_id: int | None, *, day: str, headline: str, summary: str) -> dict:
+    """Save Claude's midday note for a day: what to do next, and the rest of the day in short."""
+    if run_id is None:
+        raise ToolError("no active run")
+    try:
+        when = date.fromisoformat(day)
+    except (TypeError, ValueError):
+        raise ToolError("day must be YYYY-MM-DD")
+    known = set(db.get_meta("open_issue_identifiers", []) or [])
+    notes = dict(db.get_meta("notes", {}) or {})
+    notes[when.isoformat()] = {
+        "day": when.isoformat(), "made_at": datetime.now(TZ).replace(microsecond=0).isoformat(), "run_id": run_id,
+        "headline": _clip(str(headline or ""), 200) or "",
+        "summary": clean_refs(_clip(str(summary or ""), 700) or "", known),
+    }
+    db.set_meta("notes", {d: notes[d] for d in sorted(notes)[-4:]})
+    return {"status": "recorded"}
 
 
 def report_source_status(db: DB, run_id: int | None, *, source: str, ok: bool, detail: str,
