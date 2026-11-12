@@ -235,6 +235,7 @@ export interface Meta {
   projects: string[];
   priorities: { value: number; name: string }[];
   sources: Source[];
+  todo_state: string;
 }
 
 export interface SourceStatus {

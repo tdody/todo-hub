@@ -258,6 +258,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             raise HTTPException(400, f"No {what} {name!r} in Linear")
         return found["id"]
 
+    def todo_status(states: list[dict]) -> dict | None:
+        """The status a new or reopened to-do gets: the one named ``todo_state``, else the team's first
+        not-started one. The app's untick follows the same rule."""
+        return next((s for s in states if s["name"] == settings.todo_state), None) or \
+            next((s for s in states if s["type"] == "unstarted"), None)
+
     def candidate_or_404(cid: int) -> dict:
         c = db.get_candidate(cid)
         if not c:
@@ -286,6 +292,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 {"value": 2, "name": "High"}, {"value": 3, "name": "Medium"}, {"value": 4, "name": "Low"},
             ],
             "sources": settings.enabled_sources(),
+            "todo_state": settings.todo_state,
         }
 
     @app.get("/api/daylight", dependencies=auth)
@@ -609,8 +616,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                     states = m.states if team_id == m.team_id else client.team_states(team_id)
                 except LinearError:
                     states = []
-                todo = next((s for s in states if s["name"] == settings.todo_state), None) or \
-                    next((s for s in states if s["type"] == "unstarted"), None)
+                todo = todo_status(states)
                 label_ids = [l["id"] for l in m.client_labels if l["name"] == c["client_label"]]
                 for sub in c["subtasks"]:
                     if not todo:
@@ -973,15 +979,15 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.post("/api/issues/{issue_id}/sub-issues", dependencies=auth)
     def add_sub_issue(issue_id: str, body: SubIssueIn) -> dict:
-        """A sub-issue made the way approving an Inbox task makes its subtasks: your team, assigned to you, in Todo, with
-        the parent's client label, project and priority. Undo deletes it like any issue."""
+        """A sub-issue made the way approving an Inbox task makes its subtasks: your team, assigned to you, in Todo
+        (see todo_status), with the parent's client label, project and priority. Undo deletes it like any issue."""
         title = body.title.strip()
         if not title:
             raise HTTPException(400, "The title can't be empty")
         m = team_meta()
-        todo = next((s for s in m.states if s["name"] == settings.todo_state), None)
+        todo = todo_status(m.states)
         if not todo:
-            raise HTTPException(500, f"Team {settings.team_key} has no {settings.todo_state!r} status")
+            raise HTTPException(500, f"Team {settings.team_key} has no not-started status")
 
         def run(l: Linear) -> dict:
             parent = l.get_issue(issue_id)

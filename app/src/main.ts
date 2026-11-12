@@ -1919,6 +1919,13 @@ function doneStatus() {
   return state.meta?.states.find((s) => s.type === "completed");
 }
 
+/** The status an unticked sub-issue goes back to, as a new one does: the Todo setting, else the
+ *  team's first not-started one. */
+function todoStatus() {
+  const m = state.meta;
+  return m?.states.find((s) => s.name === m.todo_state) ?? m?.states.find((s) => s.type === "unstarted");
+}
+
 /** Check it off: moves the issue to the team's first completed status in Linear, with undo. */
 async function completeIssue(i: Issue) {
   const done = doneStatus();
@@ -2226,11 +2233,11 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
     }));
 }
 
-/** Tick: the team's first done status, as Mark done uses; untick: its first not-started one (Todo). */
+/** Tick: the team's first done status, as Mark done uses; untick: Todo (todoStatus). */
 async function tickSubIssue(parent: IssuePreview, sub: SubIssue) {
   const key = `${sub.id}:tick`;
   const done = sub.state.type !== "completed";
-  const to = done ? doneStatus() : state.meta?.states.find((s) => s.type === "unstarted");
+  const to = done ? doneStatus() : todoStatus();
   if (!to) { toast(`Couldn't find a ${done ? "done" : "to-do"} status for this team`); render(); return; }
   // The pane's copy shows the new status at once; the reload after the save confirms it.
   const show = (st: SubIssue["state"]) => {
