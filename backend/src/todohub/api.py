@@ -264,6 +264,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return next((s for s in states if s["name"] == settings.todo_state), None) or \
             next((s for s in states if s["type"] == "unstarted"), None)
 
+    def done_status(states: list[dict]) -> dict | None:
+        """The status closing an issue moves it to: the one named ``done_state``, else the team's first completed
+        one."""
+        return next((s for s in states if s["name"] == settings.done_state), None) or \
+            next((s for s in states if s["type"] == "completed"), None)
+
     def sub_issue_team(l: Linear, m: TeamMeta, parent: dict) -> tuple[str, str]:
         """The team a sub-issue of ``parent`` goes in (the parent's, so its project fits) and the id of its Todo
         status there (todo_status). Raises LinearError when that team has no not-started status."""
@@ -312,6 +318,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             ],
             "sources": settings.enabled_sources(),
             "todo_state": (todo_status(m.states) or {}).get("name"),
+            "done_state": (done_status(m.states) or {}).get("name"),
         }
 
     @app.get("/api/daylight", dependencies=auth)
@@ -463,8 +470,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             if c["kind"] == "close":
                 team_id = (target.get("team") or {}).get("id")
                 states = m.states if team_id in (None, m.team_id) else l.team_states(team_id)
-                done = (next((s for s in states if s["name"] == settings.done_state), None)
-                        or next((s for s in states if s["type"] == "completed"), None))
+                done = done_status(states)
                 if not done:
                     raise LinearError(f"{c['target_issue']}'s team has no completed status")
                 closed = l.update_issue(target["id"], {"stateId": done["id"]})

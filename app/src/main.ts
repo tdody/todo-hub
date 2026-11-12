@@ -1887,9 +1887,10 @@ function listWords(parts: string[]): string {
   return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 }
 
-/** The status Mark done and a ticked sub-issue use: the team's first completed one. */
+/** The status Mark done and a ticked sub-issue use: Done, as the backend works it out. */
 function doneStatus() {
-  return state.meta?.states.find((s) => s.type === "completed");
+  const m = state.meta;
+  return m?.states.find((s) => s.name === m.done_state);
 }
 
 /** The status an unticked sub-issue goes back to, as a new one gets: Todo, as the backend works it out. */
@@ -1898,7 +1899,7 @@ function todoStatus() {
   return m?.states.find((s) => s.name === m.todo_state);
 }
 
-/** Check it off: moves the issue to the team's first completed status in Linear, with undo. */
+/** Check it off: moves the issue to Done (doneStatus) in Linear, with undo. */
 async function completeIssue(i: Issue) {
   const done = doneStatus();
   if (!done) { toast("Couldn't find a done status for this team"); return; }
