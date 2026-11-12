@@ -60,3 +60,17 @@ def test_hubspot_read_tools_are_not_broad_rules(tmp_path):
         "mcp__claude_ai_HubSpot__search_crm_objects", "mcp__claude_ai_HubSpot__manage_crm_objects"]}}))
     assert cli.broad_allow_rules(load_settings(), f) == ["mcp__claude_ai_HubSpot__manage_crm_objects"]
     assert cli.CONNECTORS["hubspot"] == "claude.ai HubSpot"
+
+
+def test_check_warns_about_each_status_setting_linear_lacks(tmp_home, monkeypatch, capsys):
+    from conftest import FakeLinear
+    tmp_home.mkdir(parents=True, exist_ok=True)
+    (tmp_home / "config.toml").write_text(
+        '[linear]\ntodo_state = "Todo"\nwaiting_state = "Blocked"\ndone_state = "Closed"\n'
+        '[sweep]\ngithub_reviews = false\n')
+    monkeypatch.setattr(cli, "Linear", lambda key: FakeLinear())
+    assert cli.cmd_check(None) == 1
+    warnings = [line.strip() for line in capsys.readouterr().out.splitlines() if "No status named" in line]
+    statuses = "Statuses: Backlog, Todo, Pending, Done"
+    assert warnings == [f"! No status named 'Blocked' (linear.waiting_state). {statuses}",
+                        f"! No status named 'Closed' (linear.done_state). {statuses}"]
