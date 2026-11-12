@@ -2207,7 +2207,7 @@ async function saveDescription(i: IssuePreview, box: HTMLTextAreaElement) {
 }
 
 /** The issue's sub-issues from Linear, done ones too. Tick one to mark it done (untick: back to
- *  Todo); a sub-issue in another team shows its status without a box. Type in "Add sub-issue"
+ *  Todo); a canceled one, or one in another team, shows its status without a box. Type in "Add sub-issue"
  *  (⇧S) and press Enter; the box stays ready for the next. */
 function subIssuesSection(i: IssuePreview): HTMLElement {
   const today = localToday();
@@ -2218,8 +2218,9 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
     subs.length ? h("ul", { class: "tl-subs" }, ...subs.map((s) => {
       const done = s.state.type === "completed";
       const open = isOpen(s);
-      return h("li", { class: open ? "" : "done" },
-        s.own_team
+      // Canceled and duplicate ones are closed but not done: no box, like another team's.
+      return h("li", { class: open ? "" : "closed" },
+        s.own_team && (open || done)
           ? h("input", { type: "checkbox", checked: done, disabled: state.busy.has(`${s.id}:tick`), title: done ? "Reopen" : "Mark done",
               "aria-label": `${done ? "Reopen" : "Mark done"}: ${s.identifier}`, onchange: () => void tickSubIssue(i, s) })
           : h("span", { class: "sub-gap", "aria-hidden": "true" }),

@@ -881,7 +881,7 @@ button.theme:hover { color: var(--ink); }
 .tl-comment { display: flex; flex-direction: column; gap: 2px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
 .tl-comment-body { margin-top: 2px; }
 .tl-subs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.tl-subs li { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+.tl-subs li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; min-width: 0; }
 .tl-subs .ident { flex: none; font-size: 12px; }
 .tl-subs .dtitle { flex: 1; min-width: 0; }
 @media (max-width: 1000px) { .tl-grid { grid-template-columns: 1fr; } .tl-pane { position: static; max-height: none; } }
@@ -1334,9 +1334,11 @@ details.more[open] > summary { margin-bottom: 10px; }
 .desc-input + p { margin: 6px 0 0; }
 .add-text { padding: 0; border: 0; background: none; font-size: 13px; color: var(--muted); cursor: text; }
 .add-text:hover { color: var(--ink); }
-.tl-subs input[type="checkbox"] { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+/* Level with a wrapped title's first line (13px at 1.45 is a 19px line). */
+.tl-subs input[type="checkbox"] { flex: none; align-self: flex-start; width: 14px; height: 14px; margin: 2.5px 0 0;
+  accent-color: var(--accent); }
 .tl-subs .sub-gap { flex: none; width: 14px; }
-.tl-subs li.done .dtitle { color: var(--muted); text-decoration: line-through; }
+.tl-subs li.closed .dtitle { color: var(--muted); text-decoration: line-through; }
 .sub-add { display: block; width: calc(100% + 14px); margin: 4px -7px 0; padding: 4px 6px;
   border: 1px solid transparent; border-radius: 6px; background: transparent; font-size: 13px; }
 .sub-add::placeholder, .comment-input::placeholder { color: var(--muted); }
