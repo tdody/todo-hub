@@ -1305,7 +1305,8 @@ details.more[open] > summary { margin-bottom: 10px; }
 /* ---- Reading pane: the controls in one row ------------------------------------------------------ */
 
 .tl-fields { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-.tl-fields .spacer { flex: 1; }
+/* Block time and ⋯ stay together at the right, also when the row wraps, so their menus open inside the pane. */
+.tl-fields .tl-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .pane-menu > summary { list-style: none; cursor: pointer; white-space: nowrap; font-size: 12px; padding: 4px 10px; }
 .pane-menu > summary::-webkit-details-marker { display: none; }
 .pane-menu > summary.icon-more { padding: 4px 9px; font-weight: 700; letter-spacing: .05em; }

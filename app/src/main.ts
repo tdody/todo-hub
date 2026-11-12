@@ -2450,7 +2450,7 @@ function stageBody(i: Issue, onToday: boolean): Node[] {
         confirmDelete(i);
       } }, "Delete…")));
   return [
-    h("div", { class: "tl-fields" }, ...issueFields(i), h("span", { class: "spacer" }), more),
+    h("div", { class: "tl-fields" }, ...issueFields(i), h("span", { class: "tl-actions" }, more)),
     detailBody(i.id),
   ];
 }
@@ -2736,10 +2736,10 @@ function issuePane(i: Issue): HTMLElement {
     titleField(i, "h3"),
     // One row: status, priority, due date, client, project, then Block time (or Add to Today) and ⋯.
     h("div", { class: "tl-fields" }, ...issueFields(i),
-      h("span", { class: "spacer" }),
-      t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
-        onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
-      more),
+      h("span", { class: "tl-actions" },
+        t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
+          onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
+        more)),
     detailBody(i.id),
   );
 }
