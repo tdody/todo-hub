@@ -49,7 +49,7 @@ Editing is inline: fields edit in place and save when you leave them, like the s
 
 **Title.** Click it or press **e** (the same key as in Inbox). It becomes a text box in the same type, capped at 200 characters. Enter or leaving the field saves; Esc cancels. An empty title reverts.
 
-**Client and project.** Two pills in the fields row, after the due date, using Inbox's client and project selects. "No client" makes it a Dev issue. The row wraps in a narrow window.
+**Client and project.** Two pills in the fields row, after the due date, using Inbox's client and project selects. "Dev / internal" makes it a Dev issue. The row wraps in a narrow window.
 
 - In Client or Dev, an issue that changes list leaves the list, the next row is selected, and the toast says so ("ENG-123 moved to Dev").
 - On Today, it moves between the Client and Dev sections and stays selected.
@@ -71,7 +71,7 @@ Editing is inline: fields edit in place and save when you leave them, like the s
 | New sub-issue | Deletes it (to Linear's trash) |
 | Tick or untick | Puts the sub-issue's old status back |
 
-While typing in a field, ⌘Z undoes the typing, as it does now.
+While typing in a field, ⌘Z undoes the typing, as it does now. The one exception: right after a comment or sub-issue is posted, ⌘Z in the box it emptied undoes that post, until you type there again.
 
 ## Backend
 
@@ -96,13 +96,14 @@ The UI sends names and text. Linear's ids and label groups stay in `api.py` and 
 - Title, client and project saves replace the issue in memory with the `PATCH` response; the lists re-sort from its `client` and `list`.
 - A description save updates the pane's copy of the text. Comment and sub-issue saves, and ticks, reload the issue's preview in the background; the pane keeps showing what it has meanwhile.
 - The undo for a description edit uses the preview text loaded before the edit.
-- A background reload never replaces a block holding the focused field; it's applied when you leave the field. (The minute refresh already waits like this.)
+- A background reload (after a comment, a new sub-issue or a tick) re-renders the pane at once, so the new comment or sub-issue shows while its box keeps the focus. The focused field keeps its text, cursor and selection, and the pane its scroll; the field's native undo history is lost.
+- A save that began when you left a field doesn't rebuild the page while you're in another control (an open menu, a select, the date): only the saved title or description is swapped in place, and the next render shows the rest.
 
 ## Errors and edge cases
 
-- **A save fails** (Linear refuses it, offline, issue deleted in Linear). The toast names the problem. Nothing typed is lost: a failed description reopens its edit box with your text, and the comment and sub-issue boxes keep theirs. A title or pill goes back to its old value.
+- **A save fails** (Linear refuses it, offline, issue deleted in Linear). The toast names the problem. Nothing typed is lost: a failed title or description keeps its editor open with your text, and the comment and sub-issue boxes keep theirs. A pill goes back to its old value.
 - **Clicking another row while editing** saves the field, then moves.
-- **One request per save.** A field is disabled while its save is in flight.
+- **One request per save.** A text box is read-only while its save is in flight, and a sub-issue's box is disabled while its tick is. The status, priority, date, client and project fields aren't locked during a save (a known gap).
 - **Safety.** Editors are plain text fields; saved text is still shown through the Markdown renderer, so no HTML is built from data. Every write to Linear follows an action of yours: Enter, ⌘↵, a pick, a tick, or leaving a field you changed.
 
 ## Assumptions
