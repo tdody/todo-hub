@@ -20,7 +20,6 @@ export interface PaneCtx {
   fail: (e: unknown) => void;
   loadIssues: () => Promise<void>;
   afterPointer: (fn: () => void) => void;          // now, or once the pointer's click has landed
-  editing: () => boolean;                          // a field on the page has the focus
   doneStatus: () => State | undefined;
   todoStatus: () => State | undefined;
   state: { busy: Set<string>; issues: Issue[]; briefAt: number };
@@ -69,22 +68,37 @@ function openEdit(key: string, text: string) {
   el?.setSelectionRange(el.value.length, el.value.length);
 }
 
-interface PaneSnapshot { edit: string | null; start: number | null; end: number | null; ident: string | null; scroll: number }
+interface PaneSnapshot {
+  edit: string | null; start: number | null; end: number | null; tick: string | null; ident: string | null; scroll: number;
+}
 
-/** Before a re-render: the pane field holding the cursor, and how far the reading pane is scrolled. */
+// The sub-issue tick box that had the focus when a re-render rebuilt it disabled (its save in
+// flight): the first re-render that shows it enabled gives it the focus back, unless you moved on.
+let tickToRefocus: string | null = null;
+
+/** Before a re-render: the pane field holding the cursor or the tick box with the focus, and how far
+ *  the reading pane is scrolled. */
 function snapshotPane(): PaneSnapshot {
   const a = document.activeElement as HTMLInputElement | null;
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
   const edit = a?.dataset?.edit ?? null;
-  return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null,
+  const tick = a?.dataset?.tick ?? (!a || a === document.body ? tickToRefocus : null);
+  return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null, tick,
     ident: pane?.getAttribute("aria-label") ?? null, scroll: pane?.scrollTop ?? 0 };
 }
 
-/** After a re-render: the same field gets the cursor back, and the same issue's pane its scroll. */
+/** After a re-render: the same field gets the cursor back, the same tick box the focus, and the same
+ *  issue's pane its scroll. */
 function restorePane(k: PaneSnapshot) {
   document.querySelectorAll<HTMLTextAreaElement>(".desc-input, .pane-title-input").forEach(fitHeight);
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
   if (pane && k.ident && pane.getAttribute("aria-label") === k.ident) pane.scrollTop = k.scroll;
+  tickToRefocus = null;
+  if (k.tick) {
+    const box = document.querySelector<HTMLInputElement>(`[data-tick="${CSS.escape(k.tick)}"]`);
+    if (box?.disabled) tickToRefocus = k.tick;
+    else box?.focus({ preventScroll: true });
+  }
   if (!k.edit) return;
   const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-edit="${CSS.escape(k.edit)}"]`);
   if (!el) return;
@@ -161,14 +175,14 @@ async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLTextAreaElement)
 }
 
 /** Show a save that may have begun when you left a field. Re-render once the pointer is up, unless
- *  that would close what you went to next: an open menu, or a select, date or text field that isn't
- *  one of the pane's own boxes. Then only the ``block`` around the ``key`` box is swapped for
- *  ``fresh()``, found as the page shows it now (a re-render during the save rebuilds it); the next
- *  render shows the rest. */
+ *  that would take away what you went to next: an open menu, or anything on the page with the focus
+ *  (a pill, button, link, select or field) that isn't one of the pane's own boxes. Then only the
+ *  ``block`` around the ``key`` box is swapped for ``fresh()``, found as the page shows it now (a
+ *  re-render during the save rebuilds it); the next render shows the rest. */
 function showAfterLeaving(key: string, block: string, fresh: () => HTMLElement) {
   ctx.afterPointer(() => {
     const a = document.activeElement as HTMLElement | null;
-    if ((ctx.editing() && a?.dataset.edit === undefined) || document.querySelector("details.drop-menu[open]")) {
+    if ((a?.closest("main") && a.dataset.edit === undefined) || document.querySelector("details.drop-menu[open]")) {
       document.querySelector(`[data-edit="${CSS.escape(key)}"]`)?.closest(block)?.replaceWith(fresh());
     } else ctx.render();
   });
@@ -310,7 +324,8 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
       return h("li", { class: open ? "" : "closed" },
         s.own_team && (open || done)
           ? h("input", { type: "checkbox", checked: done, disabled: ctx.state.busy.has(`${s.id}:tick`), title: done ? "Reopen" : "Mark done",
-              "aria-label": `${done ? "Reopen" : "Mark done"}: ${s.identifier}`, onchange: () => void tickSubIssue(i, s) })
+              "aria-label": `${done ? "Reopen" : "Mark done"}: ${s.identifier}`, "data-tick": s.id,
+              onchange: () => void tickSubIssue(i, s) })
           : h("span", { class: "sub-gap", "aria-hidden": "true" }),
         link(s.identifier, s.url, "ident"),
         h("span", { class: "dtitle" }, s.title),

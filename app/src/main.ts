@@ -3198,7 +3198,7 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
   }, `pushed ${s.count}×`);
 }
 
-setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, editing, doneStatus, todoStatus, state });
+setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, doneStatus, todoStatus, state });
 
 const settingsCtx: SettingsCtx = {
   rerender: () => { if (state.tab === "settings") { const y = window.scrollY; render(); window.scrollTo(0, y); } },
