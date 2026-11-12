@@ -11,9 +11,13 @@ export function isOpen(i: Issue): boolean {
   return !closedType(i.state.type);
 }
 
-export function localToday(): string {
-  const d = new Date();
+/** ``d``'s day in local time, as YYYY-MM-DD. */
+export function isoDay(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function localToday(): string {
+  return isoDay(new Date());
 }
 
 export function dueLabel(due: string, today: string): string {
