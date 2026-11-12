@@ -497,15 +497,17 @@ async function editIssue(issue: Issue | IssuePreview, change: IssueEdit, rerende
 /** Delete an issue after a confirm: Linear moves it to its trash (restorable for 30 days there),
  *  it leaves the lists and Today here, and Undo / ⌘Z brings it back. */
 function confirmDelete(i: Issue) {
-  // The pane's list from Linear (everyone's, done ones left out); your open issues if it isn't loaded yet.
-  const subs = details.get(i.id)?.issue?.sub_issues.filter(isOpen).length
-    ?? state.issues.filter((x) => x.parent?.id === i.id).length;
+  // The pane's list from Linear: every open sub-issue, not only yours.
+  const preview = details.get(i.id)?.issue;
+  const subs = preview?.sub_issues.filter(isOpen).length ?? 0;
+  const note = !preview ? "Its sub-issues haven't loaded here; check them in Linear afterwards."
+    : subs ? `It has ${subs} open sub-issue${subs === 1 ? "" : "s"}; check ${subs === 1 ? "it" : "them"} in Linear afterwards.` : "";
   const go = h("button", { class: "primary danger", onclick: () => { close(); void deleteIssue(i); } }, "Delete");
   const close = modal(`Delete ${i.identifier}?`, h("div", { class: "confirm-body" },
     h("p", {}, h("strong", {}, i.title)),
     h("p", { class: "muted small" }, "Linear moves it to its trash, where you can restore it for 30 days. "
       + "Undo here brings it back too."),
-    subs ? h("p", { class: "muted small" }, `It has ${subs} sub-issue${subs === 1 ? "" : "s"}; check ${subs === 1 ? "it" : "them"} in Linear afterwards.`) : ""),
+    note ? h("p", { class: "muted small" }, note) : ""),
     [h("button", { class: "ghost", onclick: () => close() }, "Cancel"), go]);
   go.focus();
 }
