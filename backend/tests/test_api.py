@@ -192,17 +192,19 @@ def test_sub_issue_of_another_teams_issue_goes_in_that_team(env):
 
 
 @pytest.mark.parametrize("todo_state, expected", [
-    ("Pending", "s-Pending"),     # the setting names a not-started status: it wins over the first one
-    ("Ready", "s-Todo"),          # no status by that name: the team's first not-started one
+    ("Pending", "Pending"),     # the setting names a not-started status: it wins over the first one
+    ("Ready", "Todo"),          # no status by that name: the team's first not-started one
 ])
-def test_new_sub_issue_status_follows_the_todo_setting(todo_state, expected):
+def test_sub_issue_status_follows_the_todo_setting(todo_state, expected):
+    """A new sub-issue gets it, and /api/meta names it for the app's untick."""
     settings = load_settings()
     settings.todo_state = todo_state
     fake = FakeLinear()
     client = TestClient(create_app(settings, DB(settings.db_path), linear_factory=lambda: fake,
                                    sweep_launcher=lambda args: None))
     assert client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "Check the CSV"}).status_code == 200
-    assert fake.created[-1]["state_id"] == expected
+    assert fake.created[-1]["state_id"] == f"s-{expected}"
+    assert client.get("/api/meta").json()["todo_state"] == expected
 
 
 def test_meta_and_sweep(env):

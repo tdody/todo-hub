@@ -1896,11 +1896,10 @@ function doneStatus() {
   return state.meta?.states.find((s) => s.type === "completed");
 }
 
-/** The status an unticked sub-issue goes back to, as a new one does: the Todo setting, else the
- *  team's first not-started one. */
+/** The status an unticked sub-issue goes back to, as a new one gets: Todo, as the backend works it out. */
 function todoStatus() {
   const m = state.meta;
-  return m?.states.find((s) => s.name === m.todo_state) ?? m?.states.find((s) => s.type === "unstarted");
+  return m?.states.find((s) => s.name === m.todo_state);
 }
 
 /** Check it off: moves the issue to the team's first completed status in Linear, with undo. */
