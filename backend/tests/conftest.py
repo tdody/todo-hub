@@ -129,16 +129,28 @@ class FakeLinear:
         issue.update(description="Rebin the grades per channel.\n\n- use deciles", createdAt="2026-11-01T10:00:00Z",
                      assignee={"name": "Thibault"},
                      comments={"nodes": [{"body": f"note {n}", "createdAt": f"2026-11-0{n}T09:00:00Z",
-                                          "user": {"name": "Jordan"}} for n in (4, 2, 3, 1)]})
+                                          "user": {"name": "Jordan"}} for n in (4, 2, 3, 1)]},
+                     children={"nodes": [i for i in self.issues if (i.get("parent") or {}).get("id") == issue["id"]]})
         return issue
 
     def update_issue(self, issue_id, changes):
+        """Records the change and returns the issue as Linear would after it; ``self.issues`` stays as it was."""
         self.updated.append((issue_id, changes))
-        found = next((i for i in self.issues if i["id"] == issue_id), None)
-        if found and "stateId" in changes:
+        issue = dict(self.get_issue(issue_id))
+        if "stateId" in changes:
             name = changes["stateId"].removeprefix("s-")
-            return {**found, "state": {"id": changes["stateId"], "name": name, "type": "completed" if name == "Done" else "unstarted"}}
-        return make_issue("ENG-2", "Fix outcome report copy", due=changes.get("dueDate"))
+            issue["state"] = {"id": changes["stateId"], "name": name, "type": "completed" if name == "Done" else "unstarted"}
+        for field in ("title", "description", "dueDate", "priority"):
+            if field in changes:
+                issue[field] = changes[field]
+        if "projectId" in changes:
+            projects = self.team_meta(None, None).projects
+            issue["project"] = next((p for p in projects if p["id"] == changes["projectId"]), None)
+        labels = [l for l in issue["labels"]["nodes"] if l["id"] not in changes.get("removedLabelIds", [])]
+        labels += [{"id": i, "name": i.removeprefix("l-"), "parent": {"id": "g-client", "name": "client"}}
+                   for i in changes.get("addedLabelIds", [])]
+        issue["labels"] = {"nodes": labels}
+        return issue
 
     notifications = []
 

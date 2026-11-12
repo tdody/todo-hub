@@ -37,6 +37,11 @@ def is_linear_upload(url: str) -> bool:
 STATE_ORDER = {"triage": 0, "backlog": 1, "unstarted": 2, "started": 3, "completed": 4, "canceled": 5, "duplicate": 6}
 
 
+def in_linear_order(states: list[dict]) -> list[dict]:
+    """A team's statuses in Linear's menu order: by kind, then the team's order within it."""
+    return sorted(states, key=lambda s: (STATE_ORDER.get(s["type"], 9), s["position"]))
+
+
 class LinearError(RuntimeError):
     pass
 
@@ -149,12 +154,10 @@ class Linear:
             ["issueLabels"],
             {"group": client_group},
         )
-        # Linear's menu order: by kind, then the team's order within it.
-        states = sorted(team["states"]["nodes"], key=lambda s: (STATE_ORDER.get(s["type"], 9), s["position"]))
         projects = self.team_projects(team["id"])
         return TeamMeta(
             team_id=team["id"],
-            states=states,
+            states=in_linear_order(team["states"]["nodes"]),
             client_labels=sorted(labels, key=lambda l: l["name"].lower()),
             viewer_id=data["viewer"]["id"],
             projects=sorted(projects, key=lambda p: p["name"].lower()),
@@ -331,7 +334,7 @@ class Linear:
     def team_states(self, team_id: str) -> list[dict]:
         data = self.gql("query($id: String!) { team(id: $id) { states { nodes { id name type position } } } }",
                         {"id": team_id})
-        return data["team"]["states"]["nodes"]
+        return in_linear_order(data["team"]["states"]["nodes"])
 
     def create_comment(self, issue_id: str, body: str) -> str:
         """Add a comment; returns its id."""
@@ -385,7 +388,7 @@ class Linear:
             raise LinearError("Linear did not remove the link.")
 
     def issue_preview(self, id_or_identifier: str) -> dict:
-        """An issue with its description, assignee and recent comments, for a quick look."""
+        """An issue with its description, assignee, recent comments and sub-issues, for a quick look."""
         data = self.gql(
             f"""
             query($id: String!) {{
@@ -394,6 +397,7 @@ class Linear:
                 description createdAt
                 assignee {{ name }}
                 comments(first: 50) {{ nodes {{ body createdAt user {{ name }} }} }}
+                children(first: 50) {{ nodes {{ {ISSUE_FIELDS} assignee {{ name }} }} }}
               }}
             }}
             """,
@@ -404,7 +408,7 @@ class Linear:
         return data["issue"]
 
     def update_issue(self, issue_id: str, changes: dict) -> dict:
-        """``changes`` uses Linear's field names: stateId, priority, dueDate (None clears it)."""
+        """``changes`` is an IssueUpdateInput, in Linear's field names."""
         data = self.gql(
             f"""
             mutation($id: String!, $input: IssueUpdateInput!) {{
@@ -419,12 +423,14 @@ class Linear:
         return result["issue"]
 
 
+def client_labels_of(issue: dict, client_group: str) -> list[dict]:
+    """The issue's labels in the client label group (normally one)."""
+    return [l for l in issue["labels"]["nodes"] if (l.get("parent") or {}).get("name") == client_group]
+
+
 def client_label_of(issue: dict, client_group: str) -> str | None:
-    for label in issue["labels"]["nodes"]:
-        parent = label.get("parent")
-        if parent and parent["name"] == client_group:
-            return label["name"]
-    return None
+    found = client_labels_of(issue, client_group)
+    return found[0]["name"] if found else None
 
 
 def shape_issue(issue: dict, settings: Settings) -> dict:

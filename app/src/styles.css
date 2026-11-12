@@ -311,8 +311,8 @@ select.client, select.project { max-width: 165px; }
   font-size: 15px;
   font-weight: 600;
 }
-.title-input:hover { border-color: var(--border); }
-.title-input:focus { border-color: var(--accent); background: var(--surface); outline: none; }
+.title-input:hover, .sub-add:hover { border-color: var(--border); }
+.title-input:focus, .sub-add:focus { border-color: var(--accent); background: var(--surface); outline: none; }
 
 .why { margin: 2px 0 6px; color: var(--muted); }
 blockquote {
@@ -1285,8 +1285,8 @@ button.ref:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--bor
 
 .pill-menu.quiet-empty:not([open]) > summary, select.quiet-empty { opacity: 0; transition: opacity .12s; }
 :is(.row, .card):hover .pill-menu.quiet-empty > summary, .card.focused .pill-menu.quiet-empty > summary,
-.pill-menu.quiet-empty:focus-within > summary, .tl-pane .pill-menu.quiet-empty > summary,
-:is(.card:hover, .card.focused) select.quiet-empty, select.quiet-empty:focus { opacity: 1; }
+.pill-menu.quiet-empty:focus-within > summary, :is(.tl-pane, .td-st) .pill-menu.quiet-empty > summary,
+:is(.card:hover, .card.focused, .tl-pane, .td-st) select.quiet-empty, select.quiet-empty:focus { opacity: 1; }
 /* On an Inbox card the empty fields take no room at rest (a table row keeps its columns). */
 .card:not(:hover):not(.focused):not(:focus-within) .card-actions :is(select.quiet-empty, .pill-menu.quiet-empty, .qdate.is-empty) { display: none; }
 
@@ -1305,7 +1305,8 @@ details.more[open] > summary { margin-bottom: 10px; }
 /* ---- Reading pane: the controls in one row ------------------------------------------------------ */
 
 .tl-fields { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-.tl-fields .spacer { flex: 1; }
+/* Block time and ⋯ stay together at the right, also when the row wraps, so their menus open inside the pane. */
+.tl-fields .tl-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .pane-menu > summary { list-style: none; cursor: pointer; white-space: nowrap; font-size: 12px; padding: 4px 10px; }
 .pane-menu > summary::-webkit-details-marker { display: none; }
 .pane-menu > summary.icon-more { padding: 4px 9px; font-weight: 700; letter-spacing: .05em; }
@@ -1318,8 +1319,33 @@ details.more[open] > summary { margin-bottom: 10px; }
 .block.done { font-size: 12px; white-space: nowrap; }
 .tl-pane > .tl-meta .slip { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 .tl-pane > .tl-meta .slip.repeat { background: var(--warn-bg); color: var(--warn-ink); }
-.tl-fields { flex-wrap: nowrap; }
 .tl-fields .qdate { min-width: 0; }
+
+/* ---- Reading pane: editing in place ------------------------------------------------------------ */
+/* The title and description read as text and become fields where they sit, in the same type. */
+.pane-title, .tl-desc.editable { cursor: text; border-radius: 6px; }
+.pane-title:not(.editing):hover, .tl-desc.editable:hover { outline: 1px solid var(--border); outline-offset: 4px; }
+.pane-title-input { display: block; width: calc(100% + 14px); margin: -3px -7px; padding: 2px 6px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font: inherit;
+  color: inherit; resize: none; overflow: hidden; outline: none; }
+.desc-input { display: block; width: calc(100% + 14px); margin: -5px -7px 0; padding: 4px 6px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 13px; line-height: 1.55; resize: none; max-height: 60vh; overflow-y: auto; outline: none; }
+.pane-title-input:focus, .desc-input:focus { border-color: var(--accent); }
+.desc-input + p { margin: 6px 0 0; }
+.add-text { padding: 0; border: 0; background: none; font-size: 13px; color: var(--muted); cursor: text; }
+.add-text:hover { color: var(--ink); }
+/* Level with a wrapped title's first line (13px at 1.45 is a 19px line). */
+.tl-subs input[type="checkbox"] { flex: none; align-self: flex-start; width: 14px; height: 14px; margin: 2.5px 0 0;
+  accent-color: var(--accent); }
+.tl-subs .sub-gap { flex: none; width: 14px; }
+.tl-subs li.closed .dtitle { color: var(--muted); text-decoration: line-through; }
+.sub-add { display: block; width: calc(100% + 14px); margin: 4px -7px 0; padding: 4px 6px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; font-size: 13px; }
+.sub-add::placeholder, .comment-input::placeholder { color: var(--muted); }
+.comment-box { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.comment-box .comment-input { margin: 0; font-size: 13px; }
+.comment-hint { display: flex; justify-content: space-between; gap: 8px; }
 
 /* ---- Inbox: list on the left, the selected candidate in full on the right ---------------------- */
 /* Same grid, row columns and pane as Today, Client and Dev (.tl-grid, .tl-item, .tl-pane). */

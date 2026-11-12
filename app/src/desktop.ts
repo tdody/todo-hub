@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { Candidate, Run } from "./api";
+import { isoDay } from "./issues";
 
 const inTauri = () => "__TAURI_INTERNALS__" in window;
 
@@ -31,7 +32,7 @@ async function canNotify(): Promise<boolean> {
 function inDays(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() + n);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return isoDay(d);
 }
 
 /** Urgent = priority urgent or high, or due within two days (today, tomorrow, the day after). */
