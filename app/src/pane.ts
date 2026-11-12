@@ -15,7 +15,7 @@ export interface PaneCtx {
     (issue: Issue, change: Omit<IssueEdit, "description">, rerender?: boolean): Promise<boolean>;
   };
   offerUndo: (message: string, done: string, run: () => Promise<void>) => UndoEntry;
-  canUndo: (entry: UndoEntry) => boolean;          // ⌘Z or its banner can still undo it
+  canUndo: (entry: UndoEntry) => boolean;          // ⌘Z or its banner can still undo it (10 minutes)
   toast: (message: string) => void;
   fail: (e: unknown) => void;
   loadIssues: () => Promise<void>;

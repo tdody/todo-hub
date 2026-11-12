@@ -166,11 +166,15 @@ function offerUndo(message: string, done: string, run: () => Promise<void>, extr
   return entry;
 }
 
+/** ⌘Z or its banner can still undo ``entry``: it's on the stack and less than 10 minutes old. */
+function canUndo(entry: UndoEntry): boolean {
+  return undoStack.includes(entry) && Date.now() - entry.at < UNDO_FOR_MS;
+}
+
 async function undo(entry?: UndoEntry) {
   if (undoing) return;
-  const fresh = (e: UndoEntry) => Date.now() - e.at < UNDO_FOR_MS;
-  entry = entry ?? [...undoStack].reverse().find(fresh);
-  if (!entry || !fresh(entry)) { toast("Nothing to undo"); return; }
+  entry = entry ?? [...undoStack].reverse().find(canUndo);
+  if (!entry || !canUndo(entry)) { toast("Nothing to undo"); return; }
   undoStack.splice(undoStack.indexOf(entry), 1);
   entry.banner?.remove();
   undoing = true;
@@ -3195,10 +3199,7 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
   }, `pushed ${s.count}×`);
 }
 
-setupPane({
-  render, editIssue, offerUndo, toast, fail, loadIssues, afterPointer, editing, doneStatus, todoStatus, state,
-  canUndo: (entry) => undoStack.includes(entry),
-});
+setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, editing, doneStatus, todoStatus, state });
 
 const settingsCtx: SettingsCtx = {
   rerender: () => { if (state.tab === "settings") { const y = window.scrollY; render(); window.scrollTo(0, y); } },
