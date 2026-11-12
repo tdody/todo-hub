@@ -49,14 +49,14 @@ Editing is inline: fields edit in place and save when you leave them, like the s
 
 **Title.** Click it or press **e** (the same key as in Inbox). It becomes a text box in the same type, capped at 200 characters. Enter or leaving the field saves; Esc cancels. An empty title reverts.
 
-**Client and project.** Two pills in the fields row, after the due date, using Inbox's client and project selects. "Dev / internal" makes it a Dev issue. The row wraps in a narrow window.
+**Client and project.** Two selects in the fields row, after the due date: Inbox's client and project selects. "Dev / internal" makes it a Dev issue. The row wraps in a narrow window.
 
 - In Client or Dev, an issue that changes list leaves the list, the next row is selected, and the toast says so ("ENG-123 moved to Dev").
 - On Today, it moves between the Client and Dev sections and stays selected.
 
 **Description.** Click it (anywhere but a link or image) or press **⇧E**. It becomes an auto-growing text box with the raw Markdown, which is what Linear stores. Leaving the field, ⌘↵ or Esc all save, so a long edit is never thrown away. An empty description shows "Add a description". A description over 6,000 characters (the pane only loads that much) isn't editable here and shows "Edit in Linear ↗".
 
-**Sub-issues.** All of the issue's sub-issues, done ones and other people's included, read from Linear with the preview. Each has a checkbox: ticking marks it done with the status Mark done uses (the team's first completed status), unticking puts it in Todo: the status named by the `todo_state` setting, else the team's first not-started one, as a new sub-issue gets. A sub-issue in another team shows its status without a checkbox, since the app only knows its own team's statuses. "Add sub-issue" (or **⇧S**) opens a text box; Enter creates it and leaves the box open for the next.
+**Sub-issues.** All of the issue's sub-issues, done ones and other people's included, read from Linear with the preview. An open or done one has a checkbox: ticking marks it done with the status Mark done uses (the team's first completed status), unticking puts it in Todo: the status named by the `todo_state` setting, else the team's first not-started one, as a new sub-issue gets. A canceled or duplicate one shows its status without a checkbox, and so does one in another team, since the app only knows its own team's statuses. "Add sub-issue" (or **⇧S**) opens a text box; Enter creates it and leaves the box open for the next.
 
 **Comments.** A comment box above the latest comments. **⇧C** focuses it, **⌘↵** posts it as you. It counts down near 2,000 characters and won't post past that.
 
@@ -101,7 +101,7 @@ The UI sends names and text. Linear's ids and label groups stay in `api.py` and 
 
 ## Errors and edge cases
 
-- **A save fails** (Linear refuses it, offline, issue deleted in Linear). The toast names the problem. Nothing typed is lost: a failed title or description keeps its editor open with your text, and the comment and sub-issue boxes keep theirs. A pill goes back to its old value.
+- **A save fails** (Linear refuses it, offline, issue deleted in Linear). The toast names the problem. Nothing typed is lost: a failed title or description keeps its editor open with your text, and the comment and sub-issue boxes keep theirs. A pill or select goes back to its old value.
 - **Clicking another row while editing** saves the field, then moves.
 - **One request per save.** A text box is read-only while its save is in flight, and a sub-issue's box is disabled while its tick is. The status, priority, date, client and project fields aren't locked during a save (a known gap).
 - **Safety.** Editors are plain text fields; saved text is still shown through the Markdown renderer, so no HTML is built from data. Every write to Linear follows an action of yours: Enter, ⌘↵, a pick, a tick, or leaving a field you changed.
