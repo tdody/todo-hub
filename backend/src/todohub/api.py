@@ -850,7 +850,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             **shape_issue(raw, settings),
             "assignee": (raw.get("assignee") or {}).get("name"),
             "created_at": raw.get("createdAt"),
-            # Long enough to read the whole thing in the app's pane (rendered as Markdown there).
+            # Long enough to read the whole thing in the app's pane (rendered as Markdown there). One cut
+            # short isn't editable in the app: saving the cut text would drop the rest in Linear.
             "description": description[:PREVIEW_DESCRIPTION],
             "description_truncated": len(description) > PREVIEW_DESCRIPTION,
             "comment_count": len(nodes),
