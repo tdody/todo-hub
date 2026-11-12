@@ -1972,10 +1972,10 @@ function openEdit(key: string, text: string) {
   el?.setSelectionRange(el.value.length, el.value.length);
 }
 
-interface PaneKeep { edit: string | null; start: number | null; end: number | null; ident: string | null; scroll: number }
+interface PaneSnapshot { edit: string | null; start: number | null; end: number | null; ident: string | null; scroll: number }
 
 /** Before a re-render: the pane field holding the cursor, and how far the reading pane is scrolled. */
-function paneKeep(): PaneKeep {
+function snapshotPane(): PaneSnapshot {
   const a = document.activeElement as HTMLInputElement | null;
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
   const edit = a?.dataset?.edit ?? null;
@@ -1984,7 +1984,7 @@ function paneKeep(): PaneKeep {
 }
 
 /** After a re-render: the same field gets the cursor back, and the same issue's pane its scroll. */
-function paneRestore(k: PaneKeep) {
+function restorePane(k: PaneSnapshot) {
   document.querySelectorAll<HTMLTextAreaElement>(".desc-input, .pane-title-input").forEach(fitHeight);
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
   if (pane && k.ident && pane.getAttribute("aria-label") === k.ident) pane.scrollTop = k.scroll;
@@ -3694,7 +3694,7 @@ function render() {
       : state.tab === "dev" && state.pickedProject ? projectView(state.pickedProject)
       : byStatus ? statusView(state.tab as "client" | "dev")
       : listView(state.tab as "client" | "dev");
-  const keep = paneKeep();
+  const snapshot = snapshotPane();
   rebuilding = true;
   try {
     main.replaceChildren(
@@ -3710,7 +3710,7 @@ function render() {
   } finally {
     rebuilding = false;
   }
-  paneRestore(keep);
+  restorePane(snapshot);
 }
 
 // ---- on-demand capture ----------------------------------------------------------------------
