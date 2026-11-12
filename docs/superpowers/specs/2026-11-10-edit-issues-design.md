@@ -67,8 +67,8 @@ Editing is inline: fields edit in place and save when you leave them, like the s
 | Save | Undo |
 | --- | --- |
 | Title, description, client, project | Puts the old value back |
-| Comment | Deletes it |
-| New sub-issue | Deletes it (to Linear's trash) |
+| Comment | Deletes it; its text goes back in the box |
+| New sub-issue | Deletes it (to Linear's trash); its title goes back in the box |
 | Tick or untick | Puts the sub-issue's old status back |
 
 While typing in a field, ⌘Z undoes the typing, as it does now. The one exception: right after a comment or sub-issue is posted, ⌘Z in the box it emptied undoes that post, until you type there again.

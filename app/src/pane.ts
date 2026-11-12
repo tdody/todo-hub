@@ -386,6 +386,7 @@ async function addSubIssue(parent: IssuePreview) {
     emptiedBy = { key, entry: ctx.offerUndo(`${sub.identifier} added under ${parent.identifier}`, `${sub.identifier} deleted`, async () => {
       await api.deleteIssue(sub.id);
       ctx.state.issues = ctx.state.issues.filter((x) => x.id !== sub.id);
+      if (!paneDrafts.get(key)?.trim()) paneDrafts.set(key, title);  // back in the box, to fix and add again
       loadDetail(parent.id, true);
     }) };
   } catch (e) {
