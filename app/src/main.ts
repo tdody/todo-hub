@@ -10,7 +10,7 @@ import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";
 import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskAvatar } from "./avatars";
 import type { Category } from "./avatars";
-import { closedType, dueLabel, isOpen, localToday, when } from "./issues";
+import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues";
 import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
 
 applyTheme();
@@ -251,7 +251,7 @@ async function loadRun() {
  *  (A sweep can finish "ok" with one source down, e.g. an expired sign-in; the red dot is easy to miss.) */
 const FAIL_STREAK_ALERT = 2;
 function sourceAlerts() {
-  const day = isoDay(new Date());
+  const day = localToday();
   for (const o of state.run.source_overview ?? []) {
     if ((o.fail_streak ?? 0) < FAIL_STREAK_ALERT) continue;
     const name = SOURCE_NAME[o.source] ?? o.source;
@@ -728,10 +728,6 @@ function subtaskEditor(c: Candidate, d: CandidateEdit): HTMLElement {
 }
 
 // ---- snooze, selection, bulk -------------------------------------------------------------------
-function isoDay(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function snoozeChoices(): { label: string; until: string }[] {
   const d = new Date();
   const tomorrow = new Date(d); tomorrow.setDate(d.getDate() + 1);
@@ -1139,7 +1135,7 @@ const ADVICE_LABEL = { drop: "Drop it", merge: "Merge", new: "Create a new issue
 // ---- suggestions handled in Linear by hand ----------------------------------------------------
 function handledWhen(iso: string | null | undefined): string {
   if (!iso) return "";
-  const days = Math.round((Date.parse(isoDay(new Date()) + "T12:00:00") - Date.parse(isoDay(new Date(iso)) + "T12:00:00")) / 864e5);
+  const days = Math.round((Date.parse(localToday() + "T12:00:00") - Date.parse(isoDay(new Date(iso)) + "T12:00:00")) / 864e5);
   return days <= 0 ? "today" : days === 1 ? "yesterday" : days < 7 ? `${days} days ago` : `on ${shortDay(isoDay(new Date(iso)))}`;
 }
 
@@ -1616,7 +1612,7 @@ function balancePopover(behind: NonNullable<ReturnType<typeof behindSide>>,
   const total = w.client + w.dev;
   const need = neededToTarget(x, total, behind.target);
   const targetWord = Math.abs(behind.target - 0.5) < 1e-9 ? "half" : pct(behind.target);
-  const today = state.brief?.day ?? isoDay(new Date());
+  const today = state.brief?.day ?? localToday();
   const sunday = addDays(w.week, 6);
   const friday = addDays(w.week, 4);
   const daysLeft = (end: string) => Math.max(0, daysBetween(today, end) + 1);
@@ -2684,7 +2680,7 @@ function todayKey(e: KeyboardEvent): boolean {
 function todayView(): HTMLElement {
   ensureBrief();
   const b = state.brief;
-  const day = b?.day ?? isoDay(new Date());
+  const day = b?.day ?? localToday();
   const head = pageHead("Today", { sub: new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }) });
   if (!b || !state.issuesLoaded) return h("div", { class: "td" }, head, h("p", { class: "muted" }, "Loading from Linear…"));
   const ctx = todayCtx(b);
