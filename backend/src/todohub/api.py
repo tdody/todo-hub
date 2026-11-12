@@ -264,17 +264,22 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return next((s for s in states if s["name"] == settings.todo_state), None) or \
             next((s for s in states if s["type"] == "unstarted"), None)
 
-    def create_sub_issue(l: Linear, m: TeamMeta, parent: dict, title: str, *, label_ids: list[str], priority: int,
-                         due_date: str | None = None) -> dict:
-        """A sub-issue under ``parent``, an issue already in Linear: in the parent's team and project, assigned
-        to you, in Todo (todo_status). Raises LinearError when that team has no not-started status."""
+    def sub_issue_team(l: Linear, m: TeamMeta, parent: dict) -> tuple[str, str]:
+        """The team a sub-issue of ``parent`` goes in (the parent's, so its project fits) and the id of its Todo
+        status there (todo_status). Raises LinearError when that team has no not-started status."""
         team_id = (parent.get("team") or {}).get("id") or m.team_id
         todo = todo_status(m.states if team_id == m.team_id else l.team_states(team_id))
         if not todo:
             raise LinearError("the parent's team has no not-started status")
+        return team_id, todo["id"]
+
+    def create_sub_issue(l: Linear, m: TeamMeta, parent: dict, title: str, *, team_id: str, state_id: str,
+                         label_ids: list[str], priority: int, due_date: str | None = None) -> dict:
+        """A sub-issue under ``parent``, an issue already in Linear: in ``team_id`` and ``state_id`` (from
+        sub_issue_team) and the parent's project, assigned to you."""
         return l.create_issue(
             team_id=team_id, title=title, description=f"Part of {parent['identifier']}: {parent['title']}",
-            assignee_id=m.viewer_id, state_id=todo["id"], priority=priority, due_date=due_date,
+            assignee_id=m.viewer_id, state_id=state_id, priority=priority, due_date=due_date,
             label_ids=label_ids, parent_id=parent["id"], project_id=(parent.get("project") or {}).get("id"),
         )
 
@@ -626,17 +631,23 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
             if c["subtasks"]:
                 label_ids = [l["id"] for l in m.client_labels if l["name"] == c["client_label"]]
-                for sub in c["subtasks"]:
-                    try:
-                        child = create_sub_issue(
-                            client, m, target, sub["title"], label_ids=label_ids, due_date=sub.get("due_date"),
-                            priority=c["priority"] or target.get("priority") or settings.default_priority,
-                        )
-                        created.append(shape_issue(child, settings))
-                        undo["issues"].append(child["id"])
-                        db.set_undo(cid, undo)
-                    except LinearError as exc:
-                        warnings.append(f"Subtask not created ({sub['title']}): {exc}")
+                priority = c["priority"] or target.get("priority") or settings.default_priority
+                try:
+                    team_id, state_id = sub_issue_team(client, m, target)      # one status read for them all
+                except LinearError as exc:
+                    warnings += [f"Subtask not created ({sub['title']}): {exc}" for sub in c["subtasks"]]
+                else:
+                    for sub in c["subtasks"]:
+                        try:
+                            child = create_sub_issue(
+                                client, m, target, sub["title"], team_id=team_id, state_id=state_id,
+                                label_ids=label_ids, priority=priority, due_date=sub.get("due_date"),
+                            )
+                            created.append(shape_issue(child, settings))
+                            undo["issues"].append(child["id"])
+                            db.set_undo(cid, undo)
+                        except LinearError as exc:
+                            warnings.append(f"Subtask not created ({sub['title']}): {exc}")
         finally:
             client.close()
         return {"candidate": updated, "issue": shape_issue(target, settings), "subtasks": created,
@@ -990,7 +1001,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
         def run(l: Linear) -> dict:
             parent = l.get_issue(issue_id)
-            return create_sub_issue(l, m, parent, title, priority=parent["priority"],
+            team_id, state_id = sub_issue_team(l, m, parent)
+            return create_sub_issue(l, m, parent, title, team_id=team_id, state_id=state_id,
+                                    priority=parent["priority"],
                                     label_ids=[x["id"] for x in client_labels_of(parent, settings.client_label_group)])
 
         return shape_issue(linear_call(run), settings)

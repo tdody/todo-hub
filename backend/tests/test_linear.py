@@ -79,24 +79,30 @@ def test_shape_issue_buckets():
     assert shaped["list"] == "dev" and shaped["client"] is None
 
 
-def test_team_meta_orders_states_like_linear():
+def test_team_meta_and_team_states_order_states_like_linear():
+    states = {"nodes": [
+        {"id": "c", "name": "Canceled", "type": "canceled", "position": 0},
+        {"id": "d", "name": "Duplicate", "type": "duplicate", "position": 1},
+        {"id": "p", "name": "In Progress", "type": "started", "position": 2},
+        {"id": "t", "name": "Todo", "type": "unstarted", "position": 3},
+        {"id": "w", "name": "Pending", "type": "unstarted", "position": 1.5},
+        {"id": "x", "name": "Done", "type": "completed", "position": -1},
+        {"id": "b", "name": "Backlog", "type": "backlog", "position": 9}]}
+
     def handler(request: httpx.Request):
         body = json.loads(request.content)
         if "teams" in body["query"]:
-            return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": [{"id": "t1", "states": {"nodes": [
-                {"id": "c", "name": "Canceled", "type": "canceled", "position": 0},
-                {"id": "d", "name": "Duplicate", "type": "duplicate", "position": 1},
-                {"id": "p", "name": "In Progress", "type": "started", "position": 2},
-                {"id": "t", "name": "Todo", "type": "unstarted", "position": 3},
-                {"id": "w", "name": "Pending", "type": "unstarted", "position": 1.5},
-                {"id": "x", "name": "Done", "type": "completed", "position": -1},
-                {"id": "b", "name": "Backlog", "type": "backlog", "position": 9}]}}]}}})
+            return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": [{"id": "t1", "states": states}]}}})
         if "projects" in body["query"]:
             return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": []}}}})
+        if "states" in body["query"]:          # another team's statuses
+            return httpx.Response(200, json={"data": {"team": {"states": states}}})
         return httpx.Response(200, json={"data": {"issueLabels": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}})
 
-    meta = Linear("k", transport=transport(handler)).team_meta("ENG", "client")
-    assert [s["name"] for s in meta.states] == ["Backlog", "Pending", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]
+    linear = Linear("k", transport=transport(handler))
+    in_order = ["Backlog", "Pending", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]
+    assert [s["name"] for s in linear.team_meta("ENG", "client").states] == in_order
+    assert [s["name"] for s in linear.team_states("t2")] == in_order
 
 
 def test_fetch_upload_only_linear_images_and_key_stays_with_linear():
