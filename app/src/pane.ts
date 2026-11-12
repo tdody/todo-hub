@@ -157,18 +157,20 @@ async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLTextAreaElement)
   if (saved) paneDrafts.delete(key);          // a failed save keeps the box open with your text
   const now = ctx.state.issues.find((x) => x.id === i.id) ?? i;
   document.querySelectorAll(`[data-id="${CSS.escape(i.id)}"] .tl-title`).forEach((el) => { el.textContent = now.title; });
-  showAfterLeaving(input.closest(".pane-title"), () => titleField(now, tag));
+  showAfterLeaving(key, ".pane-title", () => titleField(now, tag));
 }
 
 /** Show a save that may have begun when you left a field. Re-render once the pointer is up, unless
  *  that would close what you went to next: an open menu, or a select, date or text field that isn't
- *  one of the pane's own boxes. Then only ``block`` is swapped for ``fresh()``; the next render
- *  shows the rest. */
-function showAfterLeaving(block: Element | null, fresh: () => HTMLElement) {
+ *  one of the pane's own boxes. Then only the ``block`` around the ``key`` box is swapped for
+ *  ``fresh()``, found as the page shows it now (a re-render during the save rebuilds it); the next
+ *  render shows the rest. */
+function showAfterLeaving(key: string, block: string, fresh: () => HTMLElement) {
   ctx.afterPointer(() => {
     const a = document.activeElement as HTMLElement | null;
-    if ((ctx.editing() && a?.dataset.edit === undefined) || document.querySelector("details.drop-menu[open]")) block?.replaceWith(fresh());
-    else ctx.render();
+    if ((ctx.editing() && a?.dataset.edit === undefined) || document.querySelector("details.drop-menu[open]")) {
+      document.querySelector(`[data-edit="${CSS.escape(key)}"]`)?.closest(block)?.replaceWith(fresh());
+    } else ctx.render();
   });
 }
 
@@ -289,7 +291,7 @@ async function saveDescription(i: IssuePreview, box: HTMLTextAreaElement) {
   const saved = await ctx.editIssue(i, { description: text }, false);
   ctx.state.busy.delete(key);
   if (saved) paneDrafts.delete(key);          // a failed save keeps the box open with your text
-  showAfterLeaving(box.closest("section"), () => descriptionSection(details.get(i.id)?.issue ?? i));
+  showAfterLeaving(key, "section", () => descriptionSection(details.get(i.id)?.issue ?? i));
 }
 
 /** The issue's sub-issues from Linear, done ones too. Tick one to mark it done (untick: back to
