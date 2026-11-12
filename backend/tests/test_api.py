@@ -101,7 +101,8 @@ def test_issue_lists_and_edits(env):
 
 def test_edit_issue_title_and_description(env):
     client, _, fake, _ = env
-    assert client.patch("/api/issues/id-ENG-2", json={"title": "  Fix the report copy "}).status_code == 200
+    r = client.patch("/api/issues/id-ENG-2", json={"title": "  Fix the report copy "})
+    assert r.status_code == 200 and r.json()["title"] == "Fix the report copy"     # the app shows what Linear returns
     assert fake.updated[-1] == ("id-ENG-2", {"title": "Fix the report copy"})
     assert client.patch("/api/issues/id-ENG-2", json={"description": "## Steps\n\n- one"}).status_code == 200
     assert fake.updated[-1] == ("id-ENG-2", {"description": "## Steps\n\n- one"})
@@ -119,8 +120,10 @@ def test_edit_issue_client_swaps_only_the_client_label(env):
     assert r.status_code == 200, r.text
     # ENG-1 has Bug and Globex; only Globex (in the client group) goes.
     assert fake.updated[-1] == ("id-ENG-1", {"removedLabelIds": ["l-Globex"], "addedLabelIds": ["l-Initech & Co"]})
-    client.patch("/api/issues/id-ENG-1", json={"client": None})          # to Dev
+    assert (r.json()["client"], r.json()["list"]) == ("Initech & Co", "client")   # the app re-sorts its lists from this
+    r = client.patch("/api/issues/id-ENG-1", json={"client": None})      # to Dev
     assert fake.updated[-1] == ("id-ENG-1", {"removedLabelIds": ["l-Globex"]})
+    assert (r.json()["client"], r.json()["list"]) == (None, "dev")
     client.patch("/api/issues/id-ENG-2", json={"client": "Globex"})      # from Dev
     assert fake.updated[-1] == ("id-ENG-2", {"addedLabelIds": ["l-Globex"]})
     r = client.patch("/api/issues/id-ENG-1", json={"client": "Globex"})  # already Globex: nothing to send
@@ -132,8 +135,8 @@ def test_edit_issue_client_swaps_only_the_client_label(env):
 
 def test_edit_issue_project(env):
     client, _, fake, _ = env
-    client.patch("/api/issues/id-ENG-2", json={"project": "Globex"})
-    assert fake.updated[-1] == ("id-ENG-2", {"projectId": "p-globex"})
+    r = client.patch("/api/issues/id-ENG-2", json={"project": "Globex"})
+    assert fake.updated[-1] == ("id-ENG-2", {"projectId": "p-globex"}) and r.json()["project"] == "Globex"
     client.patch("/api/issues/id-ENG-2", json={"project": None})
     assert fake.updated[-1] == ("id-ENG-2", {"projectId": None})
     r = client.patch("/api/issues/id-ENG-2", json={"project": "Old thing"})
