@@ -134,12 +134,23 @@ class FakeLinear:
         return issue
 
     def update_issue(self, issue_id, changes):
+        """Records the change and returns the issue as Linear would after it; ``self.issues`` stays as it was."""
         self.updated.append((issue_id, changes))
-        found = next((i for i in self.issues if i["id"] == issue_id), None)
-        if found and "stateId" in changes:
+        issue = dict(self.get_issue(issue_id))
+        if "stateId" in changes:
             name = changes["stateId"].removeprefix("s-")
-            return {**found, "state": {"id": changes["stateId"], "name": name, "type": "completed" if name == "Done" else "unstarted"}}
-        return make_issue("ENG-2", "Fix outcome report copy", due=changes.get("dueDate"))
+            issue["state"] = {"id": changes["stateId"], "name": name, "type": "completed" if name == "Done" else "unstarted"}
+        for field in ("title", "description", "dueDate", "priority"):
+            if field in changes:
+                issue[field] = changes[field]
+        if "projectId" in changes:
+            projects = self.team_meta(None, None).projects
+            issue["project"] = next((p for p in projects if p["id"] == changes["projectId"]), None)
+        labels = [l for l in issue["labels"]["nodes"] if l["id"] not in changes.get("removedLabelIds", [])]
+        labels += [{"id": i, "name": i.removeprefix("l-"), "parent": {"id": "g-client", "name": "client"}}
+                   for i in changes.get("addedLabelIds", [])]
+        issue["labels"] = {"nodes": labels}
+        return issue
 
     notifications = []
 
