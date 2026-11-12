@@ -635,7 +635,9 @@ function priorityTag(p: number): HTMLElement | "" {
 
 
 function clientSelect(value: string | null, onChange: (v: string | null) => void) {
-  const labels = state.meta?.client_labels ?? [];
+  // A label newer than the loaded list (or none loaded) still shows as the issue's client.
+  const known = state.meta?.client_labels ?? [];
+  const labels = value && !known.includes(value) ? [value, ...known] : known;
   return quietSelect(h(
     "select",
     { class: "client", title: "Client label", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
