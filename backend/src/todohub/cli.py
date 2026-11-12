@@ -88,9 +88,11 @@ def cmd_check(_: argparse.Namespace) -> int:
             client.close()
         states = [s["name"] for s in meta.states]
         print(f"Linear: OK. {len(issues)} open issues, {len(meta.client_labels)} client labels.")
-        if settings.todo_state not in states:
-            ok = False
-            print(f"  ! No status named {settings.todo_state!r}. Statuses: {', '.join(states)}")
+        for setting in ("todo_state", "waiting_state", "done_state"):
+            name = getattr(settings, setting)
+            if name not in states:
+                ok = False
+                print(f"  ! No status named {name!r} (linear.{setting}). Statuses: {', '.join(states)}")
     except (LinearError, RuntimeError) as exc:
         ok = False
         print(f"Linear: FAILED. {exc}")
