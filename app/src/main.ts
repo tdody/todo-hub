@@ -173,12 +173,13 @@ const UNDO_FOR_MS = 10 * 60_000;
 let undoing = false;
 
 /** Show the banner for an action and remember how to reverse it. */
-function offerUndo(message: string, done: string, run: () => Promise<void>, extra?: ToastAction) {
+function offerUndo(message: string, done: string, run: () => Promise<void>, extra?: ToastAction): UndoEntry {
   const entry: UndoEntry = { done, run, at: Date.now() };
   undoStack.push(entry);
   if (undoStack.length > 20) undoStack.shift();
   entry.banner = toast(message, [...(extra ? [extra] : []), { label: "Undo", kbd: "⌘Z", run: () => void undo(entry) }],
     false, 9000);
+  return entry;
 }
 
 async function undo(entry?: UndoEntry) {
@@ -2205,7 +2206,7 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
     h("input", {
       class: "sub-add", placeholder: "+ Add sub-issue", maxLength: 200, value: paneDrafts.get(key) ?? "", readOnly: state.busy.has(key),
       "aria-label": `Add a sub-issue to ${i.identifier}`, "data-pane": "sub", "data-edit": key,
-      oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); },
+      oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); forgetPost(key); },
       onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void addSubIssue(i); } },
     }));
 }
@@ -2243,6 +2244,21 @@ async function tickSubIssue(parent: IssuePreview, sub: SubIssue) {
   }
 }
 
+// The comment or sub-issue box the last post emptied: ⌘Z there undoes that post, until you type in it.
+let emptiedBy: { key: string; entry: UndoEntry } | null = null;
+
+function forgetPost(key: string) {
+  if (emptiedBy?.key === key) emptiedBy = null;
+}
+
+/** The post ⌘Z in ``el`` should undo: ``el`` is the box that post emptied, still empty, and the post
+ *  can still be undone. */
+function postToUndoIn(el: Element | null): UndoEntry | null {
+  if (!emptiedBy || !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return null;
+  if (el.dataset.edit !== emptiedBy.key || el.value !== "" || !undoStack.includes(emptiedBy.entry)) return null;
+  return emptiedBy.entry;
+}
+
 async function addSubIssue(parent: IssuePreview) {
   const key = `${parent.id}:sub`;
   const title = paneDrafts.get(key)?.trim();
@@ -2254,11 +2270,11 @@ async function addSubIssue(parent: IssuePreview) {
     paneDrafts.delete(key);
     state.issues = [sub, ...state.issues];
     loadDetail(parent.id, true);
-    offerUndo(`${sub.identifier} added under ${parent.identifier}`, `${sub.identifier} deleted`, async () => {
+    emptiedBy = { key, entry: offerUndo(`${sub.identifier} added under ${parent.identifier}`, `${sub.identifier} deleted`, async () => {
       await api.deleteIssue(sub.id);
       state.issues = state.issues.filter((x) => x.id !== sub.id);
       loadDetail(parent.id, true);
-    });
+    }) };
   } catch (e) {
     fail(e);                                   // the title stays in the box
   } finally {
@@ -2291,6 +2307,7 @@ function commentsSection(i: IssuePreview): HTMLElement {
         oninput: (e: Event) => {
           const v = (e.target as HTMLTextAreaElement).value;
           paneDrafts.set(key, v);
+          forgetPost(key);
           showCount(v);
         },
         onkeydown: (e: KeyboardEvent) => {
@@ -2314,11 +2331,11 @@ async function postComment(i: IssuePreview) {
     const { id } = await api.addComment(i.id, body);
     paneDrafts.delete(key);
     loadDetail(i.id, true);
-    offerUndo(`Comment posted on ${i.identifier}`, `comment on ${i.identifier} deleted`, async () => {
+    emptiedBy = { key, entry: offerUndo(`Comment posted on ${i.identifier}`, `comment on ${i.identifier} deleted`, async () => {
       await api.deleteComment(id);
       if (!paneDrafts.get(key)?.trim()) paneDrafts.set(key, body);   // back in the box, to fix and post again
       loadDetail(i.id, true);
-    });
+    }) };
   } catch (e) {
     fail(e);                                   // the text stays in the box
   } finally {
@@ -3816,17 +3833,17 @@ document.addEventListener("pointerdown", (e) => {
 
 const inApp = "__TAURI_INTERNALS__" in window;
 
-/** ⌘Z undoes typing in a text field, except in the comment and sub-issue boxes once a save has
- *  emptied them: there it undoes the post. */
-function undoesTyping(el: Element | null): boolean {
-  if (!el || !(el.tagName === "TEXTAREA"
-      || (el.tagName === "INPUT" && ["text", "search", "url", "email", ""].includes((el as HTMLInputElement).type)))) return false;
-  return (el as HTMLInputElement).value !== "" || !el.matches('[data-pane="comment"], [data-pane="sub"]');
+function isTextField(el: Element | null): boolean {
+  return !!el && (el.tagName === "TEXTAREA"
+    || (el.tagName === "INPUT" && ["text", "search", "url", "email", ""].includes((el as HTMLInputElement).type)));
 }
 
-/** Called by the app's Edit → Undo (⌘Z): undo typing in a text field (see undoesTyping), else the last action. */
+/** Called by the app's Edit → Undo (⌘Z): in the box a post just emptied, undo the post; in another
+ *  text field, undo typing; else the last action. */
 (window as unknown as { todohubUndo: () => void }).todohubUndo = () => {
-  if (undoesTyping(document.activeElement)) {
+  const post = postToUndoIn(document.activeElement);
+  if (post) { void undo(post); return; }
+  if (isTextField(document.activeElement)) {
     document.execCommand("undo");
     return;
   }
@@ -3854,13 +3871,16 @@ document.addEventListener("keydown", (e) => {
     void refresh(true, "force");
     return;
   }
-  // ⌘Z undoes the last action, except in a text field (see undoesTyping), where it undoes typing as usual.
-  // In the app, Edit → Undo owns ⌘Z and calls todohubUndo(); this is for a plain browser.
+  // ⌘Z undoes the last action, except in a text field, where it undoes typing as usual (or the post
+  // that just emptied it). In the app, Edit → Undo owns ⌘Z and calls todohubUndo(); this is for a plain browser.
   if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z"
-      && !inApp && !undoesTyping(target) && !document.querySelector(".overlay")) {
-    e.preventDefault();
-    void undo();
-    return;
+      && !inApp && !document.querySelector(".overlay")) {
+    const post = postToUndoIn(target);
+    if (post || !isTextField(target)) {
+      e.preventDefault();
+      void undo(post ?? undefined);
+      return;
+    }
   }
   if (e.key === "Escape" && state.balanceOpen) { state.balanceOpen = false; render(); return; }
   if (typing) {
