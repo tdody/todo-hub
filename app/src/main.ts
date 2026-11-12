@@ -1,17 +1,21 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api, ApiError, waitForBackend } from "./api";
-import { h, link, modal, svg } from "./dom";
-import { insightsView, invalidateInsights } from "./insights";
-import { notifyNew, notifyOnce, onDesktopEvent, setTrayCount } from "./desktop";
+import { api, ApiError, linearImage, waitForBackend } from "./api";
+import { h, link, modal, pageHead, svg } from "./dom";
+import type { Child } from "./dom";
+import { renderMarkdown } from "./markdown";
+import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
+import { notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
-import { setDaylightLocation } from "./daylight";
+import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
+import { currentSchedule, loadSettings, settingsView } from "./settings";
+import type { SettingsCtx } from "./settings";
 import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskAvatar } from "./avatars";
 import type { Category } from "./avatars";
 
 applyTheme();
-import type { BalanceStats, Brief, Candidate, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
+import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
 
-type Tab = "inbox" | "today" | "client" | "dev" | "insights";
+type Tab = "inbox" | "today" | "client" | "dev" | "insights" | "settings";
 
 const PRIORITIES = [
   { value: 1, name: "Urgent" },
@@ -29,7 +33,8 @@ const SIGNAL_NAME = {
   waiting_on: "Waiting on", done: "Looks done", update: "Issue update", meeting_prep: "Meeting prep",
   review_request: "Review requested", mention: "Mentioned you",
 };
-const SCHEDULE_HOURS = [8, 10, 12, 14, 16];
+const DECIDED_PAGE = 50;                          // "Recently decided" rows shown at a time
+const SCHEDULE_HOURS = [8, 10, 12, 14, 16];     // until the settings load
 const KIND_NAME: Record<string, string | undefined> = {
   waiting: "Waiting on", close: "Looks done", comment: "Issue update",
 };
@@ -44,6 +49,9 @@ const state = {
   today: [] as TodayItem[],
   snoozed: [] as Candidate[],
   showSnoozed: false,
+  showDecided: false,
+  decided: null as { days: number; more: boolean; items: DecidedItem[] } | null,
+  decidedShown: DECIDED_PAGE,
   mutes: [] as MuteRule[],
   showMutes: false,
   selected: new Set<number>(),
@@ -57,20 +65,26 @@ const state = {
   slips: null as Slips | null,
   slipsAt: 0,
   briefAt: 0,
-  briefMode: null as "morning" | "evening" | null,   // null: by time of day
   /** By client/project or by status, chosen separately for Client and Dev and remembered on this Mac. */
   listLayout: {
     client: layoutPref("todohub.clientView"),
     dev: layoutPref("todohub.devView"),
   } as Record<"client" | "dev", "group" | "status">,
   showBacklog: false,
-  fullBrief: false,
-  balanceOpen: false,                 // the "work behind this week" popover on the brief tiles
-  carriedTo: null as string | null,
-  todaySel: null as string | null,     // Today list: the issue open in the reading pane    // wrap-up: the day "Move N to …" last moved items to                    // morning brief: show the four sections under the summary
-  todayLayout: (loadPref("todohub.todayView") === "checklist" ? "checklist" : "brief") as "brief" | "checklist",
+  listSel: { client: null, dev: null } as Record<"client" | "dev", string | null>,   // Client/Dev: the issue in the reading pane
+  highlight: new Set<string>(),       // identifiers to point out on the Client/Dev tab (from the digest)
+  sourcesOpen: false,
+  balanceOpen: false,                 // Today: the "behind this week" popover under a section's balance line
+  planRiseAt: 0,                      // when the sunrise started (ms), so a re-render mid-way doesn't restart it
+  todaySel: null as string | null,    // Today: the issue in the reading pane
+  todayOffOpen: false,                // Today: the "not on Today" fold (Claude's picks and late issues left out)
+  todayDoneOpen: false,               // Today: the "done today" fold
+  coverChecked: null as Set<string> | null, // the morning cover's checks, until Start my day
+  copied: new Set<string>(),          // Today: issues whose message was copied (a wrap-up or late-issue step)
   allClients: false,                  // sidebar: list every client, not just the first few
-  pickedClient: null as string | null, // the client the sidebar filtered the Client tab to
+  allProjects: false,                 // sidebar: list every Dev project, not just the first few
+  pickedClient: null as string | null, // the client (Client tab) or project (Dev tab) the sidebar filtered to
+  pickedProject: null as string | null, // a project from the sidebar: its Client and Dev issues together
 };
 
 /** Per-machine UI choices. Storage can be unavailable; the app then just uses the defaults. */
@@ -121,11 +135,13 @@ function nextSweep(): string {
 
 function nextSweepAt(): Date | null {
   const now = new Date();
+  const sched = currentSchedule();
+  if (sched && !sched.installed) return null;
   for (let add = 0; add < 8; add++) {
     const d = new Date(now);
     d.setDate(now.getDate() + add);
-    if (d.getDay() === 0 || d.getDay() === 6) continue;
-    for (const hour of SCHEDULE_HOURS) {
+    if ((d.getDay() === 0 || d.getDay() === 6) && sched?.days !== "every day") continue;
+    for (const hour of sched?.hours ?? SCHEDULE_HOURS) {
       d.setHours(hour, 0, 0, 0);
       if (d > now) return d;
     }
@@ -207,8 +223,9 @@ function fail(e: unknown) {
 
 // ---- data -----------------------------------------------------------------------------------
 async function loadCandidates() {
-  const [pending, snoozed, mutes] = await Promise.all([api.candidates(), api.candidates("snoozed"),
-    api.mutes().catch(() => state.mutes)]);
+  const [pending, snoozed, mutes, decided] = await Promise.all([api.candidates(), api.candidates("snoozed"),
+    api.mutes().catch(() => state.mutes), api.decided().catch(() => state.decided)]);
+  state.decided = decided;
   state.candidates = pending;
   state.snoozed = snoozed;
   state.mutes = mutes;
@@ -216,7 +233,7 @@ async function loadCandidates() {
   for (const id of state.selected) if (!ids.has(id)) state.selected.delete(id);
   if (state.focus !== null && !ids.has(state.focus)) state.focus = null;
   setTrayCount(pending.length);
-  void notifyNew(pending);
+  void notifySweep(state.run, pending);
 }
 
 async function loadIssues() {
@@ -231,12 +248,27 @@ async function loadToday() {
 async function loadRun() {
   const before = state.run.status;
   state.run = await api.latestRun();
+  sourceAlerts();
   if (before === "running" && state.run.status !== "running") {
     invalidateInsights();
     await loadCandidates();
     const n = state.candidates.length;
     if (state.run.status === "ok") toast(`Sweep finished. ${n} task${n === 1 ? "" : "s"} to review.`);
     else toast(`Sweep failed: ${state.run.error ?? "unknown error"}`, undefined, true);
+  }
+}
+
+/** A Mac notification when a source has failed in two sweeps in a row, at most once a day each.
+ *  (A sweep can finish "ok" with one source down, e.g. an expired sign-in; the red dot is easy to miss.) */
+const FAIL_STREAK_ALERT = 2;
+function sourceAlerts() {
+  const day = isoDay(new Date());
+  for (const o of state.run.source_overview ?? []) {
+    if ((o.fail_streak ?? 0) < FAIL_STREAK_ALERT) continue;
+    const name = SOURCE_NAME[o.source] ?? o.source;
+    void notifyOnce(`source-fail-${o.source}-${day}`, `TodoHub: ${name} keeps failing`,
+      `${o.detail ?? "It reported a problem"}. Failed ${o.fail_streak} sweeps in a row`
+      + `${o.failing_since ? `, since ${shortWhen(o.failing_since)}` : ""}. Check it in Settings → Sources.`);
   }
 }
 
@@ -273,7 +305,10 @@ function pollWhileRunning() {
       /* keep polling */
     }
     renderHeader();
-    if (state.run.status !== "running") render();
+    if (state.run.status !== "running") {
+      if (state.tab === "settings") await loadSettings();      // each source's new status
+      render();
+    }
     pollWhileRunning();
   }, 3000);
 }
@@ -350,7 +385,7 @@ async function merge(c: Candidate) {
 /** The card swipes off with a slight tilt, then the list closes the gap: green and to the right
  *  when approved, red and to the left when dropped. */
 async function swipeAway(id: number, way: "approve" | "drop" = "approve") {
-  const card = document.querySelector<HTMLElement>(`.cards > .card[data-id="${id}"]`);
+  const card = document.querySelector<HTMLElement>(`.ib-pane .card[data-id="${id}"]`);
   if (!card) return;
   card.classList.remove("busy", "focused");
   card.classList.add(way === "approve" ? "approved" : "dropped");
@@ -417,7 +452,7 @@ async function editIssue(issue: Issue, change: Parameters<typeof api.editIssue>[
   try {
     const updated = await api.editIssue(issue.id, change);
     const status = state.meta?.states.find((s) => s.id === updated.state.id);
-    const closed = !!status && (status.type === "completed" || status.type === "canceled");
+    const closed = closedType(status?.type ?? updated.state.type);
     state.issues = closed ? state.issues.filter((i) => i.id !== issue.id)
       : state.issues.map((i) => (i.id === issue.id ? updated : i));
     // The reverse change: put back whatever this edit replaced.
@@ -433,6 +468,39 @@ async function editIssue(issue: Issue, change: Parameters<typeof api.editIssue>[
       state.issues = state.issues.some((i) => i.id === issue.id)
         ? state.issues.map((i) => (i.id === issue.id ? restored : i))
         : [restored, ...state.issues];
+    });
+  } catch (e) {
+    fail(e);
+  }
+  render();
+}
+
+/** Delete an issue after a confirm: Linear moves it to its trash (restorable for 30 days there),
+ *  it leaves the lists and Today here, and Undo / ⌘Z brings it back. */
+function confirmDelete(i: Issue) {
+  const subs = state.issues.filter((x) => x.parent?.id === i.id).length;
+  const go = h("button", { class: "primary danger", onclick: () => { close(); void deleteIssue(i); } }, "Delete");
+  const close = modal(`Delete ${i.identifier}?`, h("div", { class: "confirm-body" },
+    h("p", {}, h("strong", {}, i.title)),
+    h("p", { class: "muted small" }, "Linear moves it to its trash, where you can restore it for 30 days. "
+      + "Undo here brings it back too."),
+    subs ? h("p", { class: "muted small" }, `It has ${subs} sub-issue${subs === 1 ? "" : "s"}; check ${subs === 1 ? "it" : "them"} in Linear afterwards.`) : ""),
+    [h("button", { class: "ghost", onclick: () => close() }, "Cancel"), go]);
+  go.focus();
+}
+
+async function deleteIssue(i: Issue) {
+  try {
+    const { today_position } = await api.deleteIssue(i.id);
+    state.issues = state.issues.filter((x) => x.id !== i.id);
+    state.today = state.today.filter((t) => t.issue_id !== i.id);
+    details.delete(i.id);
+    state.briefAt = 0;                 // the plan and wrap-up shouldn't count it any more
+    offerUndo(`${i.identifier} deleted (in Linear's trash)`, `${i.identifier} restored`, async () => {
+      const back = await api.restoreIssue(i.id, today_position);
+      state.issues = [back, ...state.issues.filter((x) => x.id !== i.id)];
+      state.today = (await api.today()).items;
+      state.briefAt = 0;
     });
   } catch (e) {
     fail(e);
@@ -463,11 +531,20 @@ async function runNow(source?: Source) {
 // ---- status and priority pills --------------------------------------------------------------
 const PRIO_CLASS: Record<number, string> = { 1: "p-urgent", 2: "p-high", 3: "p-med", 4: "p-low", 0: "p-none" };
 
+/** Linear's order for statuses: by kind (backlog, not started, started, done, canceled,
+ *  duplicate), then the team's own order within each kind. */
+const STATE_ORDER: Record<string, number> = { triage: 0, backlog: 1, unstarted: 2, started: 3, completed: 4, canceled: 5, duplicate: 6 };
+
+/** Done, canceled or duplicate: off the open lists. */
+function closedType(type: string): boolean {
+  return type === "completed" || type === "canceled" || type === "duplicate";
+}
+
 function statusClass(st: { name: string; type: string }): string {
   if (st.type === "backlog") return "s-backlog";
   if (st.type === "started") return "s-prog";
   if (st.type === "completed") return "s-done";
-  if (st.type === "canceled") return "s-cancel";
+  if (st.type === "canceled" || st.type === "duplicate") return "s-cancel";
   const waiting = state.brief?.waiting_state ?? "Pending";
   return st.name === waiting || /^(pending|waiting|blocked)/i.test(st.name) ? "s-pend" : "s-todo";
 }
@@ -503,13 +580,28 @@ function pillMenu<T>(title: string, options: PillOption<T>[], value: T, onChange
   return menu;
 }
 
+/** No priority stays quiet: the pill shows on hover of its row or card, or on focus. */
 function priorityPill(value: number, onChange: (v: number) => void): HTMLElement {
-  return pillMenu("Priority", PRIORITIES.map((p) => ({ value: p.value, label: p.value === 0 ? "No priority" : p.name, cls: PRIO_CLASS[p.value] })),
-    value, onChange, false);
+  const el: HTMLElement = pillMenu("Priority", PRIORITIES.map((p) => ({ value: p.value, label: p.value === 0 ? "No priority" : p.name, cls: PRIO_CLASS[p.value] })),
+    value, (v) => { el.classList.toggle("quiet-empty", v === 0); onChange(v); }, false);
+  el.classList.toggle("quiet-empty", value === 0);
+  return el;
+}
+
+/** An empty choice (no client, no project) stays quiet until hover or focus. */
+function quietSelect(el: HTMLSelectElement): HTMLSelectElement {
+  const sync = () => el.classList.toggle("quiet-empty", !el.value);
+  el.addEventListener("change", sync);
+  sync();
+  return el;
 }
 
 function statusPill(i: Issue, onChange: (stateId: string) => void): HTMLElement {
-  const states = (state.meta?.states ?? [i.state]).filter((st) => st.type !== "canceled" || st.id === i.state.id);
+  // Every status the team has, as in Linear's menu; Canceled and Duplicate take the issue off the
+  // open lists (with undo).
+  const states = (state.meta?.states ?? [i.state]).map((st, n) => ({ st, n }))
+    .sort((a, b) => (STATE_ORDER[a.st.type] ?? 9) - (STATE_ORDER[b.st.type] ?? 9) || a.n - b.n).map((x) => x.st);
+  if (!states.some((st) => st.id === i.state.id)) states.push(i.state);
   return pillMenu("Status", states.map((st) => ({ value: st.id, label: st.name, cls: statusClass(st) })), i.state.id, onChange, true);
 }
 
@@ -521,32 +613,51 @@ function priorityTag(p: number): HTMLElement | "" {
 
 function clientSelect(value: string | null, onChange: (v: string | null) => void) {
   const labels = state.meta?.client_labels ?? [];
-  return h(
+  return quietSelect(h(
     "select",
     { class: "client", title: "Client label", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
     h("option", { value: "", selected: !value }, "Dev / internal"),
     ...labels.map((l) => h("option", { value: l, selected: l === value }, l)),
-  );
+  ));
 }
 
 function projectSelect(value: string | null, onChange: (v: string | null) => void) {
   const projects = state.meta?.projects ?? [];
-  return h(
+  return quietSelect(h(
     "select",
     { class: "project", title: "Linear project", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
     h("option", { value: "", selected: !value }, "No project"),
     ...projects.map((p) => h("option", { value: p, selected: p === value }, p)),
-  );
+  ));
 }
 
+/** "Nov 9" ("Today" for today), the quiet face of a date field. */
+function dateText(value: string | null): string {
+  if (!value) return "";
+  if (value === localToday()) return "Today";
+  return new Date(value + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+/** A due date that stays quiet: plain text ("Nov 9", red when late) or nothing when empty. The
+ *  date field shows on hover of its row or card, or on focus; the Today pane always shows it. */
 function dateInput(value: string | null, onChange: (v: string | null) => void, cls = "") {
-  return h("input", {
-    type: "date",
-    class: `date ${cls}`,
-    value: value ?? "",
-    title: "Due date",
-    onchange: (e: Event) => onChange((e.target as HTMLInputElement).value || null),
-  });
+  const text = h("span", { class: "qdate-text", "aria-hidden": "true" }, dateText(value));
+  const wrap = h("span", { class: `qdate${value ? "" : " is-empty"} ${cls}`.trim() },
+    text,
+    h("input", {
+      type: "date",
+      class: `date ${cls}`,
+      value: value ?? "",
+      title: "Due date",
+      "aria-label": "Due date",
+      onchange: (e: Event) => {
+        const v = (e.target as HTMLInputElement).value || null;
+        text.textContent = dateText(v);
+        wrap.classList.toggle("is-empty", !v);
+        onChange(v);
+      },
+    }));
+  return wrap;
 }
 
 // ---- views ----------------------------------------------------------------------------------
@@ -705,6 +816,70 @@ function snoozedList(): HTMLElement | "" {
         h("span", {}, c.title),
         h("span", { class: "muted small" }, `until ${c.snooze_until}`),
         h("button", { class: "ghost small-btn", onclick: () => void snooze(c, null) }, "Bring back")))),
+  );
+}
+
+// ---- recently decided -------------------------------------------------------------------------------
+// Approved and dropped cards of the last 30 days, after ⌘Z's 10 minutes are up: a dropped one can
+// come back to the Inbox, an approved one links to what it became in Linear.
+function decidedTag(i: DecidedItem): string {
+  if (i.status === "dropped") return `Dropped · ${DROP_REASONS.find((r) => r.value === i.drop_reason)?.label ?? "Other"}`;
+  return i.kind === "close" ? "Closed" : i.kind === "comment" ? "Commented" : "Approved";
+}
+
+function decidedMatches(i: DecidedItem): boolean {
+  const q = state.filter.toLowerCase();
+  return !q || [i.title, i.client_label, i.who, i.linear_identifier, i.target_issue].some((s) => s?.toLowerCase().includes(q));
+}
+
+async function restoreDecided(i: DecidedItem) {
+  try {
+    await api.restore(i.id);
+    await loadCandidates();
+    goTab("inbox");
+    state.focus = i.id;
+    render();
+    offerUndo(`"${i.title}" is back in the Inbox`, `"${i.title}" dropped again`, async () => {
+      await api.drop(i.id, i.drop_reason ?? "other");
+      await loadCandidates();
+    });
+  } catch (e) {
+    fail(e);
+  }
+}
+
+function decidedList(): HTMLElement | "" {
+  const d = state.decided;
+  if (!d?.items.length) return "";
+  const rows = d.items.filter(decidedMatches);
+  const toggle = h("button", { class: "link-btn", onclick: () => {
+    state.showDecided = !state.showDecided;
+    state.decidedShown = DECIDED_PAGE;
+    render();
+  } }, state.showDecided ? "Hide" : "Show");
+  const shown = rows.slice(0, state.decidedShown);
+  return h("div", { class: "snoozed decided" },
+    h("div", { class: "muted small" },
+      `${d.items.length}${d.more ? "+" : ""} decided in the last ${d.days} days`,
+      state.filter && state.showDecided ? `, ${rows.length} matching` : "", " ", toggle),
+    state.showDecided && h("div", { class: "snoozed-list" },
+      ...shown.map((i) => {
+        const ident = i.linear_identifier ?? i.target_issue;
+        return h("div", { class: "decided-row" },
+          h("span", { class: `dec-tag ${i.status}` }, decidedTag(i)),
+          h("span", { class: "dec-title", title: i.title }, i.title),
+          h("span", { class: "muted small dec-from" }, [SOURCE_NAME[i.source] ?? i.source, i.who].filter(Boolean).join(" · ")),
+          h("span", { class: "muted small dec-when" }, shortWhen(i.decided_at)),
+          i.status === "dropped"
+            ? h("button", { class: "link-btn", title: "Put it back in the Inbox", onclick: () => void restoreDecided(i) }, "Restore")
+            : i.linear_url ? link(`${ident} ↗`, i.linear_url, "link small")
+            : h("span", { class: "muted small" }, ident ?? ""));
+      }),
+      !rows.length ? h("p", { class: "muted small" }, "None match the filter.") : "",
+      rows.length > shown.length ? h("button", { class: "link-btn", onclick: () => {
+        state.decidedShown += DECIDED_PAGE;
+        render();
+      } }, `Show ${Math.min(DECIDED_PAGE, rows.length - shown.length)} more`) : ""),
   );
 }
 
@@ -1129,33 +1304,145 @@ function inboxView(): HTMLElement {
       h("div", { class: "empty" },
         h("p", {}, state.filter ? "No tasks match the filter." : "Nothing to review."),
         !state.filter && next && h("p", { class: "muted" }, `Next sweep: ${next}.`)),
-      snoozedList(), mutedList());
+      snoozedList(), mutedList(), decidedList());
   }
-  return h("div", {}, handledBanner(), bulkBar(), h("div", { class: "cards" }, ...items.map(candidateCard)), snoozedList(), mutedList());
+  // List on the left, the selected candidate in full on the right (like the Today list). After a
+  // decision the next one in the list is selected.
+  let at = items.findIndex((c) => c.id === state.focus);
+  if (at < 0) {
+    at = Math.min(inboxLastIdx, items.length - 1);
+    state.focus = items[at].id;
+  }
+  inboxLastIdx = at;
+  const sel = items[at];
+  return h("div", {}, handledBanner(), bulkBar(),
+    h("div", { class: "ib" },
+      h("div", { class: `ib-list${state.selected.size ? " selecting" : ""}`, role: "listbox", "aria-label": "Inbox" },
+        ...items.map((c) => inboxItem(c, c.id === sel.id))),
+      h("div", { class: "ib-pane" }, candidateCard(sel))),
+    snoozedList(), mutedList(), decidedList());
 }
 
-function issueRow(i: Issue, showGroupField: "client" | "project", nested = false): HTMLElement {
-  const parts = [showGroupField === "client" ? i.project : i.client];
-  // A sub-issue whose parent isn't shown above it says which issue it belongs to.
-  if (i.parent && !nested) parts.push(`↳ ${i.parent.identifier} ${i.parent.title}`);
-  const side = parts.filter(Boolean).join(" · ");
+let inboxLastIdx = 0;
+
+/** One candidate in the Inbox list: avatar, title, then source · who and chips for what's set. */
+function inboxItem(c: Candidate, on: boolean): HTMLElement {
+  const d = state.drafts.get(c.id) ?? {};
+  const today = localToday();
+  const client = "client_label" in d ? d.client_label : c.client_label;
+  const priority = "priority" in d ? d.priority ?? 0 : c.priority;
+  const due = "due_date" in d ? d.due_date ?? null : c.due_date;
+  const chips: (HTMLElement | "")[] = [];
+  if (c.handled?.identifier) chips.push(h("span", { class: "ib-chip ok" }, "Looks handled"));
+  else if (c.possible_duplicate) chips.push(h("span", { class: "ib-chip dup" },
+    `${(c.duplicate_advice ?? "merge") === "drop" ? "Same as" : (c.duplicate_advice ?? "merge") === "merge" ? "Adds to" : "Related to"} ${c.possible_duplicate}`));
+  if (client) chips.push(h("span", { class: "ib-chip client" }, client));
+  if (priority === 1 || priority === 2) chips.push(priorityTag(priority));
+  if (due) chips.push(h("span", { class: `ib-chip${due < today ? " late" : due === today ? " soon" : ""}` },
+    `${c.kind === "waiting" ? "Follow up " : ""}${dateText(due)}`));
+  return h("div", {
+    class: `ib-item${on ? " sel" : ""}${state.selected.has(c.id) ? " picked" : ""}${state.busy.has(`c${c.id}`) ? " busy" : ""}`,
+    "data-id": String(c.id), role: "option", "aria-selected": String(on), tabindex: "-1",
+    onclick: (e: Event) => {
+      if ((e.target as HTMLElement).closest("input")) return;
+      state.focus = c.id;
+      render();
+    },
+  },
+    h("input", { type: "checkbox", class: "select", checked: state.selected.has(c.id), "aria-label": "Select for bulk actions",
+      onclick: (e: Event) => { e.stopPropagation(); toggleSelect(c.id); } }),
+    taskAvatar(client ?? null, c.category, "sm"),
+    h("div", { class: "ib-body" },
+      h("span", { class: "ib-title" }, ("title" in d ? d.title : c.title) || c.title),
+      h("span", { class: "ib-meta" },
+        h("span", { class: `src-${c.source}` }, SOURCE_NAME[c.source]),
+        c.who ? ` · ${c.who}` : ` · ${KIND_NAME[c.kind] ?? SIGNAL_NAME[c.signal]}`,
+        ...chips),
+      (c.why || c.excerpt) && h("span", { class: "ib-why", title: c.why || c.excerpt || "" }, c.why || c.excerpt)));
+}
+
+/** One issue in the Client or Dev list: star, avatar, the full title, then one quiet line with
+ *  status, ID, the other field (project on Client, client on Dev), priority, due date and slips.
+ *  Click to read it in the pane; the star adds it to Today. */
+function listItem(kind: "client" | "dev", i: Issue, showGroupField: "client" | "project" | null, nested = false): HTMLElement {
+  const today = localToday();
+  const on = state.listSel[kind] === i.id;
   const picked = state.today.some((t) => t.issue_id === i.id);
-  return h(
-    "div",
-    { class: `row${nested ? " child" : ""}${i.priority === 1 || i.priority === 2 ? ` prio-${i.priority}` : ""}` },
+  const slip = state.slips?.slips[i.id];
+  const bits: (string | Node)[] = [
+    h("span", { class: "ll-status" }, h("span", { class: `sdot ${statusClass(i.state)}` }), i.state.name), i.identifier];
+  // The field the list isn't grouped by; none in a project's view (grouped by client, one project).
+  const other = showGroupField === "client" ? i.project : showGroupField === "project" ? i.client : null;
+  if (other) bits.push(other);
+  const tag = priorityTag(i.priority);
+  if (tag) bits.push(tag);
+  if (i.due_date) bits.push(i.due_date < today ? h("span", { class: "late" }, dueLabel(i.due_date, today).replace("overdue", "late"))
+    : i.due_date === today ? h("span", { class: "due-today" }, "due today") : `due ${shortDay(i.due_date)}`);
+  if (slip && slip.count) bits.push(slipTag(slip));
+  // A sub-issue whose parent isn't shown above it says which issue it belongs to.
+  if (i.parent && !nested) bits.push(`↳ ${i.parent.identifier} ${i.parent.title}`);
+  const meta = h("span", { class: "tl-meta" });
+  bits.filter((x) => x !== "").forEach((b, n) => { if (n) meta.append(" · "); meta.append(b); });
+  return h("div", {
+    class: `tl-item ll-item${on ? " sel" : ""}${nested ? " child" : ""}${i.priority === 1 || i.priority === 2 ? ` prio-${i.priority}` : ""}${state.highlight.has(i.identifier) ? " hl" : ""}`,
+    tabindex: "0", "data-id": i.id, role: "option", "aria-selected": String(on),
+    onclick: (e: Event) => {
+      if ((e.target as HTMLElement).closest("a, button")) return;
+      state.listSel[kind] = i.id; render();
+    },
+  },
     h("button", {
       class: `star${picked ? " on" : ""}`, title: picked ? "Remove from Today" : "Add to Today",
       "aria-label": picked ? "Remove from Today" : "Add to Today", "aria-pressed": String(picked),
       onclick: () => void toggleToday(i.id),
     }, picked ? "★" : "☆"),
     taskAvatar(i.client, i.category, "sm"),
-    link(i.identifier, i.url, "ident"),
-    h("div", { class: "row-title" }, h("span", { title: i.title }, i.title),
-      (side || state.slips?.slips[i.id]) && h("span", { class: "muted small row-sub" }, side, slipTag(state.slips?.slips[i.id]))),
-    h("div", { class: "cell" }, statusPill(i, (id) => void editIssue(i, { state_id: id }))),
-    h("div", { class: "cell" }, priorityPill(i.priority, (v) => void editIssue(i, { priority: v }))),
-    dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
-  );
+    h("div", { class: "tl-body" }, h("span", { class: "tl-title" }, i.title), meta));
+}
+
+/** The list on the left and the selected issue in the reading pane, for Client and Dev (both
+ *  groupings). ``order`` is the issues as shown, for j/k and for picking the first one. */
+function listWithPane(kind: "client" | "dev", groups: (Node | string)[], order: Issue[]): HTMLElement {
+  if (!order.some((i) => i.id === state.listSel[kind])) state.listSel[kind] = order[0]?.id ?? null;
+  listOrder = order.map((i) => i.id);
+  const sel = order.find((i) => i.id === state.listSel[kind]);
+  // The rows were built before the first one was picked: mark it now, so the list shows what the pane does.
+  for (const g of groups) {
+    if (!(g instanceof HTMLElement)) continue;
+    g.querySelectorAll<HTMLElement>(".ll-item").forEach((el) => {
+      const on = el.dataset.id === sel?.id;
+      el.classList.toggle("sel", on);
+      el.setAttribute("aria-selected", String(on));
+    });
+  }
+  return h("div", { class: "tl-grid ll-grid" },
+    h("div", { class: "tl-list ll-list", role: "listbox", "aria-label": kind === "client" ? "Client issues" : "Dev issues" }, ...groups),
+    sel ? issuePane(sel) : h("section", { class: "tl-pane" }, h("p", { class: "muted" }, "Pick an issue to read it here.")));
+}
+
+let listOrder: string[] = [];
+
+/** A group's heading in Client, Dev and Today: the client's logo (a project initial, a status dot,
+ *  or nothing on Today), the name in bold, a short summary ("8 open · 2 late · 1 due today"), then
+ *  a rule running to the group's action (Weekly summary on a client, the balance meter on Today). */
+function groupHead(name: string, lead: Node | "", issues: Issue[], action: Node | "" = ""): HTMLElement {
+  const today = localToday();
+  const late = issues.filter((i) => i.due_date && i.due_date < today).length;
+  const dueToday = issues.filter((i) => i.due_date === today).length;
+  const summary = h("span", { class: "ll-sum" }, `${issues.length} open`);
+  if (late) summary.append(" · ", h("span", { class: "late" }, `${late} late`));
+  if (dueToday) summary.append(` · ${dueToday} due today`);
+  return h("h2", {}, lead, h("span", { class: "ll-name" }, name), summary, h("span", { class: "ll-rule", "aria-hidden": "true" }), action);
+}
+
+/** ↑/↓ (or j/k) in Client and Dev. */
+function stepList(delta: number) {
+  const kind = state.tab as "client" | "dev";
+  if (!listOrder.length) return;
+  const cur = listOrder.indexOf(state.listSel[kind] ?? "");
+  state.listSel[kind] = listOrder[Math.max(0, Math.min(listOrder.length - 1, cur < 0 ? 0 : cur + delta))];
+  render();
+  document.querySelector(".ll-item.sel")?.scrollIntoView({ block: "nearest" });
 }
 
 // ---- today ----------------------------------------------------------------------------------
@@ -1179,33 +1466,41 @@ function nextHalfHour(): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/** "Block time ▾" in the Today pane: start time and length in its menu; once blocked, the
+ *  event's time as a link to it. */
 function blockControls(t: TodayItem): HTMLElement {
   if (t.event_start && t.event_minutes) {
     const start = new Date(t.event_start);
     const end = new Date(start.getTime() + t.event_minutes * 60_000);
     const fmt = (d: Date) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    return h("div", { class: "block done" }, link(`Blocked ${fmt(start)}–${fmt(end)} ↗`, t.event_link, "link small"));
+    return h("span", { class: "block done" }, link(`Blocked ${fmt(start)}–${fmt(end)} ↗`, t.event_link, "link small"));
   }
   const time = h("input", { type: "time", class: "date", value: nextHalfHour(), "aria-label": "Start time" });
   const len = h("select", { "aria-label": "Duration" },
     ...[30, 60, 90, 120].map((m) => h("option", { value: String(m), selected: m === 60 }, m < 60 ? `${m} min` : `${m / 60} h`)));
   const btn = h("button", {
-    class: "ghost small-btn",
-    onclick: async () => {
+    class: "primary small-btn",
+    onclick: async (e: Event) => {
+      e.preventDefault();
       btn.disabled = true;
       btn.textContent = "Blocking…";
       try {
         state.today = (await api.block(t.issue_id, time.value, Number(len.value))).items;
         toast("Time blocked on your calendar");
         render();
-      } catch (e) {
+      } catch (err) {
         btn.disabled = false;
-        btn.textContent = "Block time";
-        fail(e);
+        btn.textContent = "Block";
+        fail(err);
       }
     },
-  }, "Block time");
-  return h("div", { class: "block" }, time, len, btn);
+  }, "Block");
+  return h("details", { class: "drop-menu pane-menu block-menu" },
+    h("summary", { class: "ghost-btn small-btn", title: "Put a focus block on your calendar" }, "Block time ▾"),
+    h("div", { class: "menu block-pop" },
+      h("label", {}, h("span", { class: "muted small" }, "Start"), time),
+      h("label", {}, h("span", { class: "muted small" }, "Length"), len),
+      btn));
 }
 
 // ---- morning brief and wrap-up ----------------------------------------------------------------
@@ -1236,7 +1531,7 @@ function weekday(day: string): string {
 }
 
 function isOpen(i: Issue): boolean {
-  return i.state.type !== "completed" && i.state.type !== "canceled";
+  return !closedType(i.state.type);
 }
 
 /** A day's plan: overdue and due-soon work first, then urgent and high priority, up to six. */
@@ -1261,115 +1556,11 @@ function dueLabel(due: string, today: string): string {
   return days > 0 ? `${days} day${days === 1 ? "" : "s"} overdue` : `due ${due}`;
 }
 
-function briefLine(i: Issue, note: string): HTMLElement {
-  return h("li", {}, taskAvatar(i.client, i.category, "sm"), link(i.identifier, i.url, "ident"),
-    h("span", { class: "brief-title" }, i.title), note ? h("span", { class: "muted small" }, note) : "");
-}
-
-function briefSection(title: string, items: Node[], empty: string, count = items.length): HTMLElement {
-  return h("section", { class: "brief-section" },
-    h("h3", {}, title, count ? h("span", { class: "count" }, String(count)) : ""),
-    items.length ? h("ul", { class: "brief-list" }, ...items) : h("p", { class: "muted small" }, empty));
-}
-
-function morningBrief(b: Brief): HTMLElement[] {
-  const today = b.day;
-  const open = state.issues.filter(isOpen);
-  const waiting = open.filter((i) => i.state.name === b.waiting_state);
-  const due = open.filter((i) => i.state.name !== b.waiting_state && i.due_date && i.due_date <= today)
-    .sort((x, y) => x.due_date!.localeCompare(y.due_date!));
-  const chase = waiting.filter((i) => i.due_date && i.due_date <= today);
-  const picked = new Set(state.today.map((t) => t.issue_id));
-  const plan = suggestPlan(today, b.waiting_state);
-  const missing = plan.filter((i) => !picked.has(i.id));
-  return [
-    briefSection("Meetings today",
-      (b.agenda ?? []).map((e) => h("li", {},
-        h("span", { class: "brief-time" }, clock(e.start) + (e.end ? `–${clock(e.end)}` : "")),
-        link(e.title, e.link, "brief-title link"),
-        e.external ? h("span", { class: "chip" }, "external") : "")),
-      b.agenda === null ? "Today's calendar comes in with the first sweep of the day." : "No meetings today."),
-    briefSection("Due or overdue", due.map((i) => briefLine(i, dueLabel(i.due_date!, today))), "Nothing due today."),
-    briefSection("Waiting on someone: time to follow up",
-      chase.map((i) => briefLine({ ...i, title: i.title.replace(/^Waiting on /i, "") }, i.due_date === today ? "follow up today" : dueLabel(i.due_date!, today).replace("overdue", "past follow-up"))),
-      "No follow-ups due."),
-    h("section", { class: "brief-section" },
-      h("h3", {}, "Suggested plan"),
-      plan.length
-        ? h("ol", { class: "brief-list" }, ...plan.map((i) => briefLine(i, picked.has(i.id) ? "in Today" : "")))
-        : h("p", { class: "muted small" }, "Nothing urgent or due soon. Pick from Client and Dev."),
-      missing.length ? h("button", { class: "primary small-btn", onclick: () => void saveToday([...state.today.map((t) => t.issue_id), ...missing.map((i) => i.id)]) },
-        `Add ${missing.length} to Today`) : ""),
-  ];
-}
-
-function wrapUp(b: Brief): HTMLElement[] {
-  const doneIds = new Set(b.completed_today.map((i) => i.id));
-  const openIds = new Set(state.issues.filter((i) => isOpen(i) && !doneIds.has(i.id)).map((i) => i.id));
-  const left = state.today.filter((t) => openIds.has(t.issue_id));
-  const shown = b.completed_today.slice(0, 8);
-  const more = b.completed_today.length - shown.length;
-  const carry = async () => {
-    try {
-      await api.carryOver(left.map((t) => t.issue_id));
-      toast(`Moved ${left.length} to ${weekday(b.next_day)}'s Today list`);
-    } catch (e) {
-      fail(e);
-    }
-  };
-  return [
-    briefSection("Done today",
-      [...shown.map((i) => briefLine(i, "")), ...(more > 0 ? [h("li", { class: "muted small" }, `and ${more} more`)] : [])],
-      b.error ? `Couldn't load from Linear: ${b.error}` : "Nothing completed in Linear yet today.",
-      b.completed_today.length),
-    h("section", { class: "brief-section" },
-      h("h3", {}, "Still open from Today", left.length ? h("span", { class: "count" }, String(left.length)) : ""),
-      left.length
-        ? h("ul", { class: "brief-list" }, ...left.map((t) => briefLine(state.issues.find((i) => i.id === t.issue_id)!, "")))
-        : h("p", { class: "muted small" }, state.today.length ? "Everything on Today is done." : "Nothing was planned for today."),
-      left.length ? h("button", { class: "primary small-btn", onclick: () => void carry() },
-        `Move ${left.length} to ${weekday(b.next_day)}`) : ""),
-  ];
-}
-
-/** Client share = client-labeled issues completed this week (Mon–Sun) ÷ all issues completed this
- *  week, as in Insights. Shown when at least NUDGE_MIN_DONE are done and the share is NUDGE_GAP or
- *  more away from the target, with up to three open issues from the side that's behind. */
+/** The balance rule (pill, popover, checklist): client share = client-labeled issues completed this
+ *  week (Mon–Sun) ÷ all issues completed this week, as in Insights. It speaks up once at least
+ *  NUDGE_MIN_DONE are done and the share is NUDGE_GAP or more away from the target. */
 const NUDGE_MIN_DONE = 3;
 const NUDGE_GAP = 0.15;
-
-function balanceNudge(waiting: string): HTMLElement | "" {
-  const bal = state.balance;
-  const w = bal?.weeks.at(-1);
-  if (!bal || !w || w.client_share === null || w.client + w.dev < NUDGE_MIN_DONE) return "";
-  const gap = w.client_share - bal.target;
-  if (Math.abs(gap) < NUDGE_GAP) return "";
-  const behind: "client" | "dev" = gap < 0 ? "client" : "dev";
-  const weekEnd = addDays(w.week, 6);
-  const picked = new Set(state.today.map((t) => t.issue_id));
-  const pool = state.issues
-    .filter((i) => isOpen(i) && i.list === behind && i.state.name !== waiting)
-    .sort((a, b) => (a.due_date ?? "9").localeCompare(b.due_date ?? "9") || (a.priority || 9) - (b.priority || 9));
-  const dueThisWeek = pool.filter((i) => i.due_date && i.due_date <= weekEnd);
-  const picks = (dueThisWeek.length ? dueThisWeek : pool).slice(0, 3);
-  const share = behind === "client" ? w.client_share : 1 - w.client_share;
-  const done = w.client + w.dev;
-  const word = behind === "client" ? "Client" : "Dev";
-  const lead = `${word} work is ${pct(share)} of what you've completed this week ` +
-    `(${behind === "client" ? w.client : w.dev} of ${done}; target ${pct(behind === "client" ? bal.target : 1 - bal.target)}).`;
-  const next = dueThisWeek.length
-    ? ` ${dueThisWeek.length} ${word.toLowerCase()} task${dueThisWeek.length === 1 ? " is" : "s are"} due this week:`
-    : picks.length ? ` Some ${word.toLowerCase()} work to pick from:` : "";
-  return h("div", { class: `nudge nudge-${behind}` },
-    h("p", {}, h("strong", {}, "Balance. "), lead + next),
-    picks.length ? h("ul", { class: "brief-list" }, ...picks.map((i) => h("li", {},
-      taskAvatar(i.client, i.category, "sm"), link(i.identifier, i.url, "ident"),
-      h("span", { class: "brief-title" }, i.title),
-      i.due_date ? h("span", { class: "muted small" }, dueLabel(i.due_date, state.brief?.day ?? isoDay(new Date()))) : "",
-      picked.has(i.id) ? h("span", { class: "muted small" }, "in Today")
-        : h("button", { class: "ghost-btn small-btn", onclick: () => void saveToday([...state.today.map((t) => t.issue_id), i.id]) },
-          "Add to Today")))) : "");
-}
 
 function pct(x: number): string {
   return `${Math.round(x * 100)}%`;
@@ -1383,7 +1574,7 @@ function nudgeText(i: Issue): string {
     : `Hi, just following up on ${i.title}. Any update?`;
 }
 
-/** Is client or dev work behind this week? Same rule as the balance nudge. */
+/** Is client or dev work behind this week? NUDGE_MIN_DONE and NUDGE_GAP decide. */
 function behindSide(): { side: "client" | "dev"; share: number; done: number; target: number } | null {
   const bal = state.balance;
   const w = bal?.weeks.at(-1);
@@ -1397,30 +1588,15 @@ function behindSide(): { side: "client" | "dev"; share: number; done: number; ta
 /** "Hide this week" on the popover: the pill stays away until next Monday. */
 const BALANCE_HIDE = "todohub.balanceHidden";
 
-/** The "Client work behind this week" pill and, when open, its popover: how many issues from the
- *  side that's behind get you back to the target by Sunday, the math behind that number, and up
- *  to three open issues from that side to put on Today. Same definition as the nudge: client
- *  share = client-labeled issues you completed Mon–Sun ÷ all issues you completed that week. */
-function balancePill(waiting: string): HTMLElement | "" {
-  const behind = behindSide();
-  const bal = state.balance;
-  const w = bal?.weeks.at(-1);
-  if (!behind || !bal || !w || loadPref(BALANCE_HIDE) === w.week) return "";
-  const Word = behind.side === "client" ? "Client" : "Dev";
-  const pill = h("button", {
-    class: "mtile-pill", "aria-expanded": String(state.balanceOpen), "aria-haspopup": "dialog",
-    title: `${Word} work is ${pct(behind.share)} of the ${behind.done} issues you've completed this week; target ${pct(behind.target)}.`,
-    onclick: () => { state.balanceOpen = !state.balanceOpen; render(); },
-  }, `${Word} work behind this week`);
-  return h("span", { class: "bal-anchor" }, pill, state.balanceOpen ? balancePopover(behind, w, waiting) : "");
-}
-
 /** Smallest n with (x + n) / (total + n) ≥ target: issues from the behind side still needed. */
 function neededToTarget(x: number, total: number, target: number): number {
   if (target >= 1) return Infinity;
   return Math.max(0, Math.ceil((target * total - x) / (1 - target) - 1e-9));
 }
 
+/** Under Today's "Behind the target" line: how many issues from the side that's behind get you back
+ *  to the target by Sunday, the math behind that number, and up to three open issues from that side
+ *  to put on Today. Client share = client-labeled issues you completed Mon–Sun ÷ all you completed. */
 function balancePopover(behind: NonNullable<ReturnType<typeof behindSide>>,
                         w: { week: string; client: number; dev: number }, waiting: string): HTMLElement {
   const side = behind.side;
@@ -1487,237 +1663,194 @@ function balancePopover(behind: NonNullable<ReturnType<typeof behindSide>>,
   );
 }
 
-async function blockFirst(i: Issue, btn: HTMLButtonElement) {
-  const start = nextHalfHour();
+async function blockFirst(i: Issue, btn: HTMLButtonElement, minutes: number, start = nextHalfHour()) {
   btn.disabled = true;
   btn.textContent = "Blocking…";
   try {
     if (!state.today.some((t) => t.issue_id === i.id)) {
       state.today = (await api.setToday([...state.today.map((t) => t.issue_id), i.id])).items;
     }
-    state.today = (await api.block(i.id, start, 60)).items;
-    toast(`Blocked ${clock(start)} on your calendar`);
+    state.today = (await api.block(i.id, start, minutes)).items;
+    toast(`Blocked ${fmtMinutes(minutes)} at ${clock(start)} on your calendar`);
   } catch (e) {
     fail(e);
   }
   render();
 }
 
-/** The morning tile: one sentence, what to do first, the next meeting, who to chase, and the
- *  suggested plan in one line. The four full sections open with "See the full brief". */
-function morningTile(b: Brief): HTMLElement {
-  const today = b.day;
+/** A block for Claude's estimate, rounded up to 15 minutes (15 min to 3 h); an hour without one. */
+function blockLength(minutes: number | null): number {
+  return minutes ? Math.min(180, Math.max(15, Math.ceil(minutes / 15) * 15)) : 60;
+}
+
+/** "3 meetings, 3 things due and 1 to chase." The tile's headline when Claude's plan isn't in. */
+function dayHeadline(b: Brief): string {
   const open = state.issues.filter(isOpen);
-  const due = open.filter((i) => i.state.name !== b.waiting_state && i.due_date && i.due_date <= today);
-  const chase = open.filter((i) => i.state.name === b.waiting_state && i.due_date && i.due_date <= today)
-    .sort((x, y) => x.due_date!.localeCompare(y.due_date!));
+  const due = open.filter((i) => i.state.name !== b.waiting_state && i.due_date && i.due_date <= b.day);
+  const chase = open.filter((i) => i.state.name === b.waiting_state && i.due_date && i.due_date <= b.day);
   const meetings = b.agenda ?? [];
-  const now = nowHM();
-  const ahead = meetings.filter((m) => (m.end ?? m.start) >= now);
-  const next = ahead[0];
-  const picked = new Set(state.today.map((t) => t.issue_id));
-  const plan = suggestPlan(today, b.waiting_state);
-  const first = plan[0];
-  const missing = plan.filter((i) => !picked.has(i.id));
+  if (!meetings.length && !due.length && !chase.length) return "A clear day: nothing due, no meetings.";
+  return `${listWords([b.agenda ? plural(meetings.length, "meeting") : "", `${due.length} ${due.length === 1 ? "thing" : "things"} due`,
+    chase.length ? `${chase.length} to chase` : ""].filter(Boolean))}.`;
+}
 
-  const parts = [b.agenda ? plural(meetings.length, "meeting") : "", `${due.length} ${due.length === 1 ? "thing" : "things"} due`,
-    chase.length ? `${chase.length} to chase` : ""].filter(Boolean);
-  const headline = !meetings.length && !due.length && !chase.length ? "A clear morning: nothing due, no meetings."
-    : `${listWords(parts)}.`;
-  const minsTo = (hm: string) => {
-    const [hh, mm] = hm.split(":").map(Number);
-    const d = new Date(); d.setHours(hh, mm, 0, 0);
-    return Math.round((d.getTime() - Date.now()) / 60000);
-  };
-  const when = next ? (minsTo(next.start) <= 0 ? "now" : minsTo(next.start) < 60 ? `in ${minsTo(next.start)} min`
-    : `in ${Math.floor(minsTo(next.start) / 60)} h ${minsTo(next.start) % 60 ? `${minsTo(next.start) % 60} min` : ""}`.trim()) : "";
-  const firstNote = first?.due_date ? dueLabel(first.due_date, today).replace("overdue", "late") : first?.priority === 1 ? "urgent" : "";
-  const c = chase[0];
-
-  return h("div", { class: "mtile" },
-    h("div", { class: "mtile-hero" },
-      h("div", { class: "mtile-top" },
-        h("span", { class: "mtile-hello" }, new Date().getHours() < 12 ? "Good morning" : "Your day"),
-        h("span", { class: "muted small" }, new Date(today + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })),
-        h("span", { class: "spacer" }),
-        balancePill(b.waiting_state)),
-      h("h2", { class: "mtile-headline" }, headline),
-      first ? h("div", { class: "mtile-first" },
-        h("span", { class: "mtile-k" }, "Do first"),
-        h("div", { class: "mtile-first-title" }, first.title),
-        h("span", { class: "mtile-meta" }, `${first.identifier} · ${first.client ?? first.project ?? "Dev"}`,
-          firstNote ? h("span", { class: `mtile-due${first.due_date && first.due_date < today ? " late" : ""}` }, ` · ${firstNote}`) : ""),
-        h("div", { class: "mtile-actions" },
-          state.today.find((t) => t.issue_id === first.id)?.event_start
-            ? h("span", { class: "muted small" }, "Time blocked ✓")
-            : h("button", { class: "primary", onclick: (e: Event) => void blockFirst(first, e.currentTarget as HTMLButtonElement) },
-                `Block 1 h at ${clock(nextHalfHour())}`),
-          link("Open in Linear", first.url, "ghost-link"),
-          !picked.has(first.id) ? h("button", { class: "ghost", onclick: () => void saveToday([...state.today.map((t) => t.issue_id), first.id]) },
-            "Add to Today") : ""))
-        : h("p", { class: "muted" }, "Nothing urgent or due soon. Pick from Client and Dev.")),
-    h("div", { class: "mtile-cols" },
-      h("div", { class: "mtile-cell" },
-        h("span", { class: "mtile-k" }, "Next meeting"),
-        next ? h("div", { class: "mtile-big" }, `${clock(next.start)} · `, link(next.title, next.link, "link")) :
-          h("div", { class: "mtile-big muted" }, b.agenda === null ? "Calendar comes in with the first sweep" : "No more meetings today"),
-        next ? h("span", { class: "mtile-meta" }, when, next.external ? " · external" : "") : "",
-        ahead.length > 1 ? h("span", { class: "muted small" },
-          "Then " + ahead.slice(1).map((m) => `${clock(m.start)} ${m.title}`).join(" · ")) : ""),
-      h("div", { class: "mtile-cell" },
-        h("span", { class: "mtile-k" }, "Chase"),
-        c ? h("div", { class: "mtile-big" }, c.title.replace(/^Waiting on /i, ""))
-          : h("div", { class: "mtile-big muted" }, "No follow-ups due"),
-        c ? h("span", { class: "mtile-meta" }, `${c.identifier}${c.client ? ` · ${c.client}` : ""} · ${c.due_date === today ? "follow up today" : dueLabel(c.due_date!, today).replace("overdue", "past follow-up")}`) : "",
-        c ? h("div", { class: "mtile-actions" },
-          h("button", { class: "ghost small-btn", title: nudgeText(c),
-            onclick: async () => { if (await copyText(nudgeText(c))) toast("Nudge copied. Paste it where you talk to them."); } }, "Copy nudge"),
-          chase.length > 1 ? h("span", { class: "muted small" }, `+ ${chase.length - 1} more`) : "") : "")),
-    h("div", { class: "mtile-foot" },
-      h("span", {}, missing.length
-        ? `Suggested plan: ${missing.length} more${missing.filter((i) => i.list === "client").length ? `, ${missing.filter((i) => i.list === "client").length} of them client` : ""}`
-        : plan.length ? "Everything suggested is on Today." : "No suggestions today."),
-      h("span", { class: "spacer" }),
-      h("button", { class: "ghost", "aria-expanded": String(state.fullBrief), onclick: () => { state.fullBrief = !state.fullBrief; render(); } },
-        state.fullBrief ? "Hide the full brief" : "See the full brief"),
-      missing.length ? h("button", { class: "primary", onclick: () => void saveToday([...state.today.map((t) => t.issue_id), ...missing.map((i) => i.id)]) },
-        `Add ${missing.length} to Today`) : ""),
-  );
+function minutesUntil(hm: string): number {
+  const [hh, mm] = hm.split(":").map(Number);
+  const d = new Date(); d.setHours(hh, mm, 0, 0);
+  return Math.round((d.getTime() - Date.now()) / 60000);
 }
 
 function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(b + "T12:00:00") - Date.parse(a + "T12:00:00")) / 864e5);
 }
 
-function wrapText(b: Brief, left: Issue[]): string {
-  const day = new Date(b.day + "T12:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-  const lines = [`Wrap-up ${day}: ${b.completed_today.length} done, ${left.length} still open.`];
-  if (b.completed_today.length) {
-    lines.push("", "Done:", ...b.completed_today.map((i) => `• ${i.identifier} ${i.title}${i.client ? ` (${i.client})` : ""}`));
+async function rewrap(btn?: HTMLButtonElement) {
+  if (btn) { btn.disabled = true; btn.textContent = "Asking Claude…"; }
+  try {
+    await api.rewrap();
+    toast("Claude is wrapping up your day. About a minute.");
+    if (state.brief) state.brief.wrapup_run = { id: 0, status: "running", error: null, started_at: new Date().toISOString(), finished_at: null };
+    pollPlan();
+  } catch (e) {
+    fail(e);
   }
-  if (left.length) lines.push("", "Still open:", ...left.map((i) => `• ${i.identifier} ${i.title}`));
-  return lines.join("\n");
+  render();
 }
 
-/** The evening tile: what got done, what's left, and how tomorrow starts. Same layout as the
- *  morning tile, in dusk colors. The full wrap-up opens below it. */
-function eveningTile(b: Brief): HTMLElement {
-  const doneIds = new Set(b.completed_today.map((i) => i.id));
-  const leftItems = state.today.map((t) => state.issues.find((i) => i.id === t.issue_id))
-    .filter((i): i is Issue => !!i && isOpen(i) && !doneIds.has(i.id));
-  const done = b.completed_today;
-  const tomorrow = b.next_day;
-  const tomorrowName = weekday(tomorrow);
-  const plan = suggestPlan(tomorrow, b.waiting_state);
-  const leftIds = new Set(leftItems.map((i) => i.id));
-  const first = plan.find((i) => leftIds.has(i.id)) ?? leftItems[0] ?? plan[0];
-  const week = state.balance?.weeks.at(-1);
-  const carried = state.carriedTo === tomorrow;
-  const hour = new Date().getHours();
+// ---- the weekly mission check-in ---------------------------------------------------------------
+// Each wrap-up rebuilds the week's check-in draft. The dialog shows it as text to edit, with four
+// short fields only he can answer (how the week went, help, highlights, shoutouts). Copy puts it
+// all on the clipboard, in the order /mission-checkin asks; empty fields are left out. Edits stay
+// in this browser for the week, until Claude writes a newer draft (his four answers are kept).
+const CHECKIN_PREF = "todohub.checkin";
+const HEALTH_WORD = { on_track: "on track", at_risk: "at risk", off_track: "off track" } as const;
+type CheckinDraft = { week: string; base: string; text: string; how: string; help: string; highlights: string; shoutouts: string };
 
-  const headline = !done.length && !leftItems.length ? (state.today.length ? "Everything on Today is done." : "A quiet day: nothing planned, nothing closed.")
-    : !leftItems.length ? `${done.length} done today. Everything on Today is finished.`
-    : `${done.length} done today, ${leftItems.length} still open.`;
-  const firstNote = !first?.due_date ? (first?.priority === 1 ? "urgent" : "")
-    : first.due_date < tomorrow ? `${plural(daysBetween(first.due_date, tomorrow), "day")} late by ${tomorrowName}`
-    : first.due_date === tomorrow ? `due ${tomorrowName}` : `due ${shortDay(first.due_date)}`;
-  const carry = async (ids: string[], btn: HTMLButtonElement) => {
-    btn.disabled = true;
-    try {
-      await api.carryOver(ids);
-      state.carriedTo = tomorrow;
-      toast(`Moved ${plural(ids.length, "item")} to ${tomorrowName}'s Today list`);
-    } catch (e) {
-      btn.disabled = false;
-      fail(e);
-    }
-    render();
+function checkinText(c: Checkin): string {
+  const list = (xs: string[]) => xs.map((x) => `- ${x}`).join("\n");
+  return [
+    c.work.length ? "Mission work this week:\n\n" + c.work.map((g) => `${g.mission}\n${list(g.items)}`).join("\n\n") : "",
+    c.next_week.length ? `Plan for next week:\n${list(c.next_week)}` : "",
+    c.review.length ? `Deliverables to review:\n${list(c.review)}` : "",
+    c.health.length ? "Health of the missions I lead:\n" + c.health.map((x) => `- ${x.mission}: ${HEALTH_WORD[x.status]}. ${x.why}`.trim()).join("\n") : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function showCheckin(c: Checkin) {
+  let saved: Partial<CheckinDraft> = {};
+  try { saved = JSON.parse(loadPref(CHECKIN_PREF) ?? "{}"); } catch { /* start fresh */ }
+  if (saved.week !== c.week) saved = {};
+  const draft: CheckinDraft = {
+    week: c.week, base: c.made_at,
+    text: saved.base === c.made_at && saved.text !== undefined ? saved.text : checkinText(c),
+    how: saved.how ?? "", help: saved.help ?? "", highlights: saved.highlights ?? "", shoutouts: saved.shoutouts ?? "",
   };
-  const dueTomorrow = state.issues.filter((i) => isOpen(i) && i.state.name !== b.waiting_state && i.due_date === tomorrow);
-  const waitingOn = state.issues.filter((i) => isOpen(i) && i.state.name === b.waiting_state && i.due_date && i.due_date <= tomorrow)
-    .sort((x, y) => x.due_date!.localeCompare(y.due_date!));
-  const firstMeeting = b.next_agenda?.[0];
-  const doneClient = done.filter((i) => i.list === "client").length;
-
-  return h("div", { class: "mtile dusk" },
-    h("div", { class: "mtile-hero" },
-      h("span", { class: "dusk-stars", "aria-hidden": "true" }),
-      h("div", { class: "mtile-top" },
-        h("span", { class: "mtile-hello" }, hour >= 17 ? "Good evening" : hour >= 12 ? "Good afternoon" : "Wrap-up"),
-        h("span", { class: "dusk-date" }, new Date(b.day + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })),
-        h("span", { class: "spacer" }),
-        balancePill(b.waiting_state)),
-      h("h2", { class: "mtile-headline" }, headline),
-      first ? h("div", { class: "mtile-first" },
-        h("span", { class: "mtile-k" }, "Tomorrow starts with"),
-        h("div", { class: "mtile-first-title" }, first.title),
-        h("span", { class: "mtile-meta" }, `${first.identifier} · ${first.client ?? first.project ?? "Dev"}`,
-          firstNote ? h("span", { class: `mtile-due${first.due_date && first.due_date < tomorrow ? " late" : ""}` }, ` · ${firstNote}`) : ""))
-        : h("p", { class: "mtile-meta" }, "Nothing pressing for tomorrow yet."),
-      h("div", { class: "mtile-actions" },
-        carried ? h("span", { class: "dusk-done" }, `Moved to ${tomorrowName} ✓`)
-          : leftItems.length ? h("button", { class: "dusk-btn",
-              onclick: (e: Event) => void carry(leftItems.map((i) => i.id), e.currentTarget as HTMLButtonElement) },
-              `Move ${leftItems.length} to ${tomorrowName}`)
-          : first ? h("button", { class: "dusk-btn",
-              onclick: (e: Event) => void carry([first.id], e.currentTarget as HTMLButtonElement) },
-              `Put it on ${tomorrowName}'s Today`) : "",
-        first ? link("Open in Linear", first.url, "glass-link") : "")),
-    h("div", { class: "mtile-cols" },
-      h("div", { class: "mtile-cell" },
-        h("span", { class: "mtile-k" }, `Done today${done.length ? ` · ${done.length}` : ""}`),
-        done.length ? h("ul", { class: "dusk-list" }, ...done.slice(0, 3).map((i) => h("li", {},
-          h("span", { class: "dmark good" }, "✓"), link(i.identifier, i.url, "ident"), h("span", { class: "dtitle" }, i.title))))
-          : h("span", { class: "muted small" }, b.error ? `Couldn't load from Linear: ${b.error}` : "Nothing closed in Linear today."),
-        done.length ? h("span", { class: "muted small" },
-          `${done.length > 3 ? `+ ${done.length - 3} more · ` : ""}${doneClient} client, ${done.length - doneClient} dev`) : ""),
-      h("div", { class: "mtile-cell" },
-        h("span", { class: "mtile-k" }, `Tomorrow · ${tomorrowName}`),
-        h("ul", { class: "dusk-list" },
-          firstMeeting ? h("li", {}, h("span", { class: "dwhen" }, clock(firstMeeting.start)),
-            h("span", { class: "dtitle" }, firstMeeting.title, h("span", { class: "muted small" }, "  first meeting"))) : "",
-          ...dueTomorrow.slice(0, 3).map((i) => h("li", {}, h("span", { class: "dwhen" }, "due"),
-            link(i.identifier, i.url, "ident"), h("span", { class: "dtitle" }, i.title)))),
-        !firstMeeting && !dueTomorrow.length ? h("span", { class: "muted small" },
-          b.next_agenda === null ? "Tomorrow's calendar comes in with the first sweep of the day." : "No meetings and nothing due.") : "",
-        waitingOn.length ? h("span", { class: "muted small" },
-          `Still waiting on ${waitingOn[0].title.replace(/^Waiting on /i, "")} (${waitingOn[0].identifier})${waitingOn.length > 1 ? ` + ${waitingOn.length - 1} more` : ""}`) : "")),
-    h("div", { class: "mtile-foot" },
-      h("span", {}, week ? `Week so far: ${week.client + week.dev} closed, ${week.client} client` : ""),
-      h("span", { class: "spacer" }),
-      h("button", { class: "ghost", "aria-expanded": String(state.fullBrief), onclick: () => { state.fullBrief = !state.fullBrief; render(); } },
-        state.fullBrief ? "Hide the full wrap-up" : "See the full wrap-up"),
-      h("button", { class: "primary dusk-primary", onclick: async () => {
-        if (await copyText(wrapText(b, leftItems))) toast("Wrap-up copied. Paste it in Slack.");
-      } }, "Copy as Slack update")),
-  );
+  const save = () => savePref(CHECKIN_PREF, JSON.stringify(draft));
+  const compose = () => [
+    draft.how.trim() ? `How was my week: ${draft.how.trim()}` : "",
+    draft.text.trim(),
+    draft.help.trim() ? `Help needed: ${draft.help.trim()}` : "",
+    draft.highlights.trim() ? `Highlights: ${draft.highlights.trim()}` : "",
+    draft.shoutouts.trim() ? `Shoutouts: ${draft.shoutouts.trim()}` : "",
+  ].filter(Boolean).join("\n\n");
+  const missing = h("p", { class: "muted small ck-missing" });
+  const showMissing = () => {
+    const left = [["how", "how your week went"], ["help", "help needed"], ["highlights", "highlights"], ["shoutouts", "shoutouts"]]
+      .filter(([k]) => !draft[k as keyof CheckinDraft].trim()).map(([, w]) => w);
+    missing.textContent = left.length ? `Still yours to write: ${listWords(left)}. Empty ones are left out.` : "";
+  };
+  const field = (key: "how" | "help" | "highlights" | "shoutouts", label: string, hint: string) =>
+    h("label", { class: "ck-field" }, h("span", {}, label),
+      h("input", { type: "text", value: draft[key], placeholder: hint,
+        oninput: (e: Event) => { draft[key] = (e.target as HTMLInputElement).value; save(); showMissing(); } }));
+  const area = h("textarea", { class: "ck-text", rows: 16, spellcheck: true,
+    oninput: (e: Event) => { draft.text = (e.target as HTMLTextAreaElement).value; save(); } }) as HTMLTextAreaElement;
+  area.value = draft.text;
+  showMissing();
+  const through = weekday(c.through);
+  const made = new Date(c.made_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  const close = modal("Weekly check-in", h("div", { class: "checkin" },
+    h("p", { class: "muted small" }, `Your mission work, Monday to ${through}, drafted by Claude (${made}) from what you closed in Linear `
+      + "and what the sweeps read. Edit it, then Copy and paste it when /mission-checkin asks. The check-in posts your words as they are."),
+    field("how", "How was your week?", "A sentence or two"),
+    area,
+    field("help", "Help needed", "From whom, and can you set up the meeting?"),
+    field("highlights", "Highlights", "Anything you want recognized"),
+    field("shoutouts", "Shoutouts", "Good collaborators this week"),
+    missing),
+    [h("button", { class: "link-btn", title: "Throw away your edits to the draft (your four answers stay)",
+        onclick: () => { draft.text = checkinText(c); area.value = draft.text; save(); } }, "Back to Claude's draft"),
+     h("span", { class: "spacer" }),
+     h("button", { class: "primary", onclick: async () => {
+       if (await copyText(compose())) { toast("Check-in copied. Paste it into /mission-checkin."); close(); }
+     } }, "Copy")],
+    "wide");
 }
 
-function briefPanel(): HTMLElement {
-  ensureBrief();
-  const mode = state.briefMode ?? (new Date().getHours() < 14 ? "morning" : "evening");
-  const b = state.brief;
-  const pick = (m: "morning" | "evening", label: string) => h("button", {
-    class: `seg${mode === m ? " on" : ""}`, "aria-pressed": String(mode === m),
-    onclick: () => { state.briefMode = m; render(); },
-  }, label);
-  const switcher = h("div", { class: "segmented" }, pick("morning", "Morning"), pick("evening", "Wrap-up"));
-  if (!b || !state.issuesLoaded) {
-    return h("div", { class: "panel brief" }, h("div", { class: "brief-head" }, h("h2", {}, "Morning brief"),
-      h("span", { class: "spacer" }), switcher), h("p", { class: "muted small" }, "Loading…"));
+function fmtMinutes(m: number): string {
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60), r = m % 60;
+  return r === 0 ? `${h} h` : r === 30 ? `${h}½ h` : `${h} h ${r} min`;
+}
+
+/** Free minutes 8:30–18:00 (from now, if later) not taken by meetings, minus an hour for lunch. */
+function freeMinutesToday(agenda: Brief["agenda"]): number | null {
+  if (!agenda) return null;
+  const toM = (hm: string) => { const [a, b] = hm.split(":").map(Number); return a * 60 + b; };
+  const lo = Math.max(8 * 60 + 30, toM(nowHM())), hi = 18 * 60;
+  if (lo >= hi) return 0;
+  const busy = agenda.map((e) => [Math.max(lo, toM(e.start)), Math.min(hi, e.end ? toM(e.end) : toM(e.start) + 30)])
+    .filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  let taken = 0, cur: number[] | null = null;
+  for (const [a, b] of busy) {
+    if (!cur || a > cur[1]) { if (cur) taken += cur[1] - cur[0]; cur = [a, b]; } else cur[1] = Math.max(cur[1], b);
   }
-  if (mode === "morning") {
-    return h("div", { class: "brief-wrap" },
-      h("div", { class: "brief-switch" }, switcher),
-      morningTile(b),
-      state.fullBrief ? h("div", { class: "panel brief full-brief" }, balanceNudge(b.waiting_state),
-        h("div", { class: "brief-grid" }, ...morningBrief(b))) : "");
+  if (cur) taken += cur[1] - cur[0];
+  const lunch = lo < 13 * 60 ? 60 : 0;
+  return Math.max(0, hi - lo - taken - lunch);
+}
+
+type PlanPick = { issue: Issue; why: string; minutes: number | null; done: boolean };
+
+/** Claude's picks matched to open issues and to what you closed today (checked off), or the
+ *  counted suggestions when there's no plan. */
+function planPicks(b: Brief): { picks: PlanPick[]; fromClaude: boolean } {
+  const byIdent = new Map(state.issues.filter(isOpen).map((i) => [i.identifier, i]));
+  const doneByIdent = new Map(b.completed_today.map((i) => [i.identifier, i]));
+  if (b.plan) {
+    const picks = b.plan.picks.map((p) => {
+      const done = doneByIdent.get(p.identifier);
+      return { issue: done ?? byIdent.get(p.identifier), why: p.why, minutes: p.minutes as number | null, done: !!done };
+    }).filter((p): p is PlanPick => !!p.issue);
+    if (picks.length) return { picks, fromClaude: true };
   }
-  return h("div", { class: "brief-wrap" },
-    h("div", { class: "brief-switch" }, switcher),
-    eveningTile(b),
-    state.fullBrief ? h("div", { class: "panel brief full-brief" }, balanceNudge(b.waiting_state),
-      h("div", { class: "brief-grid" }, ...wrapUp(b))) : "");
+  const reason = (i: Issue) => {
+    if (i.due_date && i.due_date < b.day) return `${plural(daysBetween(i.due_date, b.day), "day")} late.`;
+    if (i.due_date === b.day) return "Due today.";
+    if (i.priority === 1) return "Marked urgent.";
+    if (i.priority === 2) return "High priority.";
+    return i.state.type === "started" ? "Already in progress." : "Due soon.";
+  };
+  return { picks: suggestPlan(b.day, b.waiting_state).map((i) => ({ issue: i, why: reason(i), minutes: null, done: false })), fromClaude: false };
+}
+
+let planPoll: number | undefined;
+function pollPlan() {
+  window.clearTimeout(planPoll);
+  planPoll = window.setTimeout(() => { state.briefAt = 0; ensureBrief(); }, 6000);
+}
+
+async function replan(btn?: HTMLButtonElement) {
+  if (btn) { btn.disabled = true; btn.textContent = "Asking Claude…"; }
+  try {
+    await api.replan();
+    toast("Claude is planning your day. About a minute.");
+    if (state.brief) state.brief.plan_run = { id: 0, status: "running", error: null, started_at: new Date().toISOString(), finished_at: null };
+    pollPlan();
+  } catch (e) {
+    fail(e);
+  }
+  render();
 }
 
 /** Weekdays: a nudge at 8am for the morning brief and at 5pm for the wrap-up. */
@@ -1735,27 +1868,7 @@ function briefReminders() {
   }
 }
 
-function setTodayLayout(layout: "brief" | "checklist") {
-  state.todayLayout = layout;
-  savePref("todohub.todayView", layout);
-  render();
-}
-
-function todayView(): HTMLElement {
-  const btn = (id: "brief" | "checklist", label: string) => h("button", {
-    class: state.todayLayout === id ? "on" : "", "aria-pressed": String(state.todayLayout === id),
-    onclick: () => setTodayLayout(id),
-  }, label);
-  const bar = h("div", { class: "toolbar page-bar" },
-    h("h1", {}, "Today"),
-    h("span", { class: "spacer" }),
-    h("div", { class: "seg", role: "group", "aria-label": "Today view" }, btn("brief", "Brief"), btn("checklist", "Checklist")));
-  return state.todayLayout === "checklist"
-    ? h("div", {}, bar, todayChecklist())
-    : h("div", {}, bar, briefPanel(), todayList());
-}
-
-// ---- Today as a checklist -------------------------------------------------------------------------
+// ---- Today helpers -----------------------------------------------------------------------------
 function nowHM(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -1773,115 +1886,9 @@ function listWords(parts: string[]): string {
 async function completeIssue(i: Issue) {
   const done = state.meta?.states.find((s) => s.type === "completed");
   if (!done) { toast("Couldn't find a done status for this team"); return; }
-  goneIssues.delete(i.id);
   state.briefAt = 0;                 // the wrap-up's "done today" should include it
   await editIssue(i, { state_id: done.id });
 }
-
-/** One column: a sentence about the day, a progress bar, the Today items to check off, with
- *  meetings still ahead and time blocks placed by time, then what's done. */
-function todayChecklist(): HTMLElement {
-  ensureBrief();
-  if (!state.issuesLoaded) return h("div", { class: "empty" }, h("p", { class: "muted" }, "Loading from Linear…"));
-  const b = state.brief;
-  const today = b?.day ?? isoDay(new Date());
-  const waiting = b?.waiting_state ?? "Pending";
-  const { open, gone } = todaySplit();
-  const issueOf = (t: TodayItem) => state.issues.find((i) => i.id === t.issue_id)!;
-  const finished = gone.flatMap((t) => {
-    const g = goneIssue(t.issue_id);
-    return "issue" in g && (g.doneToday || g.issue.state.type === "completed") ? [{ t, i: g.issue }] : [];
-  });
-  const total = open.length + finished.length;
-  const now = nowHM();
-  const meetings = (b?.agenda ?? []).filter((m) => (m.end ?? m.start) >= now);
-  const inToday = new Set(state.today.map((t) => t.issue_id));
-  const followUps = state.issues.filter((i) => isOpen(i) && i.state.name === waiting && i.due_date && i.due_date <= today);
-
-  // The sentence at the top.
-  const parts = [open.length ? `${plural(open.length, "thing")} today` : "", meetings.length ? plural(meetings.length, "meeting") : "",
-    followUps.length ? plural(followUps.length, "follow-up") : ""].filter(Boolean);
-  const headline = !total && !parts.length ? "Nothing planned yet."
-    : !open.length && total ? `All ${plural(total, "thing")} done.${meetings.length ? ` ${plural(meetings.length, "meeting")} left.` : ""}`
-    : `${listWords(parts)}.`;
-  const late = open.map(issueOf).filter((i) => i.due_date && i.due_date < today)
-    .sort((x, y) => x.due_date!.localeCompare(y.due_date!))[0];
-  const lead: string[] = [];
-  if (late) lead.push(`${late.title} is ${dueLabel(late.due_date!, today).replace("overdue", "late")}; do it first.`);
-  const w = state.balance?.weeks.at(-1);
-  if (state.balance && w && w.client_share !== null && w.client + w.dev >= NUDGE_MIN_DONE
-      && Math.abs(w.client_share - state.balance.target) >= NUDGE_GAP) {
-    const behind = w.client_share < state.balance.target ? "client" : "dev";
-    const share = behind === "client" ? w.client_share : 1 - w.client_share;
-    lead.push(`${behind === "client" ? "Client" : "Dev"} work is behind this week (${pct(share)} of what you've completed), so lean ${behind}.`);
-  }
-
-  // Items without a time first, in Today order; then meetings and time blocks by time.
-  const blockedAt = (t: TodayItem) => {
-    if (!t.event_start) return null;
-    const d = new Date(t.event_start);
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  };
-  const row = (t: TodayItem) => {
-    const i = issueOf(t);
-    const meta = [i.identifier, i.client ?? i.project ?? (i.list === "dev" ? "Dev" : ""),
-      i.state.name === waiting ? "waiting" : "",
-      i.due_date ? (i.due_date <= today ? dueLabel(i.due_date, today).replace("overdue", "late") : `due ${shortDay(i.due_date)}`) : "",
-      blockedAt(t) ? `blocked ${clock(blockedAt(t)!)}` : ""].filter(Boolean).join(" · ");
-    return h("label", { class: `check-item${i.due_date && i.due_date < today ? " late" : ""}` },
-      h("input", { type: "checkbox", "aria-label": `Mark ${i.identifier} done`,
-        onchange: (e: Event) => { (e.target as HTMLInputElement).disabled = true; void completeIssue(i); } }),
-      h("span", { class: "check-body" }, h("span", { class: "check-title" }, i.title), h("span", { class: "check-meta" }, meta)),
-      taskAvatar(i.client, i.category, "sm"));
-  };
-  const timed = [
-    ...open.filter((t) => blockedAt(t)).map((t) => ({ at: blockedAt(t)!, node: row(t) })),
-    ...meetings.map((m) => ({ at: m.start, node: h("div", { class: "check-mtg" },
-      h("strong", {}, clock(m.start)), link(m.title, m.link, "link"), m.external ? h("span", { class: "chip" }, "external") : "") })),
-  ].sort((x, y) => x.at.localeCompare(y.at));
-
-  const weekEnd = addDays(today, 6 - ((new Date(today + "T12:00:00").getDay() + 6) % 7));
-  const later = state.issues.filter((i) => isOpen(i) && !inToday.has(i.id) && i.due_date && i.due_date > today && i.due_date <= weekEnd)
-    .sort((x, y) => x.due_date!.localeCompare(y.due_date!));
-  const chase = followUps.filter((i) => !inToday.has(i.id));
-  const missing = b ? suggestPlan(today, waiting).filter((i) => !inToday.has(i.id)) : [];
-  const add = (i: Issue) => h("button", { class: "ghost small-btn", onclick: () => void saveToday([...state.today.map((t) => t.issue_id), i.id]) }, "Add");
-
-  return h("div", { class: "checklist" },
-    h("div", { class: "check-head" },
-      h("span", { class: "muted" }, new Date(today + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })),
-      h("h2", {}, headline),
-      lead.length ? h("p", {}, lead.join(" ")) : ""),
-    total ? h("div", { class: "check-progress", title: `${finished.length} of ${total} done` },
-      h("div", { style: `width:${Math.round((finished.length / total) * 100)}%` })) : "",
-    h("section", { class: "check-list", "aria-label": "Today's checklist" },
-      ...open.filter((t) => !blockedAt(t)).map(row),
-      ...timed.map((x) => x.node),
-      ...finished.map(({ i }) => h("div", { class: "check-item done" },
-        h("input", { type: "checkbox", checked: true, disabled: true, "aria-label": `${i.identifier} done` }),
-        h("span", { class: "check-body" }, h("span", { class: "check-title" }, i.title),
-          h("span", { class: "check-meta" }, `${i.identifier} · done`)),
-        taskAvatar(i.client, i.category, "sm"))),
-      !total ? h("p", { class: "muted" }, "Star (☆) issues in Client or Dev, or add the suggested ones below.") : ""),
-    chase.length ? h("div", { class: "check-extra" }, h("h3", {}, "Follow up today"),
-      ...chase.map((i) => h("div", { class: "check-line" }, link(i.identifier, i.url, "ident"),
-        h("span", { class: "dtitle" }, i.title.replace(/^Waiting on /i, "")), add(i)))) : "",
-    h("div", { class: "check-actions" },
-      missing.length ? h("button", { class: "ghost", onclick: () => void saveToday([...state.today.map((t) => t.issue_id), ...missing.map((i) => i.id)]) },
-        `+ Add ${missing.length} suggested`) : "",
-      h("button", { class: "ghost", onclick: () => goTab("client") }, "Pick from Client or Dev"),
-      h("span", { class: "spacer" }),
-      h("button", { class: "primary", onclick: () => { state.briefMode = "evening"; setTodayLayout("brief"); } }, "Wrap up the day")),
-    later.length ? h("details", { class: "check-later" },
-      h("summary", {}, `Later this week · ${later.length}`),
-      ...later.map((i) => h("div", { class: "check-line" }, link(i.identifier, i.url, "ident"),
-        h("span", { class: "dtitle" }, i.title), h("span", { class: "muted small" }, weekday(i.due_date!).slice(0, 3)), add(i)))) : "",
-  );
-}
-
-// Today items whose issue isn't in the open list: done, canceled, or reassigned since.
-type Gone = { loading: true } | { error: string } | { issue: Issue; doneToday?: boolean };
-const goneIssues = new Map<string, Gone>();
 
 /** Split Today into open items and the rest. Only meaningful once the open issues have loaded. */
 function todaySplit(): { open: TodayItem[]; gone: TodayItem[] } {
@@ -1892,20 +1899,7 @@ function todaySplit(): { open: TodayItem[]; gone: TodayItem[] } {
   };
 }
 
-function goneIssue(issueId: string): Gone {
-  const done = state.brief?.completed_today.find((i) => i.id === issueId);
-  if (done) return { issue: done, doneToday: true };
-  const known = goneIssues.get(issueId);
-  if (known) return known;
-  goneIssues.set(issueId, { loading: true });
-  api.issuePreview(issueId)
-    .then((issue) => goneIssues.set(issueId, { issue }))
-    .catch((e) => goneIssues.set(issueId, { error: e instanceof ApiError ? e.message : String(e) }))
-    .finally(() => { if (state.tab === "today" && !editing()) render(); });
-  return { loading: true };
-}
-
-// ---- Today list: tasks on the left, the selected one in a reading pane ----------------------------
+// ---- the reading pane (Today, Client and Dev) -----------------------------------------------------
 type Detail = { at: number; loading?: true; error?: string; issue?: IssuePreview };
 const details = new Map<string, Detail>();           // reading pane content, by issue id
 
@@ -1921,10 +1915,35 @@ function loadDetail(id: string, force = false) {
     });
 }
 
-/** Plain text, split into paragraphs; never parsed as HTML. */
-function paragraphs(text: string): HTMLElement[] {
-  return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).slice(0, 8)
-    .map((p) => h("p", {}, p.replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#+\s*/gm, "")));
+// Images pasted into Linear, loaded through the backend (they need the Linear key) and kept as
+// data: URLs, so a re-render shows them at once. Other sites' images stay links: loading them
+// would tell the sender you read the ticket.
+const imageCache = new Map<string, string | Promise<string>>();
+
+function isLinearUpload(url: string): boolean {
+  try { const u = new URL(url); return u.protocol === "https:" && u.host === "uploads.linear.app"; } catch { return false; }
+}
+
+function linearImageNode(alt: string, url: string): Node | null {
+  if (!isLinearUpload(url)) return null;
+  const img = h("img", { class: "md-img", alt: alt || "Image from Linear" }) as HTMLImageElement;
+  const box = link("", url, "md-figure");
+  box.title = "Open the full image";
+  box.append(img);
+  const show = (src: string) => { img.src = src; box.classList.remove("loading"); box.classList.add("loaded"); };
+  const got = imageCache.get(url);
+  if (typeof got === "string") { show(got); return box; }
+  box.classList.add("loading");
+  const p = got ?? linearImage(url).then((src) => { imageCache.set(url, src); return src; });
+  if (!got) imageCache.set(url, p);
+  p.then(show).catch((e) => {
+    imageCache.delete(url);
+    box.classList.remove("loading");
+    box.replaceChildren(`${alt ? `${alt}: ` : ""}image couldn't load ↗`);
+    box.title = `${e instanceof Error ? e.message : String(e)} Click to open it in your browser.`;
+    box.classList.add("failed");
+  });
+  return box;
 }
 
 function detailBody(id: string): HTMLElement {
@@ -1936,164 +1955,844 @@ function detailBody(id: string): HTMLElement {
   const older = i.comment_count - shown.length;
   return h("div", { class: "tl-detail", "data-id": id },
     h("section", {}, h("h4", {}, "Description"),
-      i.description.trim() ? h("div", { class: "tl-desc" }, ...paragraphs(i.description),
+      i.description.trim() ? h("div", { class: "tl-desc md" }, ...renderMarkdown(i.description, { image: linearImageNode }),
         i.description_truncated ? link("More in Linear ↗", i.url, "link small") : "")
         : h("p", { class: "muted small" }, "No description.")),
     h("section", {}, h("h4", {}, `Comments${i.comment_count ? ` · ${i.comment_count}` : ""}`),
       shown.length ? h("div", {}, ...shown.map((c) => h("div", { class: "tl-comment" },
         h("span", {}, h("b", {}, c.author), " ", h("span", { class: "muted small" }, c.created_at ? when(c.created_at) : "")),
-        h("span", { class: "tl-comment-body" }, c.body)))) : h("p", { class: "muted small" }, "No comments."),
+        h("div", { class: "tl-comment-body md" }, ...renderMarkdown(c.body, { image: linearImageNode }))))) : h("p", { class: "muted small" }, "No comments."),
       older > 0 ? link(`${older} older in Linear ↗`, i.url, "link small") : ""),
   );
 }
 
-function moveToday(issueId: string, delta: number) {
-  const { open, gone } = todaySplit();
-  const ids = open.map((t) => t.issue_id);
-  const from = ids.indexOf(issueId);
-  const to = from + delta;
-  if (from < 0 || to < 0 || to >= ids.length) return;
-  [ids[from], ids[to]] = [ids[to], ids[from]];
-  void saveToday([...ids, ...gone.map((t) => t.issue_id)]);
+// ---- Today: one list, read in three moments ----------------------------------------------------
+// The morning, until you start the day: a night sky with yesterday's recap, Claude's suggestion and
+// its picks to check; "Start my day" puts what you checked on Today, and the sun rises. Through the
+// day: a band with the time and the next meeting, Claude's note, and the Today list (Client and Dev)
+// beside the selected issue. The wrap-up, once the 4 PM sweep writes it (or from 5 PM): a dusk sky
+// with the score and tomorrow, and Claude's next step for each open item. Claude only suggests.
+const COVER_FROM = 6, COVER_UNTIL = 12;   // hours: the morning cover waits for Start my day until noon
+const WRAPUP_FROM = 17;                   // without Claude's wrap-up, the dusk view still comes at 5 PM
+const PLAN_SEEN = "todohub.planSeen";     // the day Start my day was last pressed
+const RISE_MS = 2400;                     // the sunrise, from night to the band
+
+type Moment = "cover" | "day" | "wrapup";
+
+interface TodayCtx {
+  b: Brief;
+  moment: Moment;
+  list: Issue[];                          // on Today: open, and at wrap-up also the ones done today
+  off: Issue[];                           // through the day: Claude's picks and late issues not on Today
+  sections: { side: "client" | "dev"; rows: Issue[] }[];
+  order: Issue[];                         // j / k order: the sections, then the open "not on Today" fold
+  sel: Issue | null;
 }
 
-function dropToday(dragged: string, before: string) {
-  const { open, gone } = todaySplit();
-  const ids = open.map((t) => t.issue_id).filter((x) => x !== dragged);
-  const at = ids.indexOf(before);
-  ids.splice(at < 0 ? ids.length : at, 0, dragged);
-  void saveToday([...ids, ...gone.map((t) => t.issue_id)]);
+function isWorkday(day: string): boolean {
+  const d = new Date(day + "T12:00:00").getDay();
+  return d !== 0 && d !== 6;
 }
 
-/** ↑/↓ (or j/k) select in the Today list; ⌥↑/⌥↓ move the selected task. */
-function stepToday(delta: number, move: boolean) {
-  const { open } = todaySplit();
-  if (!open.length) return;
-  const ids = open.map((t) => t.issue_id);
-  const cur = ids.indexOf(state.todaySel ?? "");
-  if (move && cur >= 0) { moveToday(ids[cur], delta); return; }
-  state.todaySel = ids[Math.max(0, Math.min(ids.length - 1, (cur < 0 ? 0 : cur + delta)))];
-  render();
-  document.querySelector(".tl-item.sel")?.scrollIntoView({ block: "nearest" });
+function todayMoment(b: Brief): Moment {
+  const hour = new Date().getHours();
+  if (b.wrapup || b.wrapup_run?.status === "running" || (isWorkday(b.day) && hour >= WRAPUP_FROM)) return "wrapup";
+  if (isWorkday(b.day) && hour >= COVER_FROM && hour < COVER_UNTIL && loadPref(PLAN_SEEN) !== b.day) return "cover";
+  return "day";
 }
 
-let draggingToday: string | null = null;
+const planPick = (b: Brief, i: Issue) => b.plan?.picks.find((p) => p.identifier === i.identifier);
+const planAside = (b: Brief, i: Issue) => b.plan?.set_aside.find((a) => a.identifier === i.identifier);
+const wrapAdvice = (b: Brief, i: Issue) => b.wrapup?.items.find((a) => a.identifier === i.identifier);
+const dayShort = (day: string) => weekday(day).slice(0, 3);
+const isWaiting = (i: Issue, b: Brief) => i.state.name === b.waiting_state;
 
-function todayList(): HTMLElement {
-  if (!state.today.length) {
-    return h("div", { class: "empty" },
-      h("p", {}, "Nothing picked for today."),
-      h("p", { class: "muted" }, "Star (☆) a few issues in Client or Dev, or use the suggested plan above."));
+/** Attention order: late, due today, a follow-up that's due, due later, no date. */
+function urgency(i: Issue, b: Brief): number {
+  if (isWaiting(i, b)) return i.due_date && i.due_date <= b.day ? 2 : 4;
+  if (i.due_date && i.due_date < b.day) return 0;
+  if (i.due_date === b.day) return 1;
+  return i.due_date ? 3 : 4;
+}
+
+/** Client and Dev, each in attention order; the side holding the most urgent item comes first,
+ *  then the side that's behind its balance target. */
+function todaySections(list: Issue[], b: Brief): TodayCtx["sections"] {
+  const pos = new Map(state.today.map((t) => [t.issue_id, t.position]));
+  const sides = (["client", "dev"] as const).map((side) => ({
+    side,
+    rows: list.filter((i) => i.list === side)
+      .sort((x, y) => urgency(x, b) - urgency(y, b) || (pos.get(x.id) ?? 0) - (pos.get(y.id) ?? 0)),
+  }));
+  const top = (s: { rows: Issue[] }) => (s.rows.length ? urgency(s.rows[0], b) : 9);
+  const behind = behindSide()?.side;
+  return sides.sort((x, y) => top(x) - top(y) || (x.side === behind ? -1 : y.side === behind ? 1 : 0));
+}
+
+function todayCtx(b: Brief): TodayCtx {
+  const moment = todayMoment(b);
+  const openById = new Map(state.issues.filter(isOpen).map((i) => [i.id, i]));
+  const doneById = new Map(b.completed_today.filter((i) => !openById.has(i.id)).map((i) => [i.id, i]));
+  const list = state.today
+    .map((t) => openById.get(t.issue_id) ?? (moment === "wrapup" ? doneById.get(t.issue_id) : undefined))
+    .filter((i): i is Issue => !!i);
+  const on = new Set(list.map((i) => i.id));
+  const byIdent = new Map([...openById.values()].map((i) => [i.identifier, i]));
+  const off = moment === "day"
+    ? [...new Set([...(b.plan?.picks ?? []), ...(b.plan?.set_aside ?? [])].map((p) => byIdent.get(p.identifier)))]
+        .filter((i): i is Issue => !!i && !on.has(i.id))
+    : [];
+  const sections = todaySections(list, b);
+  const order = [...sections.flatMap((s) => s.rows), ...(state.todayOffOpen ? off : [])];
+  let sel = order.find((i) => i.id === state.todaySel) ?? null;
+  if (!sel) {
+    sel = (moment === "wrapup" ? order.find((i) => !outcome(i, b, wrapAdvice(b, i))) : order[0]) ?? null;
+    state.todaySel = sel?.id ?? null;
   }
-  if (!state.issuesLoaded) return h("div", { class: "empty" }, h("p", { class: "muted" }, "Loading from Linear…"));
-  const today = state.brief?.day ?? isoDay(new Date());
-  const waiting = state.brief?.waiting_state ?? "Pending";
-  const { open, gone } = todaySplit();
-  const issueOf = (t: TodayItem) => state.issues.find((i) => i.id === t.issue_id)!;
-  if (!open.some((t) => t.issue_id === state.todaySel)) state.todaySel = open[0]?.issue_id ?? null;
-  const sel = open.find((t) => t.issue_id === state.todaySel);
-  const doneCount = gone.filter((t) => { const g = goneIssue(t.issue_id); return "issue" in g; }).length;
+  return { b, moment, list, off, sections, order, sel };
+}
 
-  const metaLine = (t: TodayItem, i: Issue) => {
-    const due = i.due_date ? (i.due_date < today ? h("span", { class: "late" }, dueLabel(i.due_date, today).replace("overdue", "late"))
-      : i.due_date === today ? h("span", { class: "due-today" }, "due today") : `due ${shortDay(i.due_date)}`) : "";
-    const slip = state.slips?.slips[i.id];
-    const bits: (string | Node)[] = [i.identifier, i.client ?? i.project ?? (i.list === "dev" ? "Dev" : "")];
-    const tag = priorityTag(i.priority);
-    if (tag) bits.push(tag);
-    if (due) bits.push(due);
-    if (slip && slip.count >= 2) bits.push(`pushed ${slip.count}×`);
-    if (i.state.type === "started") bits.push("in progress");
-    if (i.state.name === waiting) bits.push("waiting");
-    if (t.event_start && t.event_minutes) {
-      const s0 = new Date(t.event_start);
-      const s1 = new Date(s0.getTime() + t.event_minutes * 60_000);
-      const f = (d: Date) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      bits.push(h("span", { class: "blocked" }, `blocked ${f(s0)}–${f(s1)}`));
-    }
-    const out = h("span", { class: "tl-meta" });
-    bits.filter((x) => x !== "").forEach((b, n) => { if (n) out.append(" · "); out.append(b); });
-    return out;
+/** What's been decided for an item, read back from Linear and tomorrow's list: done, moved to
+ *  tomorrow, re-dated or cleared as Claude suggested, or its message copied. */
+function outcome(i: Issue, b: Brief, step?: { action: string; move_to?: string }): string | null {
+  if (!isOpen(i)) return "Done";
+  if (b.next_today.includes(i.id)) return `Moved to ${dayShort(b.next_day)}`;
+  if (step?.action === "move" && step.move_to && i.due_date === step.move_to) return `Due ${dueWord(b, step.move_to)}`;
+  if (step?.action === "clear_date" && !i.due_date) return "Date cleared";
+  if (state.copied.has(i.id)) return "Message copied";
+  return null;
+}
+
+function dueWord(b: Brief, day: string): string {
+  return daysBetween(b.day, day) < 7 ? weekday(day).slice(0, 3) : shortDay(day);
+}
+
+// ---- Claude's text: issues it names become chips -------------------------------------------------
+const ISSUE_REF = /\[([^\]\n]+)\]\(([A-Za-z][A-Za-z0-9]*-\d+)\)/g;
+
+/** Claude writes `[short label](ENG-123)` for each issue it names. An open issue becomes a chip that
+ *  goes to it, one done today a struck chip, any other just its label. Text stays text. */
+function claudeText(text: string, go: (i: Issue) => void): Node[] {
+  const out: Node[] = [];
+  let at = 0;
+  for (const m of text.matchAll(ISSUE_REF)) {
+    out.push(document.createTextNode(text.slice(at, m.index)));
+    const [, label, ident] = m;
+    const open = state.issues.find((i) => i.identifier === ident && isOpen(i));
+    const done = !open && state.brief?.completed_today.some((i) => i.identifier === ident);
+    out.push(open ? h("button", { class: "ref", title: `${ident} ${open.title}`, onclick: () => go(open) }, h("span", { class: "k" }, ident), label)
+      : done ? h("span", { class: "ref struck", title: `${ident} is done` }, h("span", { class: "k" }, ident), label)
+      : document.createTextNode(label));
+    at = (m.index ?? 0) + m[0].length;
+  }
+  out.push(document.createTextNode(text.slice(at)));
+  return out;
+}
+
+function redoIcon(): SVGElement {
+  return svg("svg", { width: 12, height: 12, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", "stroke-width": 1.8,
+    "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" }, svg("path", { d: "M13 8a5 5 0 1 1-1.5-3.6M13 2.5v2.9h-2.9" }));
+}
+function checkIcon(): SVGElement {
+  return svg("svg", { width: 12, height: 12, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", "stroke-width": 2,
+    "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" }, svg("path", { d: "M3 8.5l3 3 7-7" }));
+}
+
+/** "Claude 2:58 PM · ↻ Redo · about 1 min", or the run in progress, or why it didn't finish. */
+function claudeBy(madeAt: string | null, run: Brief["plan_run"], label: string, redo: (btn: HTMLButtonElement) => void): HTMLElement {
+  const running = run?.status === "running";
+  if (running) pollPlan();
+  return h("div", { class: "td-by" },
+    madeAt ? h("span", { class: "who" }, "Claude") : "",
+    madeAt ? h("span", { class: "n" }, new Date(madeAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) : "",
+    running ? h("span", { class: "td-running" }, h("span", { class: "spinner" }), " Claude is on it…")
+      : h("button", { class: "td-redo", title: "Claude reads your day again and writes this again (about a minute and a few cents)",
+          onclick: (e: Event) => redo(e.currentTarget as HTMLButtonElement) }, redoIcon(), label),
+    running ? "" : h("span", {}, "about 1 min"),
+    run?.status === "error" && !running ? h("span", { class: "td-err" }, `The last run didn't finish: ${run.error ?? "see the sweep log"}`) : "");
+}
+
+async function renote(btn?: HTMLButtonElement) {
+  if (btn) { btn.disabled = true; btn.textContent = "Asking Claude…"; }
+  try {
+    await api.renote();
+    toast("Claude is writing a fresh note. About a minute.");
+    if (state.brief) state.brief.note_run = { id: 0, status: "running", error: null, started_at: new Date().toISOString(), finished_at: null };
+    pollPlan();
+  } catch (e) {
+    fail(e);
+  }
+  render();
+}
+
+// ---- the sky ---------------------------------------------------------------------------------------
+/** Where the sun is in the band now, from today's sunrise and sunset where you are (the Daylight
+ *  theme's location): low on the left at sunrise, highest at solar noon, low on the right at sunset;
+ *  the sky turns pale around midday and dark with stars from sunset, over 45 minutes. */
+function sunState(now = new Date()): { vars: string; night: boolean; x: number } {
+  const loc = daylightLocation();
+  const st = sunTimes(now, loc.lat, loc.lon) ?? { rise: 6 * 60, set: 18 * 60 };
+  const m = now.getHours() * 60 + now.getMinutes();
+  const c = Math.min(1, Math.max(0, (m - st.rise) / (st.set - st.rise)));
+  const lift = Math.sin(Math.PI * c);
+  const outside = m < st.rise ? st.rise - m : m > st.set ? m - st.set : 0;
+  const dark = Math.min(1, outside / 45);
+  const x = 24 + 70 * c;
+  return {
+    vars: `--sun-x: ${x.toFixed(1)}%; --sun-b: ${(-4 + 22 * lift - 20 * dark).toFixed(1)}px; `
+      + `--sky-noon: ${Math.max(0, (lift - 0.45) / 0.55).toFixed(2)}; --sky-night: ${dark.toFixed(2)}`,
+    night: dark > 0.5,
+    x,
   };
+}
 
-  const item = (t: TodayItem, n: number) => {
-    const i = issueOf(t);
-    const on = t.issue_id === state.todaySel;
-    return h("div", {
-      class: `tl-item${on ? " sel" : ""}${i.priority === 1 || i.priority === 2 ? ` prio-${i.priority}` : ""}`, draggable: "true", tabindex: "0", "data-id": i.id,
-      "aria-selected": String(on), role: "option",
-      onclick: (e: Event) => {
-        if ((e.target as HTMLElement).closest("input, a, button")) return;
-        state.todaySel = i.id; render();
-      },
-      ondragstart: (e: DragEvent) => { draggingToday = i.id; e.dataTransfer?.setData("text/plain", i.identifier); },
-      ondragover: (e: DragEvent) => { if (draggingToday && draggingToday !== i.id) { e.preventDefault(); (e.currentTarget as HTMLElement).classList.add("drop-before"); } },
-      ondragleave: (e: DragEvent) => (e.currentTarget as HTMLElement).classList.remove("drop-before"),
-      ondrop: (e: DragEvent) => {
-        e.preventDefault();
-        (e.currentTarget as HTMLElement).classList.remove("drop-before");
-        if (draggingToday && draggingToday !== i.id) dropToday(draggingToday, i.id);
-        draggingToday = null;
-      },
-      ondragend: () => { draggingToday = null; },
-    },
-      h("span", { class: "tl-n" }, String(n + 1)),
-      h("input", { type: "checkbox", class: "tl-box", title: "Mark done in Linear", "aria-label": `Mark ${i.identifier} done`,
-        onchange: (e: Event) => { (e.target as HTMLInputElement).disabled = true; void completeIssue(i); } }),
-      taskAvatar(i.client, i.category, "sm"),
-      h("div", { class: "tl-body" }, h("span", { class: "tl-title" }, i.title), metaLine(t, i)));
+/** Move the sun in the band every minute, so it drifts without a re-render. */
+function tickSun() {
+  const s = sunState();
+  for (const sky of document.querySelectorAll<HTMLElement>(".td-sky.band")) {
+    sky.setAttribute("style", s.vars);
+    sky.classList.toggle("night", s.night);
+  }
+}
+window.setInterval(tickSun, 60_000);
+
+function skyLayers(): Node[] {
+  return [h("span", { class: "s-night" }), h("span", { class: "s-dawn" }), h("span", { class: "s-noon" }), h("span", { class: "s-stars" }),
+    h("span", { class: "s-sun" }),
+    svg("svg", { class: "s-hill", viewBox: "0 0 852 16", preserveAspectRatio: "none", "aria-hidden": "true" },
+      svg("path", { d: "M-1 11C120 4 240 5 360 10S560 15 680 10S800 11 853 12V18H-1Z", fill: "#e9dcc4", stroke: "#dcc9a8",
+        "vector-effect": "non-scaling-stroke" }))];
+}
+
+/** The band through the day: the time, the next meeting and the one after. */
+function bandText(b: Brief, sunLeft: boolean): HTMLElement {
+  const now = nowHM();
+  const ahead = (b.agenda ?? []).filter((m) => (m.end ?? m.start) > now);
+  const next = ahead[0], then = ahead[1];
+  const mins = next ? minutesUntil(next.start) : 0;
+  const when = !next ? "" : mins <= 0 ? "now" : mins < 60 ? `in ${mins} min`
+    : `in ${Math.floor(mins / 60)} h${mins % 60 ? ` ${mins % 60} min` : ""}`;
+  return h("div", { class: `td-bt${sunLeft ? " right" : ""}` },
+    h("time", { class: "n" }, new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })),
+    next ? h("span", {}, "Next ", h("b", {}, `${hm12(next.start)} `, link(next.title, next.link, "td-mtg")), ` · ${when}${next.external ? " · external" : ""}`)
+      : h("span", {}, b.agenda === null ? "Your calendar comes in with the first sweep of the day." : "No more meetings today."),
+    then ? h("span", { class: "td-then n" }, `then ${hm12(then.start)} ${then.title}${ahead.length > 2 ? ` + ${ahead.length - 2} more` : ""}`) : "");
+}
+
+// ---- the morning cover -------------------------------------------------------------------------
+/** The cover's checklist: Claude's picks (or, until its plan is in, suggestions counted from due dates
+ *  and priority), none on Today until you check them; then what's on Today already, checked. */
+function coverRows(b: Brief): { picks: PlanPick[]; fromClaude: boolean; already: Issue[] } {
+  const { picks, fromClaude } = planPicks(b);
+  const open = picks.filter((p) => !p.done);
+  const picked = new Set(open.map((p) => p.issue.id));
+  const already = state.today.map((t) => state.issues.find((i) => i.id === t.issue_id && isOpen(i)))
+    .filter((i): i is Issue => !!i && !picked.has(i.id));
+  if (!state.coverChecked) state.coverChecked = new Set(state.today.map((t) => t.issue_id));
+  return { picks: open, fromClaude, already };
+}
+
+function coverDue(i: Issue, b: Brief): HTMLElement | "" {
+  if (isWaiting(i, b)) return i.due_date && i.due_date <= b.day ? h("span", { class: "soon" }, "follow up today") : "";
+  if (i.due_date && i.due_date < b.day) return h("span", { class: "late" }, `${daysBetween(i.due_date, b.day)}d late`);
+  if (i.due_date === b.day) return h("span", { class: "soon" }, "due today");
+  const slip = state.slips?.slips[i.id];
+  if (i.due_date) return h("span", {}, `due ${dueWord(b, i.due_date)}`);
+  return slip && slip.count >= 2 ? h("span", { class: "soon" }, `pushed ${slip.count}×`) : "";
+}
+
+function coverView(b: Brief, rising: boolean): HTMLElement {
+  const { picks, fromClaude, already } = coverRows(b);
+  const checked = state.coverChecked!;
+  const sun = sunState();
+  const row = (i: Issue, why: string, minutes: number | null) => h("button", {
+    class: "pk", role: "checkbox", "aria-checked": String(checked.has(i.id)), "data-id": i.id,
+    onclick: () => toggleCover(i.id),
+  },
+    h("span", { class: "box" }, checkIcon()),
+    taskAvatar(i.client, i.category, "sm"),
+    h("span", { class: "pt" }, h("span", { class: "pn" }, i.title), why ? h("span", { class: "pw", title: why }, why) : ""),
+    h("span", { class: "pd n" }, coverDue(i, b), minutes ? h("span", {}, `~${fmtMinutes(minutes)}`) : ""));
+  const focusRow = (i: Issue) => {
+    const el = document.querySelector<HTMLElement>(`.pk[data-id="${i.id}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+    el?.focus({ preventScroll: true });
   };
+  const plan = b.plan;
+  const brief = plan
+    ? h("div", { class: "cv-brief" },
+        plan.recap ? h("p", {}, h("b", {}, "Yesterday"), ...claudeText(plan.recap, focusRow)) : "",
+        h("p", {}, h("b", {}, "Today"), ...claudeText(plan.summary || plan.headline, focusRow)))
+    : h("div", { class: "cv-brief" }, h("p", {}, `${dayHeadline(b)} `,
+        b.plan_run?.status === "running" ? "Claude is planning your day…" : "Claude's plan comes in with the first sweep of the morning."));
+  const group = (label: string, rows: Node[], extra: Node | "" = "") => rows.length
+    ? h("div", { class: "pg" }, h("div", { class: "pl" }, h("span", { class: "n" }, `${label} · ${rows.length}`), extra), ...rows) : "";
+  const by = h("span", { class: "plby" }, claudeBy(plan?.made_at ?? null, b.plan_run, fromClaude ? "Re-plan" : "Ask Claude to plan", (btn) => void replan(btn)));
+  return h("section", {
+    class: `td-sky cover${rising ? " rising" : ""}`, "aria-label": "Plan your day",
+    style: `${sun.vars}; --elapsed: ${rising ? Math.min(Date.now() - state.planRiseAt, RISE_MS) : 0}ms`,
+  },
+    ...skyLayers(),
+    h("div", { class: "cv" },
+      h("h2", {}, "Good morning."),
+      brief,
+      picks.length || already.length ? h("div", { class: "pks", role: "group", "aria-label": "What you'll take on today" },
+        group(fromClaude ? "Claude suggests" : "Suggested from due dates", picks.map((p) => row(p.issue, p.why, p.minutes)), by),
+        group("Already on Today", already.map((i) => row(i, planAside(b, i)?.why ?? "", null)))) : "",
+      h("div", { class: "cf" }, h("button", { class: "start", onclick: () => void startDay(b) }, ...coverFooter(b).label),
+        h("span", { class: "tally n" }, ...coverFooter(b).tally))),
+    bandText(b, sun.x < 50));
+}
 
-  const goneItem = (t: TodayItem) => {
-    const g = goneIssue(t.issue_id);
-    const i = "issue" in g ? g.issue : undefined;
-    const finished = "issue" in g && (!!g.doneToday || g.issue.state.type === "completed" || g.issue.state.type === "canceled");
-    return h("div", { class: `tl-item gone${finished ? " finished" : ""}` },
-      h("span", { class: "tl-n" }),
-      finished ? h("span", { class: "tl-check", "aria-hidden": "true" }, "✓") : h("span", { class: "tl-check muted" }, "–"),
-      i ? taskAvatar(i.client, i.category, "sm") : h("span", { class: "avatar sm" }),
-      h("div", { class: "tl-body" },
-        h("span", { class: "tl-title" }, i?.title ?? ("error" in g ? "Not found in Linear" : "Loading…")),
-        h("span", { class: "tl-meta" }, i ? `${i.identifier} · ${finished ? ("doneToday" in g && g.doneToday ? "done today" : i.state.name.toLowerCase()) : "no longer assigned to you"}` : "")),
-      h("button", { class: "ghost small-btn", title: "Take it off Today",
-        onclick: () => void saveToday(state.today.map((x) => x.issue_id).filter((x) => x !== t.issue_id)) }, "Remove"));
+/** "Start my day with 3" and "About 1 h 35 min of your 6 h free", from what's checked. */
+function coverFooter(b: Brief): { label: Child[]; tally: Child[] } {
+  const checked = state.coverChecked ?? new Set<string>();
+  const { picks, already } = coverRows(b);
+  const on = [...picks.map((p) => ({ id: p.issue.id, minutes: p.minutes })), ...already.map((i) => ({ id: i.id, minutes: null }))]
+    .filter((x) => checked.has(x.id));
+  const mins = on.reduce((n, x) => n + (x.minutes ?? 0), 0);
+  const free = freeMinutesToday(b.agenda);
+  const rows = picks.length + already.length;
+  return {
+    label: [on.length ? `Start my day with ${on.length}` : "Start my day", h("kbd", {}, "↵")],
+    tally: rows ? [mins && free !== null ? `About ${fmtMinutes(mins)} of your ${fmtMinutes(free)} free · ` : on.length ? "" : "Nothing checked yet · ",
+      h("kbd", {}, "x"), " check · ", h("kbd", {}, "j"), " ", h("kbd", {}, "k"), " move"] : [],
   };
+}
 
-  const pane = () => {
-    if (!sel) return h("section", { class: "tl-pane" }, h("p", { class: "muted" }, "Everything on Today is done."));
-    const i = issueOf(sel);
-    loadDetail(i.id);
-    const subs = state.issues.filter((x) => x.parent?.id === i.id);
-    return h("section", { class: "tl-pane", "aria-label": i.identifier },
-      h("span", { class: "tl-meta" }, [i.identifier, i.client ?? i.project].filter(Boolean).join(" · ")),
-      h("h3", {}, i.title),
-      h("div", { class: "tl-fields" },
-        statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
-        priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
-        dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
-        slipTag(state.slips?.slips[i.id])),
-      h("div", { class: "tl-actions" },
-        blockControls(sel),
+/** Update the cover after a check, without rebuilding it (which would lose the focused row). */
+function updateCover(b: Brief) {
+  const checked = state.coverChecked;
+  if (!checked) return;
+  document.querySelectorAll<HTMLElement>(".pk").forEach((el) => el.setAttribute("aria-checked", String(checked.has(el.dataset.id ?? ""))));
+  const { label, tally } = coverFooter(b);
+  document.querySelector(".td-sky.cover .start")?.replaceChildren(...label.filter((x): x is Node | string => !!x));
+  document.querySelector(".td-sky.cover .tally")?.replaceChildren(...tally.filter((x): x is Node | string => !!x));
+}
+
+function toggleCover(id: string) {
+  const checked = state.coverChecked;
+  if (!checked || !state.brief) return;
+  if (checked.has(id)) checked.delete(id); else checked.add(id);
+  updateCover(state.brief);
+}
+
+function moveCoverFocus(delta: number) {
+  const rows = [...document.querySelectorAll<HTMLElement>(".pk")];
+  const at = rows.indexOf(document.activeElement as HTMLElement);
+  rows[at < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at + delta))]?.focus();
+}
+
+/** Start my day: what's checked becomes Today (what you unchecked comes off), and the sun rises. */
+async function startDay(b: Brief) {
+  const checked = state.coverChecked ?? new Set<string>();
+  const { picks } = coverRows(b);
+  const ids = [...state.today.map((t) => t.issue_id).filter((id) => checked.has(id)),
+    ...picks.map((p) => p.issue.id).filter((id) => checked.has(id) && !state.today.some((t) => t.issue_id === id))];
+  savePref(PLAN_SEEN, b.day);
+  state.coverChecked = null;
+  state.todaySel = null;
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  state.planRiseAt = reduce ? 0 : Date.now();
+  if (!reduce) window.setTimeout(() => { if (state.tab === "today") render(); }, RISE_MS + 50);
+  render();                             // the sun starts rising now; the list below follows the save
+  state.todaySel = null;                // then the most urgent item of the new list
+  await saveToday(ids);
+}
+
+// ---- the wrap-up's dusk ------------------------------------------------------------------------
+function duskView(ctx: TodayCtx): HTMLElement {
+  const { b } = ctx;
+  const w = b.wrapup;
+  const planned = b.plan?.picks.map((p) => p.identifier) ?? [];
+  const doneIdents = new Set(b.completed_today.map((i) => i.identifier));
+  const plannedDone = planned.filter((x) => doneIdents.has(x)).length;
+  const doneN = b.completed_today.length;
+  const left = ctx.list.filter((i) => isOpen(i)).length;
+  const headline = planned.length
+    ? `${plannedDone} of ${planned.length} planned done${doneN > plannedDone ? `, plus ${doneN - plannedDone} more` : ""}.`
+    : doneN || left ? `${doneN} done today, ${left} still open.` : "A quiet day: nothing planned, nothing closed.";
+  const go = (i: Issue) => selectToday(i.id);
+  const tomorrow = b.next_day;
+  const firstMeeting = b.next_agenda?.[0];
+  const dueTomorrow = state.issues.filter((i) => isOpen(i) && !isWaiting(i, b) && i.due_date === tomorrow).length;
+  const startWith = w?.start_with ? state.issues.find((i) => i.identifier === w.start_with!.identifier && isOpen(i)) : undefined;
+  const bits = [firstMeeting ? `${hm12(firstMeeting.start)} ${firstMeeting.title}` : "", dueTomorrow ? `${dueTomorrow} due` : ""].filter(Boolean);
+  return h("section", { class: "td-sky dusk", "aria-label": "Wrap-up" },
+    h("span", { class: "s-stars" }), ...skyLayers().slice(-1),
+    h("div", { class: "dk" },
+      h("div", { class: "l1" }, h("time", { class: "n" }, new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })),
+        h("h2", {}, headline)),
+      w?.summary ? h("p", { class: "sum" }, ...claudeText(w.summary, go))
+        : h("p", { class: "sum" }, b.wrapup_run?.status === "running" ? "" : "Claude's wrap-up comes in with the 4 PM sweep."),
+      h("div", { class: "td-by-row" },
+        claudeBy(w?.made_at ?? null, b.wrapup_run, w ? "Redo" : "Ask Claude to wrap up", (btn) => void rewrap(btn)),
         h("span", { class: "spacer" }),
-        link("Open in Linear ↗", i.url, "ghost-link"),
-        h("button", { class: "ghost small-btn", onclick: () => void saveToday(state.today.map((x) => x.issue_id).filter((x) => x !== i.id)) },
-          "Remove from Today")),
-      subs.length ? h("section", {}, h("h4", {}, `Sub-issues · ${subs.length}`),
-        h("ul", { class: "tl-subs" }, ...subs.map((x) => h("li", {}, link(x.identifier, x.url, "ident"),
-          h("span", { class: "dtitle" }, x.title),
-          x.due_date && x.due_date < today ? h("span", { class: "late small" }, dueLabel(x.due_date, today).replace("overdue", "late")) : "",
-          h("span", { class: "muted small" }, x.state.name))))) : "",
-      detailBody(i.id),
-    );
-  };
+        b.checkin ? h("button", { class: "td-redo", title: "Your mission check-in for this week, drafted by Claude, to paste into /mission-checkin",
+          onclick: () => showCheckin(b.checkin!) }, "Weekly check-in") : ""),
+      h("div", { class: "tmr" }, h("b", {}, weekday(tomorrow)),
+        startWith ? h("span", {}, "start with ", h("button", { class: "ref", onclick: () => void openUrl(startWith.url), title: w!.start_with!.why },
+          h("span", { class: "k" }, startWith.identifier), startWith.title)) : "",
+        bits.length ? h("span", { class: "n" }, `${startWith ? "· " : ""}${bits.join(" · ")}`)
+          : !startWith ? h("span", {}, b.next_agenda === null ? "Calendar comes in with the first sweep of the day." : "No meetings and nothing due.") : "")));
+}
 
-  return h("div", { class: "tl" },
-    h("div", { class: "tl-head" },
-      h("h2", {}, "Today"),
-      h("span", { class: "muted small" }, `${open.length} open${doneCount ? ` · ${doneCount} done` : ""} · ↑↓ to select, ⌥↑↓ or drag to reorder`)),
-    h("div", { class: "tl-grid" },
-      h("div", { class: "tl-list", role: "listbox", "aria-label": "Today" }, ...open.map(item), ...gone.map(goneItem)),
-      pane()),
+// ---- the list ------------------------------------------------------------------------------------
+function rowMeta(i: Issue, ctx: TodayCtx): Child[] {
+  const { b } = ctx;
+  const bits: Child[] = [];
+  const done = ctx.moment === "wrapup" ? outcome(i, b, wrapAdvice(b, i)) : ctx.off.includes(i) ? outcome(i, b, planAside(b, i)) : null;
+  if (done) return [h("span", { class: "ok" }, checkIcon(), done)];
+  if (ctx.moment === "wrapup") bits.push(h("span", { class: "sg" }, stepLabel(i, b)));
+  else if (ctx.off.includes(i)) {
+    const a = planAside(b, i);
+    bits.push(a ? h("span", {}, "Claude: ", a.action === "move" ? `set due ${dueWord(b, a.move_to!)}` : a.action === "ask" ? "ask" : "clear the date")
+      : h("span", { class: "sg" }, "Suggested"));
+  }
+  const due = coverDue(i, b);
+  if (isWaiting(i, b)) bits.push(h("span", {}, "waiting", due ? " · " : "", due));
+  else if (due) bits.push(due);
+  const t = state.today.find((x) => x.issue_id === i.id);
+  if (t?.event_start && t.event_minutes) {
+    const s0 = new Date(t.event_start), s1 = new Date(s0.getTime() + t.event_minutes * 60_000);
+    const f = (d: Date) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    bits.push(h("span", { class: "blocked" }, `blocked ${f(s0)}–${f(s1)}`));
+  } else if (ctx.moment !== "wrapup" && !isWaiting(i, b) && planPick(b, i)?.minutes) {
+    bits.push(`~${fmtMinutes(planPick(b, i)!.minutes)}`);
+  }
+  return bits.flatMap((x, n) => (n ? [" · ", x] : [x]));
+}
+
+function todayRow(i: Issue, ctx: TodayCtx): HTMLElement {
+  const decided = ctx.moment === "wrapup" && !!outcome(i, ctx.b, wrapAdvice(ctx.b, i));
+  const on = ctx.sel?.id === i.id;
+  // Client's row (.tl-item); a decided row drops its priority edge.
+  const edge = !decided && (i.priority === 1 || i.priority === 2) ? ` prio-${i.priority}` : "";
+  return h("button", {
+    class: `tl-item td-row${on ? " sel" : ""}${edge}${decided ? " dec" : ""}`,
+    "aria-current": String(on), "data-id": i.id,
+    onclick: () => selectToday(i.id),
+  },
+    taskAvatar(i.client, i.category, "sm"),
+    h("span", { class: "tl-body" }, h("span", { class: "tl-title" }, i.title), h("span", { class: "tl-meta" }, ...rowMeta(i, ctx))));
+}
+
+function balanceMeter(share: number, target: number): HTMLElement {
+  return h("span", { class: "td-meter", role: "img", "aria-label": `${pct(share)} of what you closed this week; target ${pct(target)}` },
+    h("i", { style: `width: ${Math.round(share * 100)}%` }), h("b", { style: `left: calc(${Math.round(target * 100)}% - 1px)` }));
+}
+
+function todaySection(s: TodayCtx["sections"][number], ctx: TodayCtx): HTMLElement | "" {
+  if (!s.rows.length) return "";
+  const w = state.balance?.weeks.at(-1);
+  const share = w && w.client_share !== null ? (s.side === "client" ? w.client_share : 1 - w.client_share) : null;
+  const target = state.balance ? (s.side === "client" ? state.balance.target : 1 - state.balance.target) : 0.5;
+  const behind = behindSide();
+  const lean = behind?.side === s.side && w && loadPref(BALANCE_HIDE) !== w.week;
+  return h("section", { class: "ll-group" },
+    groupHead(s.side === "client" ? "Client" : "Dev", "", s.rows.filter(isOpen),
+      share !== null ? h("span", { class: "group-action td-share" }, `${pct(share)} of done`, balanceMeter(share, target)) : ""),
+    lean && behind && w ? h("span", { class: "bal-anchor td-behind" },
+      h("button", { class: "link-btn", "aria-expanded": String(state.balanceOpen), "aria-haspopup": "dialog",
+        onclick: () => { state.balanceOpen = !state.balanceOpen; render(); } },
+        `Behind the ${pct(behind.target)} target this week, so lean ${s.side}${ctx.moment === "wrapup" ? " tomorrow" : ""}.`),
+      state.balanceOpen ? balancePopover(behind, w, ctx.b.waiting_state) : "") : "",
+    ...s.rows.map((i) => todayRow(i, ctx)));
+}
+
+function todayQueue(ctx: TodayCtx): HTMLElement {
+  const { b } = ctx;
+  const done = b.completed_today.filter((i) => !state.issues.some((x) => x.id === i.id && isOpen(x)) && !ctx.list.some((x) => x.id === i.id));
+  const doneClient = done.filter((i) => i.list === "client").length;
+  const lateN = ctx.off.filter((i) => planAside(b, i)).length;
+  const offLabel = lateN === ctx.off.length ? [h("span", { class: "late n" }, `${lateN} late`), ", not on Today"]
+    : [h("span", { class: "n" }, String(ctx.off.length)), " not on Today", lateN ? " · " : "", lateN ? h("span", { class: "late n" }, `${lateN} late`) : ""];
+  const anyRows = ctx.sections.some((s) => s.rows.length);
+  return h("div", { class: "td-q" },
+    h("div", { class: "td-qp", "aria-label": "Today" },
+      ...ctx.sections.map((s) => todaySection(s, ctx)),
+      anyRows ? "" : h("p", { class: "td-none" }, ctx.moment === "wrapup" ? "Nothing was on Today." : "Nothing open on Today."),
+      ctx.off.length ? h("details", { class: "td-fold", open: state.todayOffOpen,
+        ontoggle: (e: Event) => { const open = (e.currentTarget as HTMLDetailsElement).open; if (open !== state.todayOffOpen) { state.todayOffOpen = open; render(); } } },
+        h("summary", {}, h("span", {}, ...offLabel)),
+        h("p", { class: "td-foldnote" }, lateN === ctx.off.length ? "Claude left these out of today's plan. Each has a next step."
+          : lateN ? "Suggestions you didn't take, and late issues Claude left out." : "Suggestions you didn't take."),
+        ...ctx.off.map((i) => todayRow(i, ctx))) : "",
+      done.length ? h("details", { class: "td-fold done", open: state.todayDoneOpen,
+        ontoggle: (e: Event) => { state.todayDoneOpen = (e.currentTarget as HTMLDetailsElement).open; } },
+        h("summary", {}, h("span", { class: "ok" }, checkIcon()), h("span", { class: "n" }, `${done.length} ${ctx.moment === "wrapup" ? "more " : ""}done today (${doneClient} client, ${done.length - doneClient} dev)`)),
+        h("div", { class: "td-dl" }, ...done.map((i) => h("div", {}, link(i.identifier, i.url, "ident"), h("span", {}, i.title))))) : ""),
+    h("div", { class: "td-hint" }, h("kbd", {}, "j"), " / ", h("kbd", {}, "k"), " to move · ", h("kbd", {}, "⌘Z"), " undo"));
+}
+
+// ---- the stage: the selected issue ---------------------------------------------------------------
+type FreeWindow = { from: number; to: number; before: string | null };
+const minOf = (hm: string) => { const [a, c] = hm.split(":").map(Number); return a * 60 + c; };
+const hmOf = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+/** Free stretches of 15 minutes or more from now to 6 PM, between meetings and lunch. */
+function freeWindows(agenda: AgendaEvent[]): FreeWindow[] {
+  const now = new Date();
+  const hi = 18 * 60;
+  let at = Math.max(8 * 60 + 30, Math.ceil((now.getHours() * 60 + now.getMinutes()) / 5) * 5);
+  const busy = [...agenda.map((e) => ({ from: minOf(e.start), to: e.end ? minOf(e.end) : minOf(e.start) + 30, title: e.title })),
+    { from: 12 * 60, to: 13 * 60, title: "lunch" }].sort((x, y) => x.from - y.from);
+  const out: FreeWindow[] = [];
+  for (const m of busy) {
+    if (at >= hi) break;
+    if (m.to <= at) continue;
+    if (Math.min(m.from, hi) - at >= 15) out.push({ from: at, to: Math.min(m.from, hi), before: m.from < hi ? m.title : null });
+    at = Math.max(at, m.to);
+  }
+  if (hi - at >= 15) out.push({ from: at, to: hi, before: null });
+  return out;
+}
+
+/** Where Claude's estimate fits: in the stretch you're in now, or the next one long enough. */
+function fitFor(minutes: number, agenda: AgendaEvent[] | null): { text: string; over: boolean; pct: number; start: string } | null {
+  if (!agenda) return null;
+  const ws = freeWindows(agenda);
+  const w = ws.find((x) => x.to - x.from >= minutes);
+  const nowM = minOf(nowHM());
+  const before = (x: FreeWindow) => (x.before ? `before ${x.before}` : "before the end of the day");
+  if (!w) return { text: `~${fmtMinutes(minutes)} · no free stretch that long today`, over: true, pct: 100, start: nextHalfHour() };
+  const now = w === ws[0] && w.from <= nowM + 5;
+  return {
+    text: now ? `~${fmtMinutes(minutes)} · fits the ${fmtMinutes(w.to - w.from)} ${before(w)}`
+      : `~${fmtMinutes(minutes)} · ${ws[0] && ws[0].from <= nowM + 5 ? "too long for now; " : ""}fits ${hm12(hmOf(w.from))}–${hm12(hmOf(w.to))}, ${before(w)}`,
+    over: !now, pct: Math.min(100, Math.round((minutes / (w.to - w.from)) * 100)), start: hmOf(w.from),
+  };
+}
+
+function actButton(label: string, key: string, run: (btn: HTMLButtonElement) => void, primary = false): HTMLElement {
+  return h("button", { class: primary ? "primary td-btn" : "td-btn", onclick: (e: Event) => run(e.currentTarget as HTMLButtonElement) },
+    label, h("kbd", {}, key));
+}
+
+function stageTop(i: Issue, note: Node | string): HTMLElement {
+  const where = i.client ?? i.project ?? (i.list === "dev" ? "Dev" : "");
+  return h("div", { class: "td-top" }, link(i.identifier, i.url, "ident"),
+    where ? h("span", {}, "· ", where) : "", note ? h("span", {}, "· ", note) : "",
+    slipTag(state.slips?.slips[i.id]),
+    h("button", { class: "td-open", onclick: () => void openUrl(i.url) }, "Open in Linear", h("kbd", {}, "o")));
+}
+
+function stageBody(i: Issue, onToday: boolean): Node[] {
+  loadDetail(i.id);
+  const more = h("details", { class: "drop-menu pane-menu" },
+    h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
+    h("div", { class: "menu" },
+      onToday ? h("button", { type: "button", onclick: () => void toggleToday(i.id) }, "Remove from Today") : "",
+      h("button", { type: "button", class: "menu-danger", onclick: (e: Event) => {
+        (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
+        confirmDelete(i);
+      } }, "Delete…")));
+  return [
+    h("div", { class: "tl-fields" },
+      statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
+      priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
+      dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
+      h("span", { class: "spacer" }), more),
+    detailBody(i.id),
+  ];
+}
+
+function draftBox(text: string, by: string): HTMLElement {
+  return h("blockquote", { class: "td-msg" }, h("span", {}, `${by} · copied, never sent`), text);
+}
+
+function upNext(i: Issue, ctx: TodayCtx): HTMLElement | "" {
+  const at = ctx.order.indexOf(i);
+  const n = ctx.order.slice(at + 1).find((x) => !ctx.off.includes(x) && (ctx.moment !== "wrapup" || !outcome(x, ctx.b, wrapAdvice(ctx.b, x))));
+  if (!n) return "";
+  return h("button", { class: "td-upn", onclick: () => selectToday(n.id) },
+    "Up next · ", h("span", { class: "ident" }, n.identifier), " · ", h("span", { class: "tt" }, n.title),
+    ctx.moment === "wrapup" ? h("span", { class: "sg" }, ` · ${stepLabel(n, ctx.b)}`) : "", h("kbd", {}, "j"));
+}
+
+/** Through the day: what to do now, whether it fits before the next meeting, the keys. */
+function focusStage(i: Issue, ctx: TodayCtx): Child[] {
+  const { b } = ctx;
+  const pick = planPick(b, i);
+  const t = state.today.find((x) => x.issue_id === i.id);
+  const fit = pick?.minutes ? fitFor(pick.minutes, b.agenda) : null;
+  const waiting = isWaiting(i, b);
+  const len = blockLength(pick?.minutes ?? null);
+  const start = (fit ?? fitFor(len, b.agenda))?.start ?? nextHalfHour();   // the first free stretch long enough
+  const block = t?.event_start && t.event_minutes ? blockControls(t)
+    : actButton(`Block ${fmtMinutes(len)} at ${hm12(start)}`, "b", (btn) => void blockFirst(i, btn, len, start));
+  return [
+    stageTop(i, pick ? "Claude's pick" : ""),
+    h("h2", {}, i.title),
+    pick?.why ? h("p", { class: "td-why" }, pick.why) : "",
+    waiting ? draftBox(nudgeText(i), "A nudge to send") : "",
+    fit ? h("div", { class: `td-fit n${fit.over ? " over" : ""}` }, fit.text,
+      h("span", { class: "bar", role: "img", "aria-label": `${pick!.minutes} of the free minutes` }, h("i", { style: `width: ${fit.pct}%` }))) : "",
+    h("div", { class: "td-acts" },
+      waiting ? actButton("Copy nudge", "n", () => void copyDraft(i, nudgeText(i), false), true) : "",
+      actButton("Mark done", "⌘↵", () => void markDone(i, ctx), !waiting),
+      block,
+      actButton(`Move to ${dayShort(b.next_day)}`, "m", () => void moveToTomorrow(i, false))),
+    ...stageBody(i, true),
+    upNext(i, ctx),
+  ];
+}
+
+function stepLabel(i: Issue, b: Brief): string {
+  const a = wrapAdvice(b, i);
+  return !a || a.action === "carry" ? `Move to ${dayShort(b.next_day)}` : a.action === "close" ? "Close?"
+    : a.action === "ask" ? "Copy message" : `Set due ${dueWord(b, a.move_to!)}`;
+}
+
+/** Wrap-up: Claude's next step is the main button; moving it to tomorrow and done stay a key away. */
+function wrapStage(i: Issue, ctx: TodayCtx): Child[] {
+  const { b } = ctx;
+  const a = wrapAdvice(b, i);
+  const step = a?.action ?? "carry";
+  const decided = outcome(i, b, a);
+  const buttons: Record<string, (primary: boolean) => HTMLElement> = {
+    close: (p) => actButton("Mark done", "⌘↵", () => void markDone(i, ctx), p),
+    carry: (p) => actButton(`Move to ${dayShort(b.next_day)}`, "m", () => void moveToTomorrow(i, true), p),
+    move: (p) => actButton(`Set due ${shortDay(a!.move_to!)}`, "d", () => void setClaudeDate(i, a!.move_to!), p),
+    ask: (p) => actButton("Copy message", "n", () => void copyDraft(i, a!.message ?? "", true), p),
+  };
+  return [
+    stageTop(i, ""),
+    h("h2", {}, i.title),
+    a?.why ? h("p", { class: "td-why" }, a.why) : "",
+    a?.action === "ask" && a.message && !decided ? draftBox(a.message, "Drafted by Claude") : "",
+    decided ? h("p", { class: "td-okline" }, checkIcon(), decided)
+      : h("div", { class: "td-acts" }, ...[step, ...["carry", "close"].filter((x) => x !== step)].map((x, n) => buttons[x](n === 0))),
+    ...(isOpen(i) ? stageBody(i, true) : []),
+    upNext(i, ctx),
+  ];
+}
+
+/** Not on Today: a pick you didn't take (Add to Today), or a late issue with Claude's next step. */
+function offStage(i: Issue, ctx: TodayCtx): Child[] {
+  const { b } = ctx;
+  const a = planAside(b, i);
+  const pick = planPick(b, i);
+  const decided = outcome(i, b, a);
+  const step = !a || decided ? ""
+    : a.action === "move" ? actButton(`Set due ${shortDay(a.move_to!)}`, "d", () => void setClaudeDate(i, a.move_to!), true)
+    : a.action === "clear_date" ? actButton("Clear the date", "d", () => void setClaudeDate(i, null), true)
+    : actButton("Copy message", "n", () => void copyDraft(i, a.message ?? "", true), true);
+  const fit = pick?.minutes ? fitFor(pick.minutes, b.agenda) : null;
+  return [
+    stageTop(i, a ? h("span", { class: "late" }, "not on Today") : "Claude's pick, not on Today"),
+    h("h2", {}, i.title),
+    (a ?? pick)?.why ? h("p", { class: "td-why" }, (a ?? pick)!.why) : "",
+    a?.action === "ask" && a.message && !decided ? draftBox(a.message, "Drafted by Claude") : "",
+    fit ? h("div", { class: `td-fit n${fit.over ? " over" : ""}` }, fit.text) : "",
+    decided ? h("p", { class: "td-okline" }, checkIcon(), decided) : "",
+    h("div", { class: "td-acts" }, step, actButton("Add to Today", "a", () => void addToToday(i), !step)),
+    ...stageBody(i, false),
+  ];
+}
+
+function todayStage(ctx: TodayCtx): HTMLElement {
+  const i = ctx.sel;
+  if (!i) {
+    const decided = ctx.list.length;
+    return h("article", { class: "td-st" }, h("div", { class: "td-clear" },
+      ...(ctx.moment === "wrapup"
+        ? [h("h2", {}, `All ${decided} decided.`), h("p", {}, `${weekday(ctx.b.next_day)}'s list is ready.`),
+            ctx.b.checkin ? h("div", { class: "td-acts" }, h("button", { class: "td-btn", onclick: () => showCheckin(ctx.b.checkin!) }, "Weekly check-in")) : ""]
+        : [h("h2", {}, "Nothing left on Today."), h("p", {}, `${ctx.b.completed_today.length} done. The wrap-up comes in with the 4 PM sweep.`)])));
+  }
+  const body = ctx.off.includes(i) ? offStage(i, ctx) : ctx.moment === "wrapup" ? wrapStage(i, ctx) : focusStage(i, ctx);
+  return h("article", { class: "td-st", "aria-live": "polite", "aria-label": i.identifier }, ...body);
+}
+
+// ---- actions ---------------------------------------------------------------------------------------
+function selectToday(id: string) {
+  state.todaySel = id;
+  render();
+  document.querySelector(`.td-row[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+}
+
+function stepTodaySel(delta: number) {
+  if (!state.brief) return;
+  const { order, sel } = todayCtx(state.brief);
+  if (!order.length) return;
+  const at = sel ? order.indexOf(sel) : -1;
+  selectToday(order[Math.max(0, Math.min(order.length - 1, at < 0 ? 0 : at + delta))].id);
+}
+
+/** After an item leaves the list or is decided: the next one still to do. */
+function selectAfter(i: Issue, ctx: TodayCtx) {
+  const at = ctx.order.indexOf(i);
+  const rest = [...ctx.order.slice(at + 1), ...ctx.order.slice(0, Math.max(at, 0)).reverse()]
+    .filter((x) => !ctx.off.includes(x) && (ctx.moment !== "wrapup" || !outcome(x, ctx.b, wrapAdvice(ctx.b, x))));
+  state.todaySel = rest[0]?.id ?? null;
+}
+
+async function markDone(i: Issue, ctx: TodayCtx) {
+  selectAfter(i, ctx);
+  await completeIssue(i);
+  const b = state.brief;
+  if (b && !state.issues.some((x) => x.id === i.id) && !b.completed_today.some((x) => x.id === i.id)) {
+    const closed = state.meta?.states.find((s) => s.type === "completed");
+    b.completed_today = [{ ...i, state: { id: closed?.id ?? i.state.id, name: closed?.name ?? "Done", type: "completed" } }, ...b.completed_today];
+    render();
+  }
+}
+
+/** On tomorrow's Today list; through the day it also comes off today's. ⌘Z puts it back. */
+async function moveToTomorrow(i: Issue, keepOnToday: boolean) {
+  const b = state.brief;
+  if (!b) return;
+  const before = state.today.map((t) => t.issue_id);
+  const had = b.next_today.includes(i.id);
+  selectAfter(i, todayCtx(b));
+  try {
+    b.next_today = (await api.carryOver([i.id])).items.map((t) => t.issue_id);
+    if (!keepOnToday) state.today = (await api.setToday(before.filter((x) => x !== i.id))).items;
+    offerUndo(`${i.identifier} moved to ${weekday(b.next_day)}'s Today list`, `${i.identifier} is back`, async () => {
+      if (!had) b.next_today = (await api.uncarry([i.id])).items.map((t) => t.issue_id);
+      if (!keepOnToday) state.today = (await api.setToday(before)).items;
+      state.todaySel = i.id;
+    });
+  } catch (e) {
+    fail(e);
+  }
+  render();
+}
+
+async function setClaudeDate(i: Issue, due: string | null) {
+  if (state.brief) selectAfter(i, todayCtx(state.brief));
+  await editIssue(i, { due_date: due });
+}
+
+async function copyDraft(i: Issue, text: string, decides: boolean) {
+  if (!(await copyText(text))) { toast("Couldn't copy the message", undefined, true); return; }
+  if (decides && state.brief) {
+    state.copied.add(i.id);
+    selectAfter(i, todayCtx(state.brief));
+  }
+  toast(decides ? "Message copied. Paste it where you talk to them." : "Nudge copied. Paste it where you talk to them.");
+  render();
+}
+
+async function addToToday(i: Issue) {
+  const before = state.today.map((t) => t.issue_id);
+  try {
+    state.today = (await api.setToday([...before, i.id])).items;
+    state.todaySel = i.id;
+    offerUndo(`${i.identifier} added to Today`, `${i.identifier} is off Today again`, async () => {
+      state.today = (await api.setToday(before)).items;
+    });
+  } catch (e) {
+    fail(e);
+  }
+  render();
+}
+
+/** Today's keys: j / k (↑ ↓) select, ⌘↵ done, m move to tomorrow, b block time, n copy the nudge or
+ *  message, d Claude's date, a add to Today, o open in Linear; on the cover, x checks and ↵ starts. */
+function todayKey(e: KeyboardEvent): boolean {
+  const b = state.brief;
+  if (!b || !state.issuesLoaded) return false;
+  if (todayMoment(b) === "cover") {
+    const pk = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>(".pk");
+    const free = !document.activeElement || document.activeElement === document.body;
+    if (e.key === "Enter" && !e.metaKey && (pk || free)) { e.preventDefault(); void startDay(b); return true; }
+    if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); moveCoverFocus(1); return true; }
+    if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); moveCoverFocus(-1); return true; }
+    if (e.key === "x" && pk?.dataset.id) { toggleCover(pk.dataset.id); return true; }
+    return false;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    const ctx = todayCtx(b);
+    if (ctx.sel && isOpen(ctx.sel) && !ctx.off.includes(ctx.sel)) { e.preventDefault(); void markDone(ctx.sel, ctx); return true; }
+    return false;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) return false;
+  if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); stepTodaySel(1); return true; }
+  if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); stepTodaySel(-1); return true; }
+  if (!["m", "b", "n", "d", "a", "o"].includes(e.key)) return false;
+  const button = [...document.querySelectorAll<HTMLButtonElement>(".td-st .td-btn, .td-st .td-open")]
+    .find((el) => el.querySelector("kbd")?.textContent === e.key);
+  if (!button || button.disabled) return false;
+  e.preventDefault();
+  button.click();
+  return true;
+}
+
+function todayView(): HTMLElement {
+  ensureBrief();
+  const b = state.brief;
+  const day = b?.day ?? isoDay(new Date());
+  const head = pageHead("Today", { sub: new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }) });
+  if (!b || !state.issuesLoaded) return h("div", { class: "td" }, head, h("p", { class: "muted" }, "Loading from Linear…"));
+  const ctx = todayCtx(b);
+  if (ctx.moment === "cover") {
+    return h("div", { class: "td" }, head, coverView(b, false));
+  }
+  const rising = !!state.planRiseAt && Date.now() - state.planRiseAt < RISE_MS;
+  const sun = sunState();
+  const sky = ctx.moment === "wrapup" ? duskView(ctx)
+    : rising ? coverView(b, true)
+    : h("section", { class: `td-sky band${sun.night ? " night" : ""}`, style: sun.vars, "aria-label": "Now and next" },
+        ...skyLayers(), bandText(b, sun.x < 50));
+  const go = (i: Issue) => {
+    if (ctx.off.includes(i)) state.todayOffOpen = true;
+    if (ctx.list.includes(i) || ctx.off.includes(i)) selectToday(i.id); else void openUrl(i.url);
+  };
+  const note = b.note ?? (b.plan ? { made_at: b.plan.made_at, headline: b.plan.headline, summary: b.plan.summary } : null);
+  const noteBlock = ctx.moment === "wrapup" ? "" : h("section", { class: "td-note", "aria-label": "Claude's note" },
+    h("p", {}, h("span", { class: "lead" }, ...claudeText(note?.headline || dayHeadline(b), go), " "), ...(note?.summary ? claudeText(note.summary, go) : [])),
+    b.note ? claudeBy(b.note.made_at, b.note_run, "Redo", (btn) => void renote(btn))
+      : claudeBy(b.plan?.made_at ?? null, b.plan_run, b.plan ? "Re-plan" : "Ask Claude to plan", (btn) => void replan(btn)));
+  const empty = !ctx.list.length && !ctx.off.length && !b.completed_today.length;
+  return h("div", { class: "td" }, head, sky, noteBlock,
+    empty
+      ? h("div", { class: "td-empty" }, h("div", { class: "td-clear" },
+          ...(ctx.moment === "wrapup"
+            ? [h("h2", {}, "Nothing to wrap up."), h("p", {}, b.next_agenda?.length ? `${weekday(b.next_day)} starts with ${hm12(b.next_agenda[0].start)} ${b.next_agenda[0].title}.` : `${weekday(b.next_day)} starts clear.`)]
+            : [h("h2", {}, "Nothing on Today."), h("p", {}, "Star an issue in Client or Dev to put it here, or press ", h("kbd", {}, "c"), " to capture one."),
+                h("div", { class: "td-acts" }, h("button", { class: "td-btn", onclick: () => goTab("client") }, "Open Client"),
+                  h("button", { class: "td-btn", onclick: () => goTab("dev") }, "Open Dev"))])))
+      : h("div", { class: "td-cols" }, todayQueue(ctx), todayStage(ctx)));
+}
+
+/** The reading pane for one issue (Today, Client and Dev): its ID, client or project and slips,
+ *  the title, one row with status, priority and due date, then Block time (on Today) or Add to
+ *  Today, and ⋯; below, sub-issues, the description and the latest comments. */
+function issuePane(i: Issue): HTMLElement {
+  const today = state.brief?.day ?? isoDay(new Date());
+  const t = state.today.find((x) => x.issue_id === i.id);
+  loadDetail(i.id);
+  const subs = state.issues.filter((x) => x.parent?.id === i.id);
+  const more = h("details", { class: "drop-menu pane-menu" },
+    h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
+    h("div", { class: "menu" },
+      link("Open in Linear ↗", i.url, "menu-link"),
+      t ? h("button", { type: "button", onclick: () => void toggleToday(i.id) }, "Remove from Today") : "",
+      h("button", { type: "button", class: "menu-danger", onclick: (e: Event) => {
+        (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
+        confirmDelete(i);
+      } }, "Delete…")));
+  return h("section", { class: "tl-pane", "aria-label": i.identifier },
+    h("span", { class: "tl-meta" }, link(`${i.identifier} ↗`, i.url, "ident"), [i.client ?? i.project].filter(Boolean).map((x) => ` · ${x}`).join(""),
+      state.slips?.slips[i.id] ? " · " : "", slipTag(state.slips?.slips[i.id])),
+    h("h3", {}, i.title),
+    // One row: status, priority, due date, then Block time (or Add to Today) and ⋯.
+    h("div", { class: "tl-fields" },
+      statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
+      priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
+      dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
+      h("span", { class: "spacer" }),
+      t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
+        onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
+      more),
+    subs.length ? h("section", {}, h("h4", {}, `Sub-issues · ${subs.length}`),
+      h("ul", { class: "tl-subs" }, ...subs.map((x) => h("li", {}, link(x.identifier, x.url, "ident"),
+        h("span", { class: "dtitle" }, x.title),
+        x.due_date && x.due_date < today ? h("span", { class: "late small" }, dueLabel(x.due_date, today).replace("overdue", "late")) : "",
+        h("span", { class: "muted small" }, x.state.name))))) : "",
+    detailBody(i.id),
   );
 }
 
@@ -2148,24 +2847,40 @@ function listView(kind: "client" | "dev"): HTMLElement {
   const names = [...groups.keys()].sort((a, b) =>
     a === "No project" ? 1 : b === "No project" ? -1 : a.localeCompare(b));
   const field = kind === "client" ? "client" : "project";
-  const withChildren = (i: Issue): HTMLElement[] => [
-    issueRow(i, field),
-    ...(children.get(i.id) ?? []).sort(sortIssues).map((c) => issueRow(c, field, true)),
-  ];
-  return h(
-    "div",
-    { class: "groups" },
-    ...names.map((name) => {
-      const list = groups.get(name)!.sort(sortIssues);
-      const total = list.reduce((n, i) => n + 1 + (children.get(i.id)?.length ?? 0), 0);
-      return h("section", { class: "group" },
-        h("h2", {}, name, h("span", { class: "count" }, String(total)),
-          kind === "client" && name !== "No project" &&
-            h("button", { class: "ghost small-btn group-action", onclick: () => void showSummary(name) }, "Weekly summary")),
-        ...list.flatMap(withChildren),
-      );
-    }),
-  );
+  const order: Issue[] = [];
+  const withChildren = (i: Issue): HTMLElement[] => {
+    const kids = (children.get(i.id) ?? []).sort(sortIssues);
+    order.push(i, ...kids);
+    return [listItem(kind, i, field), ...kids.map((c) => listItem(kind, c, field, true))];
+  };
+  const sections = names.map((name) => {
+    const list = groups.get(name)!.sort(sortIssues);
+    const all = list.flatMap((i) => [i, ...(children.get(i.id) ?? [])]);
+    const lead = kind === "client" && name !== "No project" ? clientLogo(name)
+      : h("span", { class: "ll-initial", "aria-hidden": "true" }, name === "No project" ? "–" : name.slice(0, 1).toUpperCase());
+    return h("section", { class: "ll-group" },
+      groupHead(name, lead, all,
+        kind === "client" && name !== "No project"
+          ? h("button", { class: "link-btn group-action", onclick: () => void showSummary(name) }, "Weekly summary") : ""),
+      ...list.flatMap(withChildren),
+    );
+  });
+  return listWithPane(kind, sections, order);
+}
+
+// ---- one project, from the sidebar ----------------------------------------------------------------
+function projectHead(name: string, filter: HTMLElement): HTMLElement {
+  const issues = state.issues.filter((i) => i.project === name && isOpen(i));
+  const client = issues.filter((i) => i.list === "client").length;
+  return pageHead(name, {
+    sub: state.issuesLoaded ? `${issues.length} open${client ? ` · ${client} client, ${issues.length - client} dev` : ""}` : "",
+    right: filter });
+}
+
+/** Every issue in one project, Client and Dev together, grouped by status like the By status
+ *  view; each row names its client. */
+function projectView(name: string): HTMLElement {
+  return statusView("dev", (i) => i.project === name);
 }
 
 // ---- by status ------------------------------------------------------------------------------
@@ -2174,9 +2889,9 @@ const STATUS_RANK: Record<string, number> = { started: 0, unstarted: 1, backlog:
 
 /** Client or Dev issues as one table per open Linear status, in the same rows as the grouped
  *  view. Change a row's status with its status menu and it moves to that group. */
-function statusView(kind: "client" | "dev"): HTMLElement {
+function statusView(kind: "client" | "dev", only?: (i: Issue) => boolean): HTMLElement {
   if (!state.issuesLoaded) return h("div", { class: "empty" }, h("p", { class: "muted" }, "Loading from Linear…"));
-  const items = state.issues.filter((i) => i.list === kind && matches(i));
+  const items = state.issues.filter((i) => (only ? only(i) : i.list === kind) && matches(i));
   if (!items.length) return h("div", { class: "empty" }, h("p", {}, state.filter ? "No issues match the filter." : "No open issues."));
   const states = (state.meta?.states ?? []).filter((s) => s.type in STATUS_RANK);
   // Statuses the issues use but the team list doesn't have (stale meta) still get a group.
@@ -2185,22 +2900,24 @@ function statusView(kind: "client" | "dev"): HTMLElement {
     .sort((a, b) => (STATUS_RANK[a.s.type] ?? 3) - (STATUS_RANK[b.s.type] ?? 3) || a.n - b.n)
     .map((x) => x.s);
   const backlog = items.filter((i) => i.state.type === "backlog");
-  // The row shows the other field: the client on Client, the project on Dev.
-  const other = kind === "client" ? "project" : "client";
+  // The row shows the other field: the client on Client, the project on Dev, the client in a project.
+  const other = kind === "client" && !only ? "project" : "client";
   const groups = order
     .filter((s) => s.type !== "backlog" || state.showBacklog)
     .map((s) => ({ s, list: items.filter((i) => i.state.id === s.id).sort(sortIssues) }))
     .filter((g) => g.list.length);
-  return h("div", { class: "groups" },
-    ...groups.map(({ s, list }) => h("section", { class: `group st-group st-${s.type}` },
-      h("h2", {}, h("span", { class: "sdot" }), s.name, h("span", { class: "count" }, String(list.length))),
-      ...list.map((i) => issueRow(i, other)),
+  const field = other === "project" ? "client" : "project";      // listItem shows the other one
+  const shown = groups.flatMap((g) => g.list);
+  return listWithPane(kind, [
+    ...groups.map(({ s, list }) => h("section", { class: `ll-group st-group st-${s.type}` },
+      groupHead(s.name, h("span", { class: `sdot ll-dot ${statusClass(s)}` }), list),
+      ...list.map((i) => listItem(kind, i, field)),
     )),
-    backlog.length > 0 && h("button", {
+    backlog.length > 0 ? h("button", {
       class: "ghost small-btn backlog-toggle", "aria-pressed": String(state.showBacklog),
       onclick: () => { state.showBacklog = !state.showBacklog; render(); },
-    }, state.showBacklog ? "Hide backlog" : `Show backlog (${backlog.length})`),
-  );
+    }, state.showBacklog ? "Hide backlog" : `Show backlog (${backlog.length})`) : "",
+  ], shown);
 }
 
 function setLayout(kind: "client" | "dev", layout: "group" | "status") {
@@ -2209,15 +2926,16 @@ function setLayout(kind: "client" | "dev", layout: "group" | "status") {
   render();
 }
 
-function layoutToggle(kind: "client" | "dev"): HTMLElement {
+/** Client / Dev header: the title with its open count, then By client (or project) · By status
+ *  as tabs (v switches), with the filter on the tab line. */
+function listHead(kind: "client" | "dev", filter: HTMLElement): HTMLElement {
   const current = state.listLayout[kind];
   const by = kind === "client" ? "client" : "project";
-  const btn = (id: "group" | "status", label: string) => h("button", {
-    class: current === id ? "on" : "", "aria-pressed": String(current === id),
-    title: `${label} (press v to switch)`, onclick: () => setLayout(kind, id),
-  }, label);
-  return h("div", { class: "seg", role: "group", "aria-label": "Group by" },
-    btn("group", `By ${by}`), btn("status", "By status"));
+  const open = state.issues.filter((i) => i.list === kind && isOpen(i)).length;
+  const tab = (id: "group" | "status", label: string) => ({ id, label, on: current === id, select: () => setLayout(kind, id) });
+  return pageHead(kind === "client" ? "Client" : "Dev", {
+    sub: state.issuesLoaded ? `${open} open` : "", label: "Group by",
+    tabs: [tab("group", `By ${by}`), tab("status", "By status")], right: filter });
 }
 
 function matches(x: Candidate | Issue): boolean {
@@ -2239,6 +2957,8 @@ const NAV_ICON: Record<Tab, string[]> = {
            "M7.5 6.5V5A1.5 1.5 0 0 1 9 3.5h2A1.5 1.5 0 0 1 12.5 5v1.5M3 11h14"],
   dev: ["M7 6 3 10l4 4M13 6l4 4-4 4M11.2 4.5 8.8 15.5"],
   insights: ["M4.5 16.5v-5M8.5 16.5v-9M12.5 16.5v-6.5M16.5 16.5v-11"],
+  settings: ["M15.33 7.99L17.42 8.34L17.42 11.66L15.33 12.01L15.19 12.35L16.42 14.07L14.07 16.42L12.35 15.19L12.01 15.33L11.66 17.42L8.34 17.42L7.99 15.33L7.65 15.19L5.93 16.42L3.58 14.07L4.81 12.35L4.67 12.01L2.58 11.66L2.58 8.34L4.67 7.99L4.81 7.65L3.58 5.93L5.93 3.58L7.65 4.81L7.99 4.67L8.34 2.58L11.66 2.58L12.01 4.67L12.35 4.81L14.07 3.58L16.42 5.93L15.19 7.65z",
+             "M10 7.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z"],
 };
 
 function navIcon(tab: Tab): SVGElement {
@@ -2247,12 +2967,26 @@ function navIcon(tab: Tab): SVGElement {
     ...NAV_ICON[tab].map((d) => svg("path", { d })));
 }
 
-function goTab(id: Tab) {
+/** ``highlight``: issue identifiers to point out and scroll to (the digest's "Show ENG-123"). */
+function goTab(id: Tab, highlight: string[] = []) {
   // Leaving a client the sidebar picked drops that filter, so the next tab starts unfiltered.
   if (state.pickedClient && state.filter === state.pickedClient) state.filter = "";
+  if (state.pickedProject) state.filter = "";
   state.pickedClient = null;
+  state.pickedProject = null;
   state.tab = id;
+  state.highlight = new Set(highlight);
+  if (highlight.length) {
+    state.filter = "";        // a filter could hide them
+    if (state.issues.some((i) => state.highlight.has(i.identifier) && i.state.type === "backlog")) state.showBacklog = true;
+  }
+  if ((id === "client" || id === "dev") && highlight.length) {
+    const first = state.issues.find((i) => i.list === id && state.highlight.has(i.identifier));
+    if (first) state.listSel[id] = first.id;
+  }
   render();
+  if (highlight.length) requestAnimationFrame(() =>
+    document.querySelector(".ll-item.hl, .row.hl")?.scrollIntoView({ block: "center", behavior: "smooth" }));
   if (id !== "inbox" && !state.issuesLoaded) void refresh(true);
 }
 
@@ -2260,8 +2994,36 @@ function pickClient(name: string) {
   state.tab = "client";
   state.filter = name;
   state.pickedClient = name;
+  state.pickedProject = null;
   render();
   if (!state.issuesLoaded) void refresh(true);
+}
+
+/** One project from the sidebar: every open issue in it, Client and Dev together (a client issue
+ *  can belong to a project too), grouped by status. The filter then searches within it. */
+function pickProject(name: string) {
+  state.tab = "dev";
+  state.filter = "";
+  state.pickedClient = name;
+  state.pickedProject = name;
+  render();
+  if (!state.issuesLoaded) void refresh(true);
+}
+
+/** Projects of your open issues, Client and Dev, the ones that need you first: overdue, then the
+ *  most open. Issues without a project aren't listed (they're under "No project" in Dev). */
+function sidebarProjects(): { name: string; open: number; late: number }[] {
+  const today = localToday();
+  const by = new Map<string, { open: number; late: number }>();
+  for (const i of state.issues) {
+    if (!i.project || !isOpen(i)) continue;
+    const p = by.get(i.project) ?? { open: 0, late: 0 };
+    p.open += 1;
+    if (i.due_date && i.due_date < today) p.late += 1;
+    by.set(i.project, p);
+  }
+  return [...by.entries()].map(([name, p]) => ({ name, ...p }))
+    .sort((a, b) => (b.late - a.late) || (b.open - a.open) || a.name.localeCompare(b.name));
 }
 
 /** Clients with open client issues, the ones that need you first: overdue, then a meeting
@@ -2303,28 +3065,32 @@ function shortWhen(iso: string | null | undefined): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function problemWord(detail: string | null): string {
-  return detail && /sign.?in|auth|log ?in|connect/i.test(detail) ? "sign-in" : "failed";
-}
-
-/** Bottom of the sidebar: each source, when it last worked, and ↻ to check just that one. */
+/** Bottom of the sidebar: one line for the sources (a green dot and "next 12pm", a red dot and
+ *  "1 error", or "Sweeping…"), then theme and help. The line opens a popover with each source, when it last
+ *  worked, ↻ to check just that one, Run all and the sweep history. */
 function sweepStatus(): HTMLElement {
   const r = state.run;
   const running = r.status === "running";
   const overview: SourceOverview[] = r.source_overview?.length ? r.source_overview
     : (r.sources ?? []).map((s) => ({ source: s.source, ok: s.ok, detail: s.detail, at: r.started_at ?? null,
         last_ok_at: s.ok ? r.started_at ?? null : null }));
+  const errors = overview.filter((o) => o.ok === false).length;
+  const next = nextSweep();
+  const nextTip = nextSweepAt() ? `Next scheduled sweep: ${nextSweepAt()!.toLocaleString([],
+    { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "";
+
   const row = (o: SourceOverview) => {
     const name = SOURCE_NAME[o.source];
     const busy = running && (!r.scope || r.scope === o.source);
     const failed = o.ok === false;
-    const timeText = busy ? "checking…" : failed ? problemWord(o.detail) : o.last_ok_at ? shortWhen(o.last_ok_at) : "not yet";
+    const timeText = busy ? "checking…" : failed ? (o.detail ? "" : "failed") : o.last_ok_at ? shortWhen(o.last_ok_at) : "not yet";
     const tip = failed
       ? `${name}: ${o.detail ?? "problem"} (${shortWhen(o.at)}).${o.last_ok_at ? ` Last worked ${shortWhen(o.last_ok_at)}; the next check catches up from there.` : ""}`
       : o.last_ok_at ? `${name}: last checked ${shortWhen(o.last_ok_at)}.` : `${name}: not checked yet.`;
     return h("div", { class: `src-row${failed ? " bad" : ""}${busy ? " busy" : ""}`, title: tip },
       h("span", { class: `src-dot${o.ok === null ? " none" : ""}` }),
-      h("span", { class: "src-name" }, name),
+      h("span", { class: "src-name" }, name,
+        failed && o.detail ? h("span", { class: "src-why" }, o.detail) : ""),
       h("span", { class: "src-time" }, timeText),
       busy ? h("span", { class: "src-act" }, h("span", { class: "spinner" }))
         : h("button", {
@@ -2333,16 +3099,36 @@ function sweepStatus(): HTMLElement {
             onclick: () => void runNow(o.source),
           }, "↻"));
   };
+
+  const scopeName = r.scope ? SOURCE_NAME[r.scope as Source] ?? r.scope : "";
+  const line = running
+    ? [h("span", { class: "spinner" }), h("span", { class: "src-line-text" }, scopeName ? `Checking ${scopeName}…` : "Sweeping…")]
+    : !overview.length
+      ? [h("span", { class: "src-dot none" }), h("span", { class: "src-line-text" }, "No sweeps yet")]
+      : [h("span", { class: `src-dot${errors ? " bad" : ""}` }),
+         h("span", { class: "src-line-text" },
+           errors ? h("span", { class: "src-err" }, plural(errors, "error")) : next ? `next ${next}` : "All OK")];
+  const label = running ? "Sweep running" : errors ? `${plural(errors, "source")} with an error` : "All sources OK";
+  const menu = h("details", { class: "drop-menu src-menu", open: state.sourcesOpen,
+    ontoggle: (e: Event) => { state.sourcesOpen = (e.currentTarget as HTMLDetailsElement).open; } },
+    h("summary", { class: "src-line", title: `${label}. Click for each source (r)`, "aria-label": `${label}: show sources` }, ...line),
+    h("div", { class: "menu src-pop", role: "dialog", "aria-label": "Sources" },
+      h("div", { class: "src-pop-head" }, h("b", {}, "Sources"),
+        h("span", { class: "muted small", title: nextTip },
+          [r.started_at ? `last sweep ${shortWhen(r.started_at)}` : "", next ? `next ${next}` : ""].filter(Boolean).join(" · "))),
+      overview.length ? h("div", { class: "src-list" }, ...overview.map(row))
+        : h("p", { class: "muted small" }, "No sweeps yet."),
+      h("div", { class: "src-pop-foot" },
+        h("button", { class: "primary small-btn", disabled: running, title: "Sweep every source now", onclick: () => void runNow() },
+          running && !r.scope ? "Sweeping…" : "Run all"),
+        h("button", { class: "link-btn", onclick: () => {
+          state.sourcesOpen = false;
+          renderHeader();
+          void showSweepHistory();
+        } }, "Sweep history →"))));
   return h("div", { class: "sweep" },
-    h("div", { class: "src-head" }, h("span", {}, "Sources"),
-      nextSweep() ? h("span", { class: "sweep-next", title: `Next scheduled sweep: ${nextSweepAt()!.toLocaleString([],
-        { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` }, `next ${nextSweep()}`) : ""),
-    overview.length ? h("div", { class: "src-list" }, ...overview.map(row))
-      : h("div", { class: "sweep-line" }, h("span", { class: "sdot" }), "No sweeps yet"),
     h("div", { class: "sweep-actions" },
-      h("button", { class: "secondary small-btn", disabled: running, title: "Sweep every source now", onclick: () => void runNow() },
-        running && !r.scope ? "Sweeping…" : "Run all"),
-      h("span", { class: "spacer" }),
+      menu,
       themeButton(),
       h("button", { class: "icon help", title: "Keyboard shortcuts (?)", "aria-label": "Keyboard shortcuts", onclick: showShortcuts }, "?")),
   );
@@ -2379,12 +3165,13 @@ function renderHeader() {
     inbox: state.candidates.length,
     today: state.issuesLoaded ? todaySplit().open.length : state.today.length,
     insights: 0,
+    settings: 0,
     client: state.issues.filter((i) => i.list === "client").length,
     dev: state.issues.filter((i) => i.list === "dev").length,
   };
   const item = (id: Tab, label: string, key: number) => {
-    const showCount = id !== "insights" && (id === "inbox" || id === "today" || state.issuesLoaded);
-    const on = state.tab === id && !(id === "client" && state.pickedClient);
+    const showCount = id !== "insights" && id !== "settings" && (id === "inbox" || id === "today" || state.issuesLoaded);
+    const on = state.tab === id && !((id === "client" || id === "dev") && state.pickedClient);
     return h("button", {
       class: `nav${on ? " active" : ""}`, title: `${label} (⌘${key})`, "aria-current": on ? "page" : undefined,
       onclick: () => goTab(id),
@@ -2393,6 +3180,8 @@ function renderHeader() {
   };
   const clients = state.issuesLoaded ? sidebarClients() : [];
   const shown = state.allClients ? clients : clients.slice(0, SIDEBAR_CLIENTS);
+  const projects = state.issuesLoaded ? sidebarProjects() : [];
+  const shownProjects = state.allProjects ? projects : projects.slice(0, SIDEBAR_CLIENTS);
   side.replaceChildren(
     h("div", { class: "side-brand" },
       h("img", { class: "brand-logo", src: "/logo.svg", alt: "" }),
@@ -2403,7 +3192,7 @@ function renderHeader() {
       }, "+")),
     h("nav", { class: "side-nav", "aria-label": "Sections" },
       item("inbox", "Inbox", 1), item("today", "Today", 2), item("client", "Client", 3), item("dev", "Dev", 4),
-      item("insights", "Insights", 5)),
+      item("insights", "Insights", 5), h("div", { class: "nav-gap" }), item("settings", "Settings", 6)),
     clients.length > 0 ? h("div", { class: "side-group" }, "Clients") : "",
     clients.length > 0 ? h("div", { class: "side-clients" },
       ...shown.map((c) => h("button", {
@@ -2417,6 +3206,19 @@ function renderHeader() {
       clients.length > SIDEBAR_CLIENTS && h("button", {
         class: "client-link more", onclick: () => { state.allClients = !state.allClients; renderHeader(); },
       }, state.allClients ? "Show fewer" : `+ ${clients.length - SIDEBAR_CLIENTS} more`)) : "",
+    projects.length > 0 ? h("div", { class: "side-group" }, "Projects") : "",
+    projects.length > 0 ? h("div", { class: "side-clients" },
+      ...shownProjects.map((p) => h("button", {
+        class: `client-link${state.tab === "dev" && state.pickedClient === p.name ? " active" : ""}`,
+        title: `${p.name}: ${p.open} open${p.late ? `, ${p.late} overdue` : ""}`,
+        onclick: () => pickProject(p.name),
+      }, h("span", { class: "proj-mark", "aria-hidden": "true" }, p.name.slice(0, 1).toUpperCase()),
+        h("span", { class: "client-name" }, p.name),
+        p.late ? h("span", { class: "client-hint late" }, `${p.late} late`)
+          : h("span", { class: "client-hint" }, String(p.open)))),
+      projects.length > SIDEBAR_CLIENTS && h("button", {
+        class: "client-link more", onclick: () => { state.allProjects = !state.allProjects; renderHeader(); },
+      }, state.allProjects ? "Show fewer" : `+ ${projects.length - SIDEBAR_CLIENTS} more`)) : "",
     h("div", { class: "side-fill" }),
     sweepStatus(),
   );
@@ -2445,53 +3247,58 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
   }, `pushed ${s.count}×`);
 }
 
+const settingsCtx: SettingsCtx = {
+  rerender: () => { if (state.tab === "settings") { const y = window.scrollY; render(); window.scrollTo(0, y); } },
+  themeChanged: () => renderHeader(),
+  runNow: (source) => void runNow(source).then(() => settingsCtx.rerender()),
+  running: () => state.run.status === "running",
+  toast: (m) => void toast(m),
+  fail,
+  when: (iso) => shortWhen(iso),
+};
+
 function render() {
   if (state.tab === "client" || state.tab === "dev" || state.tab === "today") ensureSlips();
   ensureLogos([...state.candidates.map((c) => c.client_label), ...state.issues.map((i) => i.client)]);
   renderHeader();
   const main = document.querySelector("main")!;
+  main.classList.toggle("wide", state.tab !== "insights" && state.tab !== "settings");
+  main.classList.toggle("fit", state.tab === "today");      // Today fits the window; its panes scroll
   const problems = (state.run.source_overview?.length ? state.run.source_overview : state.run.sources ?? [])
     .filter((s) => s.ok === false);
-  const toolbar = h(
-    "div",
-    { class: "toolbar" },
-    h("input", {
-      class: "filter", type: "search", placeholder: "Filter", value: state.filter,
-      oninput: (e: Event) => {
-        state.filter = (e.target as HTMLInputElement).value;
-        if (state.pickedClient) { state.pickedClient = null; renderHeader(); }
-        const f = focusedCandidate();
-        if (f && !matches(f)) state.focus = null;
-        const content = document.querySelector(".content");
-        content?.replaceChildren(view());
-      },
-    }),
-    h("button", { class: "ghost", title: "Reload from Linear: issues, labels, projects and statuses; re-check the Inbox",
-      onclick: async (e: Event) => {
-        const btn = e.currentTarget as HTMLButtonElement;
-        btn.disabled = true;
-        btn.textContent = "Refreshing…";
-        await refresh(true, "force");
-        btn.disabled = false;
-        btn.textContent = "Refresh";
-      } }, "Refresh"),
-    (state.tab === "client" || state.tab === "dev") && layoutToggle(state.tab),
-  );
+  const filter = h("input", {
+    class: "filter", type: "search", placeholder: "Filter", value: state.filter, "aria-label": "Filter",
+    oninput: (e: Event) => {
+      state.filter = (e.target as HTMLInputElement).value;
+      if (state.pickedClient && !state.pickedProject) { state.pickedClient = null; renderHeader(); }
+      const f = focusedCandidate();
+      if (f && !matches(f)) state.focus = null;
+      const content = document.querySelector(".content");
+      content?.replaceChildren(view());
+    },
+  });
+  // Inbox, Client and Dev headers (Today and Insights build their own with the same pageHead).
+  const head = state.tab === "inbox"
+    ? pageHead("Inbox", { sub: state.candidates.length ? `${state.candidates.length} to review` : "", right: filter })
+    : state.tab === "dev" && state.pickedProject ? projectHead(state.pickedProject, filter)
+    : state.tab === "client" || state.tab === "dev" ? listHead(state.tab, filter) : "";
   const byStatus = (state.tab === "client" || state.tab === "dev") && state.listLayout[state.tab] === "status";
   const view = () =>
     state.tab === "inbox" ? inboxView()
       : state.tab === "today" ? todayView()
-      : state.tab === "insights" ? insightsView(() => { if (state.tab === "insights") render(); }, (t) => goTab(t))
+      : state.tab === "settings" ? settingsView(settingsCtx)
+      : state.tab === "insights" ? insightsView(() => { if (state.tab === "insights") render(); }, (t, ids) => goTab(t, ids))
+      : state.tab === "dev" && state.pickedProject ? projectView(state.pickedProject)
       : byStatus ? statusView(state.tab as "client" | "dev")
       : listView(state.tab as "client" | "dev");
   main.replaceChildren(
+    head,
     state.error ? h("div", { class: "banner error" }, state.error) : "",
     state.tab === "inbox" && state.run.status !== "running" && problems.length
       ? h("div", { class: "banner warn" },
           ...problems.map((p) => h("div", {}, `${SOURCE_NAME[p.source]}: ${p.detail ?? "problem during the last sweep"}`)))
       : "",
     state.tab === "inbox" ? captureBar : "",
-    state.tab === "insights" || state.tab === "today" ? "" : toolbar,
     h("div", { class: "content" }, view()),
   );
 }
@@ -2562,18 +3369,22 @@ const SHORTCUTS: [string, string][] = [
   ["m", "Merge a possible duplicate into the existing issue"],
   ["x", "Select for bulk actions"],
   ["⌘Z", "Undo the last action (approve, drop, snooze, issue edit)"],
+  ["⌘R", "Reload from Linear now (it also reloads every minute)"],
   ["⇧⌘R", "Reload: restart the backend and the window after a code change"],
   ["e", "Edit the title"],
   ["c", "Capture a task"],
   ["/", "Filter"],
-  ["⌘1 – ⌘5", "Inbox, Today, Client, Dev, Insights"],
+  ["⌘1 – ⌘6", "Inbox, Today, Client, Dev, Insights, Settings (also ⌘,)"],
   ["⌥⌘T", "Capture from anywhere (when TodoHub is running)"],
-  ["↑ ↓", "Today: select a task (⌥↑ ⌥↓ moves it)"],
-  ["v", "Client / Dev: group by client or project ↔ by status · Today: brief ↔ checklist"],
+  ["⌘↵ · m · b", "Today: mark done · move to tomorrow's list · block time"],
+  ["n · d · a · o", "Today: copy the nudge or message · Claude's due date · add to Today · open in Linear"],
+  ["x · ↵", "Today, in the morning: check a suggestion · start the day"],
+  ["v", "Client / Dev: group by client or project ↔ by status"],
   ["t", "Theme: follow the Mac → light → dark → daylight (follows the time of day)"],
+  ["r", "Sources: each one's status, ↻ to check one, Run all"],
   ["?", "This list"],
 ];
-const TAB_ORDER: Tab[] = ["inbox", "today", "client", "dev", "insights"];
+const TAB_ORDER: Tab[] = ["inbox", "today", "client", "dev", "insights", "settings"];
 
 function markFocus() {
   document.querySelectorAll<HTMLElement>(".card").forEach((el) => {
@@ -2595,8 +3406,8 @@ function moveFocus(delta: number) {
   if (!ids.length) return;
   const at = state.focus === null ? -1 : ids.indexOf(state.focus);
   state.focus = ids[Math.min(ids.length - 1, Math.max(0, at + delta))];
-  markFocus();
-  document.querySelector(`.card[data-id="${state.focus}"]`)?.scrollIntoView({ block: "nearest" });
+  render();
+  document.querySelector(`.ib-item[data-id="${state.focus}"]`)?.scrollIntoView({ block: "nearest" });
 }
 
 function focusedCard(): HTMLElement | null {
@@ -2615,7 +3426,7 @@ document.addEventListener("pointerdown", (e) => {
   if (state.balanceOpen && !(e.target as Element).closest?.(".bal-anchor")) {
     state.balanceOpen = false;
     document.querySelector(".bal-pop")?.remove();
-    document.querySelector(".bal-anchor .mtile-pill")?.setAttribute("aria-expanded", "false");
+    document.querySelector(".bal-anchor > button")?.setAttribute("aria-expanded", "false");
   }
   document.querySelectorAll<HTMLDetailsElement>("details.drop-menu[open]").forEach((d) => {
     if (!d.contains(e.target as Node)) d.open = false;
@@ -2641,9 +3452,22 @@ function isTextField(el: Element | null): boolean {
 document.addEventListener("keydown", (e) => {
   const target = e.target as HTMLElement;
   const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
-  if ((e.metaKey || e.ctrlKey) && /^[1-5]$/.test(e.key)) {
+  if ((e.metaKey || e.ctrlKey) && e.key === ",") {          // the Mac's usual Settings shortcut
+    e.preventDefault();
+    goTab("settings");
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && /^[1-6]$/.test(e.key)) {
     e.preventDefault();
     goTab(TAB_ORDER[Number(e.key) - 1]);
+    return;
+  }
+  // ⌘R reloads from Linear now: issues, labels, projects and statuses, and re-checks the Inbox.
+  // (It reloads every minute and when the window comes back anyway; ⇧⌘R restarts the app.)
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "r") {
+    e.preventDefault();
+    toast("Reloading from Linear…");
+    void refresh(true, "force");
     return;
   }
   // ⌘Z undoes the last action, except in a text field, where it undoes typing as usual.
@@ -2659,10 +3483,17 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") target.blur();
     return;
   }
-  const todayList = state.tab === "today" && state.todayLayout === "brief" && !document.querySelector(".overlay");
-  if (todayList && !e.metaKey && !e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+  if (state.tab === "inbox" && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")
+      && !document.querySelector(".overlay")) {
     e.preventDefault();
-    stepToday(e.key === "ArrowUp" ? -1 : 1, e.altKey);
+    moveFocus(e.key === "ArrowUp" ? -1 : 1);
+    return;
+  }
+  if (state.tab === "today" && !document.querySelector(".overlay") && todayKey(e)) return;
+  const issueList = (state.tab === "client" || state.tab === "dev") && !document.querySelector(".overlay");
+  if (issueList && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+    e.preventDefault();
+    stepList(e.key === "ArrowUp" ? -1 : 1);
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".overlay")) return;
@@ -2690,17 +3521,16 @@ document.addEventListener("keydown", (e) => {
   switch (e.key) {
     case "?": showShortcuts(); break;
     case "t": nextTheme(); renderHeader(); break;
+    case "r": state.sourcesOpen = !state.sourcesOpen; renderHeader(); break;
     case "v":
       if (state.tab === "client" || state.tab === "dev") {
         setLayout(state.tab, state.listLayout[state.tab] === "status" ? "group" : "status");
-      } else if (state.tab === "today") {
-        setTodayLayout(state.todayLayout === "checklist" ? "brief" : "checklist");
       }
       break;
     case "/": e.preventDefault(); document.querySelector<HTMLInputElement>(".filter")?.focus(); break;
     case "c": e.preventDefault(); goTab("inbox"); captureInput.focus(); break;
-    case "j": if (state.tab === "inbox") moveFocus(1); else if (todayList) stepToday(1, false); break;
-    case "k": if (state.tab === "inbox") moveFocus(-1); else if (todayList) stepToday(-1, false); break;
+    case "j": if (state.tab === "inbox") moveFocus(1); else if (issueList) stepList(1); break;
+    case "k": if (state.tab === "inbox") moveFocus(-1); else if (issueList) stepList(-1); break;
     case "a": if (c) void approve(c); break;
     case "m": if (c?.possible_duplicate && (c.kind === "task" || c.kind === "waiting")) void merge(c); break;
     case "x": if (c) toggleSelect(c.id); break;
@@ -2724,6 +3554,7 @@ async function start() {
   }
   // Daylight theme: a location from config.toml, if set; otherwise it stays on the time zone.
   onDaylightPhase(() => renderHeader());
+  void loadSettings().then(() => renderHeader());       // the sweep's schedule, for "next 12pm"
   api.daylight().then(({ location }) => {
     setDaylightLocation(location);
     if (currentTheme() === "daylight") { applyTheme(); renderHeader(); }

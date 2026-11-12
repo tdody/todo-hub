@@ -14,7 +14,8 @@ def test_broad_allow_rules(tmp_path):
 
 
 def test_schedule_is_weekdays_five_times():
-    p = cli.schedule_plist()
+    from todohub import schedule
+    p = schedule.schedule_plist(load_settings())
     slots = p["StartCalendarInterval"]
     assert len(slots) == 25
     assert {s["Weekday"] for s in slots} == {1, 2, 3, 4, 5}

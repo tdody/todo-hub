@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import type { Candidate } from "./api";
+import type { Candidate, Run } from "./api";
 
 const inTauri = () => "__TAURI_INTERNALS__" in window;
 
@@ -39,23 +39,24 @@ export function isUrgent(c: Candidate): boolean {
   return c.priority === 1 || c.priority === 2 || (!!c.due_date && c.due_date <= inDays(2));
 }
 
-let seen: Set<number> | null = null;
+const SWEEP_NOTICE_HOURS = 3;     // a sweep older than this isn't news any more (the app was closed)
 
-/** Notify about urgent candidates that weren't in the queue last time. The first call only records. */
-export async function notifyNew(candidates: Candidate[]) {
-  const ids = new Set(candidates.map((c) => c.id));
-  if (seen === null) {
-    seen = ids;
-    return;
-  }
-  const fresh = candidates.filter((c) => !seen!.has(c.id) && isUrgent(c));
-  seen = ids;
-  if (!fresh.length || !(await canNotify())) return;
-  if (fresh.length === 1) {
-    sendNotification({ title: `TodoHub: ${fresh[0].title}`, body: fresh[0].why ?? "New urgent task to review" });
-  } else {
-    sendNotification({ title: `TodoHub: ${fresh.length} urgent tasks`, body: fresh.slice(0, 3).map((c) => c.title).join("\n") });
-  }
+/** One notification per sweep that added tasks: "TodoHub: 4 new tasks to review (1 urgent)", with
+ *  the first titles, urgent ones first. Sent once the sweep has finished, so tasks it adds one by
+ *  one make one notification; once per sweep, across app restarts. Typed captures don't notify. */
+export async function notifySweep(run: Run, pending: Candidate[]) {
+  if (run.status !== "ok" || !run.id || !run.finished_at) return;
+  if (Date.now() - Date.parse(run.finished_at) > SWEEP_NOTICE_HOURS * 3600_000) return;
+  const fresh = pending.filter((c) => c.run_id === run.id);
+  if (!fresh.length) return;
+  const urgent = fresh.filter(isUrgent);
+  const ordered = [...urgent, ...fresh.filter((c) => !isUrgent(c))];
+  const title = fresh.length === 1
+    ? `TodoHub: ${urgent.length ? "urgent: " : ""}${fresh[0].title}`
+    : `TodoHub: ${fresh.length} new tasks to review${urgent.length ? ` (${urgent.length} urgent)` : ""}`;
+  const body = fresh.length === 1 ? fresh[0].why ?? "New task to review"
+    : ordered.slice(0, 3).map((c) => c.title).join("\n") + (fresh.length > 3 ? `\nand ${fresh.length - 3} more` : "");
+  await notifyOnce(`sweep-new-${run.id}`, title, body);
 }
 
 /** A Mac notification at most once per key (e.g. "brief-morning-2026-11-04"). */

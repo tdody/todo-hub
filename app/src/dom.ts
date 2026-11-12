@@ -39,11 +39,14 @@ export function link(text: string, url: string | null, cls = "link"): HTMLElemen
 }
 
 /** A simple dialog over the page. Esc or the backdrop closes it. */
-export function modal(title: string, body: Node, actions: Node[] = []): () => void {
+export function modal(title: string, body: Node, actions: Node[] = [], cls = ""): () => void {
   const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
-  const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+  // Esc closes only the top dialog (a log opened from the sweep history closes alone).
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && [...document.querySelectorAll(".overlay")].at(-1) === overlay) close();
+  };
   const overlay = h("div", { class: "overlay", onclick: (e: Event) => { if (e.target === overlay) close(); } },
-    h("div", { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": title },
+    h("div", { class: `dialog ${cls}`.trim(), role: "dialog", "aria-modal": "true", "aria-label": title },
       h("div", { class: "dialog-head" }, h("h3", {}, title),
         h("button", { class: "icon", "aria-label": "Close", onclick: close }, "×")),
       body,
@@ -53,4 +56,21 @@ export function modal(title: string, body: Node, actions: Node[] = []): () => vo
   document.addEventListener("keydown", onKey);
   document.body.append(overlay);
   return close;
+}
+
+export type PageTab = { id: string; label: string; on: boolean; select: () => void };
+
+/** Every page's header: the title (with a short count beside it), then underline tabs when the
+ *  page has views. ``right`` (the filter) sits on the tab line, or on the title line when there
+ *  are no tabs. */
+export function pageHead(title: string, opts: { sub?: string; tabs?: PageTab[]; label?: string; right?: Node | "" } = {}): HTMLElement {
+  const titleLine = h("div", { class: `page-title${opts.tabs ? "" : " ruled"}` },
+    h("h1", {}, title), opts.sub ? h("span", { class: "page-sub" }, opts.sub) : "",
+    !opts.tabs && opts.right ? h("span", { class: "page-right" }, opts.right) : "");
+  if (!opts.tabs) return h("div", { class: "page-head" }, titleLine);
+  return h("div", { class: "page-head" }, titleLine,
+    h("div", { class: "page-tabline" },
+      h("div", { class: "page-tabs", role: "tablist", "aria-label": opts.label ?? `${title} view` },
+        ...opts.tabs.map((t) => h("button", { role: "tab", class: t.on ? "on" : "", "aria-selected": String(t.on), onclick: t.select }, t.label))),
+      opts.right ? h("span", { class: "page-right" }, opts.right) : ""));
 }

@@ -13,7 +13,7 @@ from typing import Any, Iterator
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id            INTEGER PRIMARY KEY,
-    trigger       TEXT NOT NULL,              -- schedule | manual (sweeps) | capture
+    trigger       TEXT NOT NULL,              -- schedule | manual (sweeps) | capture | plan | wrapup | note
     started_at    TEXT NOT NULL,
     finished_at   TEXT,
     status        TEXT NOT NULL,              -- running | ok | error
@@ -105,6 +105,9 @@ SIGNALS = ("ask", "commitment", "action_item", "deadline", "manual", "waiting_on
 SOURCES = ("slack", "gmail", "grain", "calendar", "linear", "github", "hubspot", "manual")
 SWEEP_TRIGGERS = ("schedule", "manual")
 CAPTURE_TRIGGERS = ("capture",)
+PLAN_TRIGGERS = ("plan",)
+WRAPUP_TRIGGERS = ("wrapup",)
+NOTE_TRIGGERS = ("note",)
 CANDIDATE_FIELDS = (
     "id", "run_id", "source", "source_id", "source_url", "title", "signal", "why", "excerpt", "who",
     "client_label", "due_date", "priority", "possible_duplicate", "links", "subtasks", "status", "drop_reason", "kind", "target_issue", "comment", "project", "snooze_until", "category",
@@ -239,7 +242,8 @@ class DB:
 
     def latest_run(self, kind: str = "sweep") -> dict | None:
         """Latest sweep (scheduled or manual), or latest capture when kind="capture"."""
-        triggers = CAPTURE_TRIGGERS if kind == "capture" else SWEEP_TRIGGERS
+        triggers = {"capture": CAPTURE_TRIGGERS, "plan": PLAN_TRIGGERS, "wrapup": WRAPUP_TRIGGERS,
+                    "note": NOTE_TRIGGERS}.get(kind, SWEEP_TRIGGERS)
         marks = ", ".join("?" * len(triggers))
         with self.connect() as c:
             row = c.execute(
@@ -264,18 +268,28 @@ class DB:
                 "ORDER BY r.id DESC LIMIT 1", (source,)).fetchone()
         return row["started_at"] if row else None
 
+    FAIL_STREAK_LOOKBACK = 20      # reports looked at when counting failures in a row
+
     def source_overview(self, sources: list[str]) -> list[dict]:
-        """Per source: its latest report in any sweep (full or one-source), and when it last worked."""
+        """Per source: its latest report in any sweep (full or one-source), when it last worked, and
+        how many of its latest reports failed in a row (``fail_streak``, from ``failing_since``)."""
         out = []
         with self.connect() as c:
             for source in sources:
-                row = c.execute(
+                rows = c.execute(
                     "SELECT s.ok, s.detail, s.items_scanned, r.started_at, r.id FROM source_status s "
                     "JOIN runs r ON r.id = s.run_id WHERE s.source = ? AND r.trigger IN ('schedule', 'manual') "
-                    "ORDER BY r.id DESC LIMIT 1", (source,)).fetchone()
+                    "ORDER BY r.id DESC LIMIT ?", (source, self.FAIL_STREAK_LOOKBACK)).fetchall()
+                row = rows[0] if rows else None
+                streak = 0
+                for r in rows:
+                    if r["ok"]:
+                        break
+                    streak += 1
                 out.append({"source": source, "ok": bool(row["ok"]) if row else None,
                             "detail": row["detail"] if row else None, "at": row["started_at"] if row else None,
-                            "run_id": row["id"] if row else None, "last_ok_at": self.last_ok_start(source)})
+                            "run_id": row["id"] if row else None, "last_ok_at": self.last_ok_start(source),
+                            "fail_streak": streak, "failing_since": rows[streak - 1]["started_at"] if streak else None})
         return out
 
     def has_reported(self, source: str) -> bool:
@@ -475,6 +489,14 @@ class DB:
     def bump_mute(self, rule_id: int) -> None:
         with self.connect() as c:
             c.execute("UPDATE mute_rules SET blocked = blocked + 1, last_blocked_at = ? WHERE id = ?", (now_iso(), rule_id))
+
+    def list_decided(self, since_iso: str, limit: int = 300) -> list[dict]:
+        """Approved and dropped candidates decided since ``since_iso``, latest decision first."""
+        with self.connect() as c:
+            rows = c.execute(
+                f"SELECT {', '.join(CANDIDATE_FIELDS)} FROM candidates WHERE status IN ('approved', 'dropped') "
+                "AND decided_at >= ? ORDER BY decided_at DESC, id DESC LIMIT ?", (since_iso, limit)).fetchall()
+        return [_row(r) for r in rows]
 
     def decided_since(self, source: str, since_iso: str) -> list[dict]:
         """Approved and dropped candidates from one source, decided since ``since_iso``."""

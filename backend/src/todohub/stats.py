@@ -80,7 +80,9 @@ def due_slips(issues: list[dict], client_group: str = "client") -> dict:
     for i in issues:
         changes = []
         for n in sorted((i.get("history") or {}).get("nodes", []), key=lambda n: n.get("createdAt") or ""):
-            old, new = n.get("fromDueDate"), n.get("toDueDate")
+            # Linear sends these as dates ("2026-11-06") or as midnight UTC timestamps
+            # ("2026-11-06T00:00:00.000Z"); the day is the first ten characters either way.
+            old, new = (n.get("fromDueDate") or "")[:10], (n.get("toDueDate") or "")[:10]
             if old and new and new > old:
                 changes.append({"from": old, "to": new, "at": n.get("createdAt"),
                                 "by": (n.get("actor") or {}).get("name")})
