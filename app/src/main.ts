@@ -154,7 +154,7 @@ interface ToastAction { label: string; run: () => void; kbd?: string }
 
 function toast(message: string, action?: ToastAction | ToastAction[], error = false, ms?: number): HTMLElement {
   const box = document.querySelector(".toasts")!;
-  const t = h("div", { class: `toast${error ? " error" : ""}` }, h("span", {}, message));
+  const t = h("div", { class: `toast${error ? " error" : ""}`, role: error ? "alert" : null }, h("span", {}, message));
   for (const a of action ? [action].flat() : []) {
     t.append(h("button", { class: "ghost", onclick: () => { a.run(); t.remove(); } },
       a.label, a.kbd ? h("kbd", {}, a.kbd) : ""));
@@ -3014,7 +3014,7 @@ function todayStage(ctx: TodayCtx): HTMLElement {
         : [h("h2", {}, "Nothing left on Today."), h("p", {}, `${ctx.b.completed_today.length} done. The wrap-up comes in with the 4 PM sweep.`)])));
   }
   const body = ctx.off.includes(i) ? offStage(i, ctx) : ctx.moment === "wrapup" ? wrapStage(i, ctx) : focusStage(i, ctx);
-  return h("article", { class: "td-st", "aria-live": "polite", "aria-label": i.identifier }, ...body);
+  return h("article", { class: "td-st", "aria-label": i.identifier }, ...body);
 }
 
 // ---- actions ---------------------------------------------------------------------------------------
@@ -3975,7 +3975,7 @@ document.addEventListener("keydown", (e) => {
 
 // ---- start ----------------------------------------------------------------------------------
 async function start() {
-  document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), h("main", {}), h("div", { class: "toasts" }));
+  document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), h("main", {}), h("div", { class: "toasts", role: "status" }));
   render();
   try {
     await waitForBackend();
