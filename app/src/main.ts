@@ -450,10 +450,11 @@ async function drop(c: Candidate, reason: DropReason = "other") {
 }
 
 /** Change an issue in Linear, with Undo. For a description edit ``issue`` is the pane's preview:
- *  its text is what Undo puts back. Returns whether Linear took the change. */
-function editIssue(issue: IssuePreview, change: IssueEdit): Promise<boolean>;
-function editIssue(issue: Issue, change: Omit<IssueEdit, "description">): Promise<boolean>;
-async function editIssue(issue: Issue | IssuePreview, change: IssueEdit): Promise<boolean> {
+ *  its text is what Undo puts back. Returns whether Linear took the change. ``rerender`` is false
+ *  when the caller shows the result itself. */
+function editIssue(issue: IssuePreview, change: IssueEdit, rerender?: boolean): Promise<boolean>;
+function editIssue(issue: Issue, change: Omit<IssueEdit, "description">, rerender?: boolean): Promise<boolean>;
+async function editIssue(issue: Issue | IssuePreview, change: IssueEdit, rerender = true): Promise<boolean> {
   try {
     const updated = await api.editIssue(issue.id, change);
     const status = state.meta?.states.find((s) => s.id === updated.state.id);
@@ -489,7 +490,7 @@ async function editIssue(issue: Issue | IssuePreview, change: IssueEdit): Promis
     fail(e);
     return false;
   } finally {
-    render();
+    if (rerender) render();
   }
 }
 
@@ -2040,13 +2041,27 @@ async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLTextAreaElement)
     return;
   }
   // No render() before the request: this can run from a blur, and rebuilding the page under the
-  // pointer would swallow the click that moved the focus. editIssue renders when Linear answers.
+  // pointer would swallow the click that moved the focus.
   state.busy.add(key);
   input.readOnly = true;
-  await editIssue(i, { title });
+  await editIssue(i, { title }, false);
   state.busy.delete(key);
   paneDrafts.delete(key);
-  render();
+  const now = state.issues.find((x) => x.id === i.id) ?? i;
+  document.querySelectorAll(`[data-id="${CSS.escape(i.id)}"] .tl-title`).forEach((el) => { el.textContent = now.title; });
+  showAfterLeaving(input.closest(".pane-title"), () => titleField(now, tag));
+}
+
+/** Show a save that may have begun when you left a field. Re-render once the pointer is up, unless
+ *  that would close what you went to next: an open menu, or a select, date or text field that isn't
+ *  one of the pane's own boxes. Then only ``block`` is swapped for ``fresh()``; the next render
+ *  shows the rest. */
+function showAfterLeaving(block: Element | null, fresh: () => HTMLElement) {
+  afterPointer(() => {
+    const a = document.activeElement as HTMLElement | null;
+    if ((editing() && a?.dataset.edit === undefined) || document.querySelector("details.drop-menu[open]")) block?.replaceWith(fresh());
+    else render();
+  });
 }
 
 /** Status, priority, due date, client and project: the fields both reading panes edit in place. */
@@ -2174,10 +2189,10 @@ async function saveDescription(i: IssuePreview, box: HTMLTextAreaElement) {
   state.busy.add(key);
   box.readOnly = true;
   box.nextElementSibling?.replaceChildren("Saving…");
-  const saved = await editIssue(i, { description: text });
+  const saved = await editIssue(i, { description: text }, false);
   state.busy.delete(key);
   if (saved) paneDrafts.delete(key);          // a failed save keeps the box open with your text
-  render();
+  showAfterLeaving(box.closest("section"), () => descriptionSection(details.get(i.id)?.issue ?? i));
 }
 
 /** The issue's sub-issues from Linear, done ones too. Tick one to mark it done (untick: back to
