@@ -2044,9 +2044,9 @@ async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLTextAreaElement)
   // pointer would swallow the click that moved the focus.
   state.busy.add(key);
   input.readOnly = true;
-  await editIssue(i, { title }, false);
+  const saved = await editIssue(i, { title }, false);
   state.busy.delete(key);
-  paneDrafts.delete(key);
+  if (saved) paneDrafts.delete(key);          // a failed save keeps the box open with your text
   const now = state.issues.find((x) => x.id === i.id) ?? i;
   document.querySelectorAll(`[data-id="${CSS.escape(i.id)}"] .tl-title`).forEach((el) => { el.textContent = now.title; });
   showAfterLeaving(input.closest(".pane-title"), () => titleField(now, tag));
