@@ -174,6 +174,19 @@ def test_add_sub_issue_takes_the_parents_client_project_and_priority(env):
     assert len(fake.created) == 2
 
 
+def test_sub_issue_of_another_teams_issue_goes_in_that_team(env):
+    client, _, fake, _ = env
+    fake.issues[0].update(team={"id": "team-ops"}, project={"id": "p-ops", "name": "Ops"})
+    fake.team_states = lambda team_id: [{"id": "ops-later", "name": "Later", "type": "backlog", "position": 0},
+                                        {"id": "ops-next", "name": "Next", "type": "unstarted", "position": 1}]
+    assert client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "Check the CSV"}).status_code == 200
+    made = fake.created[-1]
+    assert (made["team_id"], made["state_id"], made["project_id"]) == ("team-ops", "ops-next", "p-ops")
+    fake.team_states = lambda team_id: [{"id": "ops-later", "name": "Later", "type": "backlog", "position": 0}]
+    r = client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "Check the CSV"})
+    assert r.status_code == 502 and "no not-started status" in r.json()["error"]
+
+
 @pytest.mark.parametrize("todo_state, expected", [
     ("Pending", "s-Pending"),     # the setting names a not-started status: it wins over the first one
     ("Ready", "s-Todo"),          # no status by that name: the team's first not-started one
