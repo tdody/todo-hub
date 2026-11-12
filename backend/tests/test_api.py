@@ -174,10 +174,25 @@ def test_add_sub_issue_takes_the_parents_client_project_and_priority(env):
     assert len(fake.created) == 2
 
 
+@pytest.mark.parametrize("todo_state, expected", [
+    ("Pending", "s-Pending"),     # the setting names a not-started status: it wins over the first one
+    ("Ready", "s-Todo"),          # no status by that name: the team's first not-started one
+])
+def test_new_sub_issue_status_follows_the_todo_setting(todo_state, expected):
+    settings = load_settings()
+    settings.todo_state = todo_state
+    fake = FakeLinear()
+    client = TestClient(create_app(settings, DB(settings.db_path), linear_factory=lambda: fake,
+                                   sweep_launcher=lambda args: None))
+    assert client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "Check the CSV"}).status_code == 200
+    assert fake.created[-1]["state_id"] == expected
+
+
 def test_meta_and_sweep(env):
     client, db, _, launched = env
     m = client.get("/api/meta").json()
     assert [s["name"] for s in m["states"]] == ["Backlog", "Todo", "Pending", "Done"]
+    assert m["todo_state"] == "Todo"
     assert m["sources"] == ["slack", "gmail", "grain", "calendar", "hubspot", "linear", "github"]
     assert client.post("/api/sweep").status_code == 202 and launched == [["--trigger", "manual"]]
     assert client.post("/api/sweep", json={"source": "fax"}).status_code == 400
