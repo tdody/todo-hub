@@ -1,8 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api, ApiError, linearImage, waitForBackend } from "./api";
+import { api, ApiError, waitForBackend } from "./api";
 import { h, link, modal, pageHead, svg } from "./dom";
 import type { Child } from "./dom";
-import { renderMarkdown } from "./markdown";
 import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
@@ -11,9 +10,11 @@ import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";
 import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskAvatar } from "./avatars";
 import type { Category } from "./avatars";
+import { closedType, dueLabel, isOpen, localToday, when } from "./issues";
+import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
 
 applyTheme();
-import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, SubIssue, Subtask, TodayItem } from "./api";
+import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
 
 type Tab = "inbox" | "today" | "client" | "dev" | "insights" | "settings";
 
@@ -101,23 +102,6 @@ function savePref(key: string, value: string) {
 }
 
 // ---- formatting -----------------------------------------------------------------------------
-function when(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const today = new Date();
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (d.toDateString() === today.toDateString()) return `Today ${time}`;
-  const y = new Date(today);
-  y.setDate(today.getDate() - 1);
-  if (d.toDateString() === y.toDateString()) return `Yesterday ${time}`;
-  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + ` ${time}`;
-}
-
-function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function dueClass(due: string | null): string {
   if (!due) return "";
   const today = localToday();
@@ -167,7 +151,7 @@ function toast(message: string, action?: ToastAction | ToastAction[], error = fa
 // ---- undo -----------------------------------------------------------------------------------
 // Every action that changes Linear or takes a card out of the Inbox offers Undo in its banner,
 // and ⌘Z undoes the most recent ones, one at a time, for 10 minutes.
-interface UndoEntry { done: string; run: () => Promise<void>; at: number; banner?: HTMLElement }
+export interface UndoEntry { done: string; run: () => Promise<void>; at: number; banner?: HTMLElement }
 const undoStack: UndoEntry[] = [];
 const UNDO_FOR_MS = 10 * 60_000;
 let undoing = false;
@@ -557,11 +541,6 @@ const PRIO_CLASS: Record<number, string> = { 1: "p-urgent", 2: "p-high", 3: "p-m
 /** Linear's order for statuses: by kind (backlog, not started, started, done, canceled,
  *  duplicate), then the team's own order within each kind. */
 const STATE_ORDER: Record<string, number> = { triage: 0, backlog: 1, unstarted: 2, started: 3, completed: 4, canceled: 5, duplicate: 6 };
-
-/** Done, canceled or duplicate: off the open lists. */
-function closedType(type: string): boolean {
-  return type === "completed" || type === "canceled" || type === "duplicate";
-}
 
 function statusClass(st: { name: string; type: string }): string {
   if (st.type === "backlog") return "s-backlog";
@@ -1566,10 +1545,6 @@ function weekday(day: string): string {
   return new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long" });
 }
 
-function isOpen(i: Issue): boolean {
-  return !closedType(i.state.type);
-}
-
 /** A day's plan: overdue and due-soon work first, then urgent and high priority, up to six. */
 function suggestPlan(today: string, waiting: string): Issue[] {
   const soon = addDays(today, 2);
@@ -1584,12 +1559,6 @@ function suggestPlan(today: string, waiting: string): Issue[] {
     .sort((a, b) => b[0] - a[0] || (a[1].due_date ?? "9").localeCompare(b[1].due_date ?? "9"))
     .slice(0, 6)
     .map(([, i]) => i);
-}
-
-function dueLabel(due: string, today: string): string {
-  if (due === today) return "due today";
-  const days = Math.round((Date.parse(today) - Date.parse(due)) / 864e5);
-  return days > 0 ? `${days} day${days === 1 ? "" : "s"} overdue` : `due ${due}`;
 }
 
 /** The balance rule (pill, popover, checklist): client share = client-labeled issues completed this
@@ -1947,134 +1916,7 @@ function todaySplit(): { open: TodayItem[]; gone: TodayItem[] } {
   };
 }
 
-// ---- the reading pane (Today, Client and Dev) -----------------------------------------------------
-type Detail = { at: number; loading?: true; error?: string; issue?: IssuePreview };
-const details = new Map<string, Detail>();           // reading pane content, by issue id
-
-// Text typed in the pane, by "<issue id>:<field>" (title, description, comment, sub), until it's
-// saved. Re-renders rebuild the fields from it, so a sweep finishing or the list reloading never
-// loses what you typed. A title or description draft also means its editor is open.
-const paneDrafts = new Map<string, string>();
-let rebuilding = false;        // render() is replacing the page
-
-/** A field lost focus because you left it: not because a re-render removed it, and not because you
- *  switched to another app (the field gets the focus back when you return). */
-function isLeaving(e: Event): boolean {
-  return !rebuilding && (e.target as Element).isConnected && document.hasFocus();
-}
-
-/** Open the title or description editor with ``text``, cursor at the end. */
-function openEdit(key: string, text: string) {
-  paneDrafts.set(key, text);
-  render();
-  const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-edit="${CSS.escape(key)}"]`);
-  el?.focus();
-  el?.setSelectionRange(el.value.length, el.value.length);
-}
-
-interface PaneSnapshot { edit: string | null; start: number | null; end: number | null; ident: string | null; scroll: number }
-
-/** Before a re-render: the pane field holding the cursor, and how far the reading pane is scrolled. */
-function snapshotPane(): PaneSnapshot {
-  const a = document.activeElement as HTMLInputElement | null;
-  const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
-  const edit = a?.dataset?.edit ?? null;
-  return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null,
-    ident: pane?.getAttribute("aria-label") ?? null, scroll: pane?.scrollTop ?? 0 };
-}
-
-/** After a re-render: the same field gets the cursor back, and the same issue's pane its scroll. */
-function restorePane(k: PaneSnapshot) {
-  document.querySelectorAll<HTMLTextAreaElement>(".desc-input, .pane-title-input").forEach(fitHeight);
-  const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
-  if (pane && k.ident && pane.getAttribute("aria-label") === k.ident) pane.scrollTop = k.scroll;
-  if (!k.edit) return;
-  const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-edit="${CSS.escape(k.edit)}"]`);
-  if (!el) return;
-  el.focus({ preventScroll: true });
-  if (k.start !== null) el.setSelectionRange(k.start, k.end ?? k.start);
-}
-
-/** Keep the pane's copy of a description in step with a save or an undo. */
-function setDescription(id: string, text: string) {
-  const d = details.get(id);
-  if (d?.issue) d.issue = { ...d.issue, description: text };
-}
-
-/** Grow a text box to fit its text, so a field opening in place keeps the text's shape. Sizing goes
- *  through "auto" for a moment; the pane and the page keep their scroll. */
-function fitHeight(el: HTMLTextAreaElement) {
-  const pane = el.closest<HTMLElement>(".td-st, .tl-pane");
-  const page = document.scrollingElement;
-  const paneTop = pane?.scrollTop ?? 0, pageTop = page?.scrollTop ?? 0;
-  el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
-  if (pane) pane.scrollTop = paneTop;
-  if (page) page.scrollTop = pageTop;
-}
-
-/** The issue's title in a reading pane. Click it (or press e) to rename it in place; Enter or
- *  leaving the field saves, Esc cancels. */
-function titleField(i: Issue, tag: "h2" | "h3"): HTMLElement {
-  const key = `${i.id}:title`;
-  const draft = paneDrafts.get(key);
-  if (draft === undefined) {
-    return h(tag, { class: "pane-title", "data-pane": "title", title: "Rename (e)", onclick: (e: Event) => {
-      if ((e as MouseEvent).detail > 0 && window.getSelection()?.toString()) return;
-      openEdit(key, i.title);
-    } }, i.title);
-  }
-  const box = h("textarea", {
-    class: "pane-title-input", value: draft, rows: 1, maxLength: 200, readOnly: state.busy.has(key), "aria-label": "Title",
-    "data-edit": key, "data-pane": "title",
-    oninput: (e: Event) => {
-      const el = e.target as HTMLTextAreaElement;
-      paneDrafts.set(key, el.value);
-      fitHeight(el);
-    },
-    onkeydown: (e: KeyboardEvent) => {
-      if (e.key === "Enter") { e.preventDefault(); void saveTitle(i, tag, e.target as HTMLTextAreaElement); }
-      if (e.key === "Escape") { e.stopPropagation(); paneDrafts.delete(key); render(); }
-    },
-    onblur: (e: Event) => { if (isLeaving(e)) void saveTitle(i, tag, e.target as HTMLTextAreaElement); },
-  }) as HTMLTextAreaElement;
-  requestAnimationFrame(() => fitHeight(box));
-  return h(tag, { class: "pane-title editing" }, box);
-}
-
-async function saveTitle(i: Issue, tag: "h2" | "h3", input: HTMLTextAreaElement) {
-  const key = `${i.id}:title`;
-  const title = paneDrafts.get(key)?.replace(/\s*\n\s*/g, " ").trim();
-  if (title === undefined || state.busy.has(key)) return;
-  if (!title || title === i.title) {          // unchanged or empty: close the editor where it sits
-    paneDrafts.delete(key);
-    afterPointer(() => input.closest(".pane-title")?.replaceWith(titleField(i, tag)));
-    return;
-  }
-  // No render() before the request: this can run from a blur, and rebuilding the page under the
-  // pointer would swallow the click that moved the focus.
-  state.busy.add(key);
-  input.readOnly = true;
-  const saved = await editIssue(i, { title }, false);
-  state.busy.delete(key);
-  if (saved) paneDrafts.delete(key);          // a failed save keeps the box open with your text
-  const now = state.issues.find((x) => x.id === i.id) ?? i;
-  document.querySelectorAll(`[data-id="${CSS.escape(i.id)}"] .tl-title`).forEach((el) => { el.textContent = now.title; });
-  showAfterLeaving(input.closest(".pane-title"), () => titleField(now, tag));
-}
-
-/** Show a save that may have begun when you left a field. Re-render once the pointer is up, unless
- *  that would close what you went to next: an open menu, or a select, date or text field that isn't
- *  one of the pane's own boxes. Then only ``block`` is swapped for ``fresh()``; the next render
- *  shows the rest. */
-function showAfterLeaving(block: Element | null, fresh: () => HTMLElement) {
-  afterPointer(() => {
-    const a = document.activeElement as HTMLElement | null;
-    if ((editing() && a?.dataset.edit === undefined) || document.querySelector("details.drop-menu[open]")) block?.replaceWith(fresh());
-    else render();
-  });
-}
-
+// ---- the reading pane's fields row (the rest of the pane is in pane.ts) --------------------------
 /** Status, priority, due date, client and project: the fields both reading panes edit in place. */
 function issueFields(i: Issue): HTMLElement[] {
   return [
@@ -2084,303 +1926,6 @@ function issueFields(i: Issue): HTMLElement[] {
     clientSelect(i.client, (v) => void editIssue(i, { client: v })),
     projectSelect(i.project, (v) => void editIssue(i, { project: v })),
   ];
-}
-
-function loadDetail(id: string, force = false) {
-  const d = details.get(id);
-  if (!force && d && (d.loading || Date.now() - d.at < 2 * 60_000)) return;
-  const at = Date.now();                // also marks this load: an older one answering later is dropped
-  details.set(id, { ...d, at, loading: true });
-  api.issuePreview(id)
-    .then((issue) => { if (details.get(id)?.at === at) details.set(id, { at, issue }); })
-    .catch((e) => {
-      // Keep showing what the pane has; say what went wrong only when it has nothing.
-      const now = details.get(id);
-      if (now?.at !== at) return;
-      details.set(id, now.issue ? { at, issue: now.issue } : { at, error: e instanceof ApiError ? e.message : String(e) });
-    })
-    .finally(() => {
-      const shown = [...document.querySelectorAll<HTMLElement>(`.tl-detail[data-id="${id}"]`)];
-      // While you type in it, re-render the page instead: that keeps your cursor where it was.
-      if (shown.some((el) => el.contains(document.activeElement))) render();
-      else shown.forEach((el) => el.replaceWith(detailBody(id)));
-    });
-}
-
-// Images pasted into Linear, loaded through the backend (they need the Linear key) and kept as
-// data: URLs, so a re-render shows them at once. Other sites' images stay links: loading them
-// would tell the sender you read the ticket.
-const imageCache = new Map<string, string | Promise<string>>();
-
-function isLinearUpload(url: string): boolean {
-  try { const u = new URL(url); return u.protocol === "https:" && u.host === "uploads.linear.app"; } catch { return false; }
-}
-
-function linearImageNode(alt: string, url: string): Node | null {
-  if (!isLinearUpload(url)) return null;
-  const img = h("img", { class: "md-img", alt: alt || "Image from Linear" }) as HTMLImageElement;
-  const box = link("", url, "md-figure");
-  box.title = "Open the full image";
-  box.append(img);
-  const show = (src: string) => { img.src = src; box.classList.remove("loading"); box.classList.add("loaded"); };
-  const got = imageCache.get(url);
-  if (typeof got === "string") { show(got); return box; }
-  box.classList.add("loading");
-  const p = got ?? linearImage(url).then((src) => { imageCache.set(url, src); return src; });
-  if (!got) imageCache.set(url, p);
-  p.then(show).catch((e) => {
-    imageCache.delete(url);
-    box.classList.remove("loading");
-    box.replaceChildren(`${alt ? `${alt}: ` : ""}image couldn't load ↗`);
-    box.title = `${e instanceof Error ? e.message : String(e)} Click to open it in your browser.`;
-    box.classList.add("failed");
-  });
-  return box;
-}
-
-function detailBody(id: string): HTMLElement {
-  const d = details.get(id);
-  const i = d?.issue;
-  if (!i) return h("div", { class: "tl-detail", "data-id": id },
-    h("p", { class: "muted small" }, d?.error ? `Couldn't load the details: ${d.error}` : "Loading…"));
-  return h("div", { class: "tl-detail", "data-id": id }, descriptionSection(i), subIssuesSection(i), commentsSection(i));
-}
-
-/** The description as Markdown. Click it (not a link or image) or press ⇧E to edit the Markdown in
- *  place; leaving the box, ⌘↵ or Esc saves. A description cut off at the pane's limit is edited in Linear. */
-function descriptionSection(i: IssuePreview): HTMLElement {
-  const key = `${i.id}:description`;
-  const head = h("h4", {}, "Description");
-  const draft = paneDrafts.get(key);
-  if (draft !== undefined) {
-    const busy = state.busy.has(key);
-    const box = h("textarea", {
-        class: "desc-input", value: draft, rows: 4, readOnly: busy, "aria-label": "Description", "data-edit": key, "data-pane": "description",
-        oninput: (e: Event) => {
-          const el = e.target as HTMLTextAreaElement;
-          paneDrafts.set(key, el.value);
-          fitHeight(el);
-        },
-        onkeydown: (e: KeyboardEvent) => {
-          if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
-            e.preventDefault();
-            e.stopPropagation();
-            void saveDescription(i, e.target as HTMLTextAreaElement);
-          }
-        },
-        onblur: (e: Event) => { if (isLeaving(e)) void saveDescription(i, e.target as HTMLTextAreaElement); },
-      }) as HTMLTextAreaElement;
-    requestAnimationFrame(() => fitHeight(box));
-    return h("section", {}, head, box,
-      h("p", { class: "muted small" }, busy ? "Saving…" : "Markdown. Saves when you leave the box (or ⌘↵)."));
-  }
-  const md = renderMarkdown(i.description, { image: linearImageNode });
-  if (i.description_truncated) {
-    return h("section", {}, head, h("div", { class: "tl-desc md" }, ...md), link("Edit in Linear ↗", i.url, "link small"));
-  }
-  const open = (e: Event) => {
-    if ((e.target as HTMLElement).closest("a, img") || ((e as MouseEvent).detail > 0 && window.getSelection()?.toString())) return;
-    openEdit(key, i.description);
-  };
-  return h("section", {}, head, i.description.trim()
-    ? h("div", { class: "tl-desc md editable", "data-pane": "description", title: "Edit (⇧E)", onclick: open }, ...md)
-    : h("button", { class: "add-text", "data-pane": "description", onclick: open }, "Add a description"));
-}
-
-async function saveDescription(i: IssuePreview, box: HTMLTextAreaElement) {
-  const key = `${i.id}:description`;
-  const text = paneDrafts.get(key);
-  if (text === undefined || state.busy.has(key)) return;
-  if (text.trim() === i.description.trim()) {     // unchanged: close the editor where it sits
-    paneDrafts.delete(key);
-    afterPointer(() => box.closest("section")?.replaceWith(descriptionSection(i)));
-    return;
-  }
-  // No render() before the request (see saveTitle): this can run from a blur.
-  state.busy.add(key);
-  box.readOnly = true;
-  box.nextElementSibling?.replaceChildren("Saving…");
-  const saved = await editIssue(i, { description: text }, false);
-  state.busy.delete(key);
-  if (saved) paneDrafts.delete(key);          // a failed save keeps the box open with your text
-  showAfterLeaving(box.closest("section"), () => descriptionSection(details.get(i.id)?.issue ?? i));
-}
-
-/** The issue's sub-issues from Linear, done ones too. Tick one to mark it done (untick: back to
- *  Todo); a canceled one, or one in another team, shows its status without a box. Type in "Add sub-issue"
- *  (⇧S) and press Enter; the box stays ready for the next. */
-function subIssuesSection(i: IssuePreview): HTMLElement {
-  const today = localToday();
-  const key = `${i.id}:sub`;
-  const subs = i.sub_issues;
-  return h("section", {},
-    subs.length ? h("h4", {}, `Sub-issues · ${subs.length}`) : "",
-    subs.length ? h("ul", { class: "tl-subs" }, ...subs.map((s) => {
-      const done = s.state.type === "completed";
-      const open = isOpen(s);
-      // Canceled and duplicate ones are closed but not done: no box, like another team's.
-      return h("li", { class: open ? "" : "closed" },
-        s.own_team && (open || done)
-          ? h("input", { type: "checkbox", checked: done, disabled: state.busy.has(`${s.id}:tick`), title: done ? "Reopen" : "Mark done",
-              "aria-label": `${done ? "Reopen" : "Mark done"}: ${s.identifier}`, onchange: () => void tickSubIssue(i, s) })
-          : h("span", { class: "sub-gap", "aria-hidden": "true" }),
-        link(s.identifier, s.url, "ident"),
-        h("span", { class: "dtitle" }, s.title),
-        open && s.due_date && s.due_date < today
-          ? h("span", { class: "late small" }, dueLabel(s.due_date, today).replace("overdue", "late")) : "",
-        h("span", { class: "muted small" }, s.assignee && s.assignee !== i.assignee ? `${s.state.name} · ${s.assignee}` : s.state.name));
-    })) : "",
-    h("input", {
-      class: "sub-add", placeholder: "+ Add sub-issue", maxLength: 200, value: paneDrafts.get(key) ?? "", readOnly: state.busy.has(key),
-      "aria-label": `Add sub-issue to ${i.identifier}`, "data-pane": "sub", "data-edit": key,
-      oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); forgetPost(key); },
-      onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void addSubIssue(i); } },
-    }));
-}
-
-/** Tick: the team's first done status, as Mark done uses; untick: Todo (todoStatus). */
-async function tickSubIssue(parent: IssuePreview, sub: SubIssue) {
-  const key = `${sub.id}:tick`;
-  const done = sub.state.type !== "completed";
-  const to = done ? doneStatus() : todoStatus();
-  if (!to) { toast(`Couldn't find a ${done ? "done" : "to-do"} status for this team`); render(); return; }
-  // The pane's copy shows the new status at once; the reload after the save confirms it.
-  const show = (st: SubIssue["state"]) => {
-    const d = details.get(parent.id);
-    if (d?.issue) d.issue = { ...d.issue, sub_issues: d.issue.sub_issues.map((x) => (x.id === sub.id ? { ...x, state: st } : x)) };
-  };
-  const reload = async () => { loadDetail(parent.id, true); await loadIssues().catch(() => undefined); };
-  if (done) state.briefAt = 0;               // the wrap-up's "done today" should include it
-  state.busy.add(key);
-  show(to);
-  render();
-  try {
-    await api.editIssue(sub.id, { state_id: to.id });
-    offerUndo(`${sub.identifier} ${done ? "done" : `moved to ${to.name}`}`, `${sub.identifier} back to ${sub.state.name}`, async () => {
-      await api.editIssue(sub.id, { state_id: sub.state.id });
-      show(sub.state);
-      await reload();
-    });
-    await reload();
-  } catch (e) {
-    show(sub.state);
-    fail(e);
-  } finally {
-    state.busy.delete(key);
-    render();
-  }
-}
-
-// The comment or sub-issue box the last post emptied: ⌘Z there undoes that post, until you type in it.
-let emptiedBy: { key: string; entry: UndoEntry } | null = null;
-
-function forgetPost(key: string) {
-  if (emptiedBy?.key === key) emptiedBy = null;
-}
-
-/** The post ⌘Z in ``el`` should undo: ``el`` is the box that post emptied, still empty, and the post
- *  can still be undone. */
-function postToUndoIn(el: Element | null): UndoEntry | null {
-  if (!emptiedBy || !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return null;
-  if (el.dataset.edit !== emptiedBy.key || el.value !== "" || !undoStack.includes(emptiedBy.entry)) return null;
-  return emptiedBy.entry;
-}
-
-async function addSubIssue(parent: IssuePreview) {
-  const key = `${parent.id}:sub`;
-  const title = paneDrafts.get(key)?.trim();
-  if (!title || state.busy.has(key)) return;
-  state.busy.add(key);
-  render();
-  try {
-    const sub = await api.addSubIssue(parent.id, title);
-    paneDrafts.delete(key);
-    state.issues = [sub, ...state.issues];
-    loadDetail(parent.id, true);
-    emptiedBy = { key, entry: offerUndo(`${sub.identifier} added under ${parent.identifier}`, `${sub.identifier} deleted`, async () => {
-      await api.deleteIssue(sub.id);
-      state.issues = state.issues.filter((x) => x.id !== sub.id);
-      loadDetail(parent.id, true);
-    }) };
-  } catch (e) {
-    fail(e);                                   // the title stays in the box
-  } finally {
-    state.busy.delete(key);
-    render();
-  }
-}
-
-const COMMENT_MAX = 2000;      // the backend's limit, the same as an Inbox comment
-
-/** A box to comment as you (⇧C; ⌘↵ posts), then the latest comments, newest first. */
-function commentsSection(i: IssuePreview): HTMLElement {
-  const key = `${i.id}:comment`;
-  const busy = state.busy.has(key);
-  const count = h("span", { class: "small" });
-  const showCount = (text: string) => {
-    const room = COMMENT_MAX - text.trim().length;
-    count.textContent = room <= 200 ? String(room) : "";
-    count.className = `small ${room < 0 ? "late" : "muted"}`;
-  };
-  const draft = paneDrafts.get(key) ?? "";
-  showCount(draft);
-  const shown = [...i.comments].sort((x, y) => (y.created_at ?? "").localeCompare(x.created_at ?? ""));
-  const older = i.comment_count - shown.length;
-  return h("section", {}, h("h4", {}, `Comments${i.comment_count ? ` · ${i.comment_count}` : ""}`),
-    h("div", { class: "comment-box" },
-      h("textarea", {
-        class: "comment-input", rows: 2, placeholder: "Comment…", value: draft, readOnly: busy,
-        "aria-label": `Comment on ${i.identifier}`, "data-pane": "comment", "data-edit": key,
-        oninput: (e: Event) => {
-          const v = (e.target as HTMLTextAreaElement).value;
-          paneDrafts.set(key, v);
-          forgetPost(key);
-          showCount(v);
-        },
-        onkeydown: (e: KeyboardEvent) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void postComment(i); }
-        },
-      }),
-      h("span", { class: "comment-hint muted small" }, busy ? "Posting…" : "⌘↵ posts it, as you", count)),
-    shown.length ? h("div", {}, ...shown.map((c) => h("div", { class: "tl-comment" },
-      h("span", {}, h("b", {}, c.author), " ", h("span", { class: "muted small" }, c.created_at ? when(c.created_at) : "")),
-      h("div", { class: "tl-comment-body md" }, ...renderMarkdown(c.body, { image: linearImageNode }))))) : "",
-    older > 0 ? link(`${older} older in Linear ↗`, i.url, "link small") : "");
-}
-
-async function postComment(i: IssuePreview) {
-  const key = `${i.id}:comment`;
-  const body = paneDrafts.get(key)?.trim();
-  if (!body || body.length > COMMENT_MAX || state.busy.has(key)) return;
-  state.busy.add(key);
-  render();
-  try {
-    const { id } = await api.addComment(i.id, body);
-    paneDrafts.delete(key);
-    loadDetail(i.id, true);
-    emptiedBy = { key, entry: offerUndo(`Comment posted on ${i.identifier}`, `comment on ${i.identifier} deleted`, async () => {
-      await api.deleteComment(id);
-      if (!paneDrafts.get(key)?.trim()) paneDrafts.set(key, body);   // back in the box, to fix and post again
-      loadDetail(i.id, true);
-    }) };
-  } catch (e) {
-    fail(e);                                   // the text stays in the box
-  } finally {
-    state.busy.delete(key);
-    render();
-  }
-}
-
-/** e, ⇧E, ⇧S and ⇧C in Today, Client and Dev: rename, edit the description, add a sub-issue, comment. */
-const PANE_KEYS: Record<string, string> = { e: "title", E: "description", S: "sub", C: "comment" };
-
-function paneKey(key: string): boolean {
-  const target = PANE_KEYS[key];
-  const el = target ? document.querySelector<HTMLElement>(`:is(.td-st, .tl-pane) [data-pane="${target}"]`) : null;
-  if (!el) return false;
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.focus();
-  else el.click();
-  return true;
 }
 
 // ---- Today: one list, read in three moments ----------------------------------------------------
@@ -3650,6 +3195,11 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
   }, `pushed ${s.count}×`);
 }
 
+setupPane({
+  render, editIssue, offerUndo, toast, fail, loadIssues, afterPointer, editing, doneStatus, todoStatus, state,
+  canUndo: (entry) => undoStack.includes(entry),
+});
+
 const settingsCtx: SettingsCtx = {
   rerender: () => { if (state.tab === "settings") { const y = window.scrollY; render(); window.scrollTo(0, y); } },
   themeChanged: () => renderHeader(),
@@ -3694,9 +3244,7 @@ function render() {
       : state.tab === "dev" && state.pickedProject ? projectView(state.pickedProject)
       : byStatus ? statusView(state.tab as "client" | "dev")
       : listView(state.tab as "client" | "dev");
-  const snapshot = snapshotPane();
-  rebuilding = true;
-  try {
+  rebuildKeepingPane(() => {
     main.replaceChildren(
       head,
       state.error ? h("div", { class: "banner error" }, state.error) : "",
@@ -3707,10 +3255,7 @@ function render() {
       state.tab === "inbox" ? captureBar : "",
       h("div", { class: "content" }, view()),
     );
-  } finally {
-    rebuilding = false;
-  }
-  restorePane(snapshot);
+  });
 }
 
 // ---- on-demand capture ----------------------------------------------------------------------
