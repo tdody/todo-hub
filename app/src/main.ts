@@ -2231,7 +2231,7 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
     })) : "",
     h("input", {
       class: "sub-add", placeholder: "+ Add sub-issue", maxLength: 200, value: paneDrafts.get(key) ?? "", readOnly: state.busy.has(key),
-      "aria-label": `Add a sub-issue to ${i.identifier}`, "data-pane": "sub", "data-edit": key,
+      "aria-label": `Add sub-issue to ${i.identifier}`, "data-pane": "sub", "data-edit": key,
       oninput: (e: Event) => { paneDrafts.set(key, (e.target as HTMLInputElement).value); forgetPost(key); },
       onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void addSubIssue(i); } },
     }));
