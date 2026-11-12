@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from todohub import tools
-from todohub.api import create_app, issue_description
+from todohub.api import PREVIEW_DESCRIPTION, create_app, issue_description
 from todohub.config import load_settings
 from todohub.db import DB
 from conftest import FakeLinear, make_issue
@@ -570,6 +570,19 @@ def test_issue_preview(env):
     assert p["description"].startswith("Rebin the grades") and p["comment_count"] == 4
     assert [c["body"] for c in p["comments"]] == ["note 2", "note 3", "note 4"]     # latest three, oldest first
     assert client.get("/api/issues/ENG-404/preview").status_code == 502
+
+
+@pytest.mark.parametrize("raw, truncated", [
+    ("x" * PREVIEW_DESCRIPTION, False),
+    ("x" * (PREVIEW_DESCRIPTION + 1), True),
+    ("  " + "x" * PREVIEW_DESCRIPTION + "\n\n", False),      # surrounding whitespace doesn't count
+])
+def test_issue_preview_says_when_the_description_was_cut(env, raw, truncated):
+    client, _, fake, _ = env
+    preview = fake.issue_preview
+    fake.issue_preview = lambda ident: {**preview(ident), "description": raw}
+    p = client.get("/api/issues/ENG-1/preview").json()
+    assert (p["description_truncated"], len(p["description"])) == (truncated, PREVIEW_DESCRIPTION)
 
 
 def test_issue_preview_lists_sub_issues(env):
