@@ -235,7 +235,7 @@ export interface Meta {
   projects: string[];
   priorities: { value: number; name: string }[];
   sources: Source[];
-  todo_state: string;
+  todo_state: string | null;      // the status a new or reopened sub-issue gets; null if the team has none
 }
 
 export interface SourceStatus {

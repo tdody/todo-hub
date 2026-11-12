@@ -259,8 +259,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return found["id"]
 
     def todo_status(states: list[dict]) -> dict | None:
-        """The status a new or reopened to-do gets: the one named ``todo_state``, else the team's first
-        not-started one. The app's untick follows the same rule."""
+        """The status a new or reopened sub-issue gets: the one named ``todo_state``, else the team's first
+        not-started one."""
         return next((s for s in states if s["name"] == settings.todo_state), None) or \
             next((s for s in states if s["type"] == "unstarted"), None)
 
@@ -311,7 +311,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 {"value": 2, "name": "High"}, {"value": 3, "name": "Medium"}, {"value": 4, "name": "Low"},
             ],
             "sources": settings.enabled_sources(),
-            "todo_state": settings.todo_state,
+            "todo_state": (todo_status(m.states) or {}).get("name"),
         }
 
     @app.get("/api/daylight", dependencies=auth)
