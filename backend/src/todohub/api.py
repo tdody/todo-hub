@@ -31,7 +31,7 @@ from .categories import categorize
 from .config import (SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings,
                      get_linear_key, load_settings, read_overrides, source_state, write_overrides)
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, is_linear_upload, shape_issue
+from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
 from .selfcmd import self_command
 from .sweep import next_working_day
 from .tools import ToolError
@@ -133,10 +133,22 @@ class IssueEdit(BaseModel):
     state_id: str | None = None
     priority: int | None = Field(default=None, ge=0, le=4)
     due_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    title: str | None = Field(default=None, max_length=200)
+    description: str | None = None      # Markdown; empty or null clears it
+    client: str | None = None           # a client label's name; null makes it a Dev issue
+    project: str | None = None          # an open project's name; null takes it out of its project
 
 
 class RestoreIn(BaseModel):
     today_position: int | None = Field(default=None, ge=0)
+
+
+class CommentIn(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class SubIssueIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
 
 
 PREVIEW_DESCRIPTION = 6000   # characters of an issue's description in the reading pane
@@ -237,6 +249,40 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 db.set_meta("projects", [p["name"] for p in cache["meta"].projects])
             return cache["meta"]
 
+    def id_by_name(items: list[dict], name: str | None, what: str) -> str | None:
+        """The id of the client label or project called ``name`` (None for none); a 400 if Linear has none."""
+        if name is None:
+            return None
+        found = next((x for x in items if x["name"] == name), None)
+        if not found:
+            raise HTTPException(400, f"No {what} {name!r} in Linear")
+        return found["id"]
+
+    def todo_status(states: list[dict]) -> dict | None:
+        """The status a new or reopened sub-issue gets: the one named ``todo_state``, else the team's first
+        not-started one."""
+        return next((s for s in states if s["name"] == settings.todo_state), None) or \
+            next((s for s in states if s["type"] == "unstarted"), None)
+
+    def sub_issue_team(l: Linear, m: TeamMeta, parent: dict) -> tuple[str, str]:
+        """The team a sub-issue of ``parent`` goes in (the parent's, so its project fits) and the id of its Todo
+        status there (todo_status). Raises LinearError when that team has no not-started status."""
+        team_id = (parent.get("team") or {}).get("id") or m.team_id
+        todo = todo_status(m.states if team_id == m.team_id else l.team_states(team_id))
+        if not todo:
+            raise LinearError("the parent's team has no not-started status")
+        return team_id, todo["id"]
+
+    def create_sub_issue(l: Linear, m: TeamMeta, parent: dict, title: str, *, team_id: str, state_id: str,
+                         label_ids: list[str], priority: int, due_date: str | None = None) -> dict:
+        """A sub-issue under ``parent``, an issue already in Linear: in ``team_id`` and ``state_id`` (from
+        sub_issue_team) and the parent's project, assigned to you."""
+        return l.create_issue(
+            team_id=team_id, title=title, description=f"Part of {parent['identifier']}: {parent['title']}",
+            assignee_id=m.viewer_id, state_id=state_id, priority=priority, due_date=due_date,
+            label_ids=label_ids, parent_id=parent["id"], project_id=(parent.get("project") or {}).get("id"),
+        )
+
     def candidate_or_404(cid: int) -> dict:
         c = db.get_candidate(cid)
         if not c:
@@ -265,6 +311,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 {"value": 2, "name": "High"}, {"value": 3, "name": "Medium"}, {"value": 4, "name": "Low"},
             ],
             "sources": settings.enabled_sources(),
+            "todo_state": (todo_status(m.states) or {}).get("name"),
         }
 
     @app.get("/api/daylight", dependencies=auth)
@@ -583,32 +630,24 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                     warnings.append(f"Link not attached ({link['title']}): {exc}")
 
             if c["subtasks"]:
-                team_id = (target.get("team") or {}).get("id") or m.team_id
-                try:
-                    states = m.states if team_id == m.team_id else client.team_states(team_id)
-                except LinearError:
-                    states = []
-                todo = next((s for s in states if s["name"] == settings.todo_state), None) or \
-                    next((s for s in states if s["type"] == "unstarted"), None)
                 label_ids = [l["id"] for l in m.client_labels if l["name"] == c["client_label"]]
-                for sub in c["subtasks"]:
-                    if not todo:
-                        warnings.append(f"Subtask not created ({sub['title']}): no Todo status on that team")
-                        continue
-                    try:
-                        child = client.create_issue(
-                            team_id=team_id, title=sub["title"],
-                            description=f"Part of {target['identifier']}: {target['title']}",
-                            assignee_id=m.viewer_id, state_id=todo["id"],
-                            priority=c["priority"] or target.get("priority") or settings.default_priority,
-                            due_date=sub.get("due_date"), label_ids=label_ids, parent_id=target["id"],
-                            project_id=(target.get("project") or {}).get("id"),
-                        )
-                        created.append(shape_issue(child, settings))
-                        undo["issues"].append(child["id"])
-                        db.set_undo(cid, undo)
-                    except LinearError as exc:
-                        warnings.append(f"Subtask not created ({sub['title']}): {exc}")
+                priority = c["priority"] or target.get("priority") or settings.default_priority
+                try:
+                    team_id, state_id = sub_issue_team(client, m, target)      # one status read for them all
+                except LinearError as exc:
+                    warnings += [f"Subtask not created ({sub['title']}): {exc}" for sub in c["subtasks"]]
+                else:
+                    for sub in c["subtasks"]:
+                        try:
+                            child = create_sub_issue(
+                                client, m, target, sub["title"], team_id=team_id, state_id=state_id,
+                                label_ids=label_ids, priority=priority, due_date=sub.get("due_date"),
+                            )
+                            created.append(shape_issue(child, settings))
+                            undo["issues"].append(child["id"])
+                            db.set_undo(cid, undo)
+                        except LinearError as exc:
+                            warnings.append(f"Subtask not created ({sub['title']}): {exc}")
         finally:
             client.close()
         return {"candidate": updated, "issue": shape_issue(target, settings), "subtasks": created,
@@ -813,15 +852,17 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.get("/api/issues/{ident}/preview", dependencies=auth)
     def issue_preview(ident: str) -> dict:
-        """A quick look at an issue: its description and latest comments."""
+        """A quick look at an issue: its description, latest comments and sub-issues."""
         raw = linear_call(lambda l: l.issue_preview(ident))
         nodes = sorted((raw.get("comments") or {}).get("nodes", []), key=lambda n: n.get("createdAt") or "")
         description = (raw.get("description") or "").strip()
+        own_team = team_meta().team_id
         return {
             **shape_issue(raw, settings),
             "assignee": (raw.get("assignee") or {}).get("name"),
             "created_at": raw.get("createdAt"),
-            # Long enough to read the whole thing in the app's pane (rendered as Markdown there).
+            # Long enough to read the whole thing in the app's pane (rendered as Markdown there). One cut
+            # short isn't editable in the app: saving the cut text would drop the rest in Linear.
             "description": description[:PREVIEW_DESCRIPTION],
             "description_truncated": len(description) > PREVIEW_DESCRIPTION,
             "comment_count": len(nodes),
@@ -829,6 +870,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 {"author": (n.get("user") or {}).get("name") or "Someone", "created_at": n.get("createdAt"),
                  "body": (n.get("body") or "").strip()[:PREVIEW_COMMENT]}
                 for n in nodes[-3:]
+            ],
+            # Done ones too. A sub-issue in another team has statuses the app doesn't know, so the
+            # pane shows its status without a checkbox.
+            "sub_issues": [
+                {**shape_issue(n, settings), "assignee": (n.get("assignee") or {}).get("name"),
+                 "own_team": (n.get("team") or {}).get("id") == own_team}
+                for n in sorted((raw.get("children") or {}).get("nodes", []), key=lambda n: n.get("createdAt") or "")
             ],
         }
 
@@ -875,8 +923,33 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             changes["priority"] = edit.priority or 0
         if "due_date" in fields:
             changes["dueDate"] = edit.due_date   # None clears it
-        issue = linear_call(lambda l: l.update_issue(issue_id, changes))
-        return shape_issue(issue, settings)
+        if "title" in fields:
+            title = (edit.title or "").strip()
+            if not title:
+                raise HTTPException(400, "The title can't be empty")
+            changes["title"] = title
+        if "description" in fields:
+            changes["description"] = edit.description or ""
+        if "project" in fields:
+            changes["projectId"] = id_by_name(team_meta().projects, edit.project, "open project")
+        new_client = id_by_name(team_meta().client_labels, edit.client, "client label") if "client" in fields else None
+
+        def run(l: Linear) -> dict:
+            labels: dict = {}
+            # A client change swaps the label in the client group and keeps every other label.
+            if "client" in fields:
+                current = l.get_issue(issue_id)
+                old = [x["id"] for x in client_labels_of(current, settings.client_label_group)]
+                new = [new_client] if new_client else []
+                if removed := [x for x in old if x not in new]:
+                    labels["removedLabelIds"] = removed
+                if added := [x for x in new if x not in old]:
+                    labels["addedLabelIds"] = added
+                if not changes and not labels:      # it already has that client: nothing to send
+                    return current
+            return l.update_issue(issue_id, changes | labels)
+
+        return shape_issue(linear_call(run), settings)
 
     @app.delete("/api/issues/{issue_id}", dependencies=auth)
     def delete_issue(issue_id: str) -> dict:
@@ -903,6 +976,37 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             ids.insert(min(body.today_position, len(ids)), issue_id)
             db.set_today(day, ids)
         return shape_issue(issue, settings)
+
+    @app.post("/api/issues/{issue_id}/comments", dependencies=auth)
+    def add_comment(issue_id: str, body: CommentIn) -> dict:
+        """Post a comment as you. Returns its id, so Undo can delete it."""
+        text = body.body.strip()
+        if not text:
+            raise HTTPException(400, "The comment is empty")
+        return {"id": linear_call(lambda l: l.create_comment(issue_id, text))}
+
+    @app.delete("/api/comments/{comment_id}", dependencies=auth)
+    def delete_comment(comment_id: str) -> dict:
+        linear_call(lambda l: l.delete_comment(comment_id))
+        return {"deleted": comment_id}
+
+    @app.post("/api/issues/{issue_id}/sub-issues", dependencies=auth)
+    def add_sub_issue(issue_id: str, body: SubIssueIn) -> dict:
+        """A sub-issue made as merging an Inbox task makes them (create_sub_issue), with the parent's client label
+        and priority. Undo deletes it like any issue."""
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(400, "The title can't be empty")
+        m = team_meta()
+
+        def run(l: Linear) -> dict:
+            parent = l.get_issue(issue_id)
+            team_id, state_id = sub_issue_team(l, m, parent)
+            return create_sub_issue(l, m, parent, title, team_id=team_id, state_id=state_id,
+                                    priority=parent["priority"],
+                                    label_ids=[x["id"] for x in client_labels_of(parent, settings.client_label_group)])
+
+        return shape_issue(linear_call(run), settings)
 
     # ---- sweeps -----------------------------------------------------------------------
     @app.get("/api/runs/latest", dependencies=auth)

@@ -2,9 +2,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from todohub import tools
-from todohub.api import create_app, issue_description
+from todohub.api import PREVIEW_DESCRIPTION, create_app, issue_description
 from todohub.config import load_settings
 from todohub.db import DB
+from todohub.linear import LinearError
 from conftest import FakeLinear, make_issue
 
 
@@ -99,10 +100,118 @@ def test_issue_lists_and_edits(env):
     assert client.patch("/api/issues/id-ENG-2", json={"due_date": "soon"}).status_code == 422
 
 
+def test_edit_issue_title_and_description(env):
+    client, _, fake, _ = env
+    r = client.patch("/api/issues/id-ENG-2", json={"title": "  Fix the report copy "})
+    assert r.status_code == 200 and r.json()["title"] == "Fix the report copy"     # the app shows what Linear returns
+    assert fake.updated[-1] == ("id-ENG-2", {"title": "Fix the report copy"})
+    assert client.patch("/api/issues/id-ENG-2", json={"description": "## Steps\n\n- one"}).status_code == 200
+    assert fake.updated[-1] == ("id-ENG-2", {"description": "## Steps\n\n- one"})
+    client.patch("/api/issues/id-ENG-2", json={"description": None})
+    assert fake.updated[-1] == ("id-ENG-2", {"description": ""})
+    r = client.patch("/api/issues/id-ENG-2", json={"title": "   "})
+    assert r.status_code == 400 and r.json()["error"] == "The title can't be empty"
+    assert client.patch("/api/issues/id-ENG-2", json={"title": "x" * 201}).status_code == 422
+    assert len(fake.updated) == 3
+
+
+def test_edit_issue_client_swaps_only_the_client_label(env):
+    client, _, fake, _ = env
+    r = client.patch("/api/issues/id-ENG-1", json={"client": "Initech & Co"})
+    assert r.status_code == 200, r.text
+    # ENG-1 has Bug and Globex; only Globex (in the client group) goes.
+    assert fake.updated[-1] == ("id-ENG-1", {"removedLabelIds": ["l-Globex"], "addedLabelIds": ["l-Initech & Co"]})
+    assert (r.json()["client"], r.json()["list"]) == ("Initech & Co", "client")   # the app re-sorts its lists from this
+    r = client.patch("/api/issues/id-ENG-1", json={"client": None})      # to Dev
+    assert fake.updated[-1] == ("id-ENG-1", {"removedLabelIds": ["l-Globex"]})
+    assert (r.json()["client"], r.json()["list"]) == (None, "dev")
+    client.patch("/api/issues/id-ENG-2", json={"client": "Globex"})      # from Dev
+    assert fake.updated[-1] == ("id-ENG-2", {"addedLabelIds": ["l-Globex"]})
+    r = client.patch("/api/issues/id-ENG-1", json={"client": "Globex"})  # already Globex: nothing to send
+    assert r.status_code == 200 and r.json()["client"] == "Globex"
+    r = client.patch("/api/issues/id-ENG-1", json={"client": "Vandelay"})
+    assert r.status_code == 400 and r.json()["error"] == "No client label 'Vandelay' in Linear"
+    assert len(fake.updated) == 3
+
+
+def test_edit_issue_project(env):
+    client, _, fake, _ = env
+    r = client.patch("/api/issues/id-ENG-2", json={"project": "Globex"})
+    assert fake.updated[-1] == ("id-ENG-2", {"projectId": "p-globex"}) and r.json()["project"] == "Globex"
+    client.patch("/api/issues/id-ENG-2", json={"project": None})
+    assert fake.updated[-1] == ("id-ENG-2", {"projectId": None})
+    r = client.patch("/api/issues/id-ENG-2", json={"project": "Old thing"})
+    assert r.status_code == 400 and r.json()["error"] == "No open project 'Old thing' in Linear"
+    assert len(fake.updated) == 2
+
+
+def test_post_and_delete_comment(env):
+    client, _, fake, _ = env
+    r = client.post("/api/issues/id-ENG-1/comments", json={"body": "  Sent the file to Sam.  "})
+    assert r.status_code == 200 and r.json() == {"id": "comment-1"}
+    assert fake.comments == [("id-ENG-1", "Sent the file to Sam.")]
+    assert client.delete("/api/comments/comment-1").json() == {"deleted": "comment-1"}
+    assert fake.deleted_comments == ["comment-1"]
+    r = client.post("/api/issues/id-ENG-1/comments", json={"body": "   "})
+    assert r.status_code == 400 and r.json()["error"] == "The comment is empty"
+    assert client.post("/api/issues/id-ENG-1/comments", json={"body": "x" * 2001}).status_code == 422
+    assert len(fake.comments) == 1
+
+
+def test_add_sub_issue_takes_the_parents_client_project_and_priority(env):
+    client, _, fake, _ = env
+    fake.issues[0].update(priority=2, project={"id": "p-globex", "name": "Globex"})
+    r = client.post("/api/issues/id-ENG-1/sub-issues", json={"title": " Check the CSV "})
+    assert r.status_code == 200, r.text
+    assert r.json()["parent"]["id"] == "id-ENG-1"
+    assert fake.created[-1] == {
+        "team_id": "team-eng", "title": "Check the CSV", "description": "Part of ENG-1: Rebin Globex grades",
+        "assignee_id": "me", "state_id": "s-Todo", "priority": 2, "due_date": None,
+        "label_ids": ["l-Globex"], "parent_id": "id-ENG-1", "project_id": "p-globex",
+    }
+    # a Dev parent without a project: no labels, no project
+    client.post("/api/issues/id-ENG-2/sub-issues", json={"title": "Read the logs"})
+    assert fake.created[-1]["label_ids"] == [] and fake.created[-1]["project_id"] is None
+    r = client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "   "})
+    assert r.status_code == 400 and r.json()["error"] == "The title can't be empty"
+    assert client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "x" * 201}).status_code == 422
+    assert len(fake.created) == 2
+
+
+def test_sub_issue_of_another_teams_issue_goes_in_that_team(env):
+    client, _, fake, _ = env
+    fake.issues[0].update(team={"id": "team-ops"}, project={"id": "p-ops", "name": "Ops"})
+    fake.team_states = lambda team_id: [{"id": "ops-later", "name": "Later", "type": "backlog", "position": 0},
+                                        {"id": "ops-next", "name": "Next", "type": "unstarted", "position": 1}]
+    assert client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "Check the CSV"}).status_code == 200
+    made = fake.created[-1]
+    assert (made["team_id"], made["state_id"], made["project_id"]) == ("team-ops", "ops-next", "p-ops")
+    fake.team_states = lambda team_id: [{"id": "ops-later", "name": "Later", "type": "backlog", "position": 0}]
+    r = client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "Check the CSV"})
+    assert r.status_code == 502 and "no not-started status" in r.json()["error"]
+
+
+@pytest.mark.parametrize("todo_state, expected", [
+    ("Pending", "Pending"),     # the setting names a not-started status: it wins over the first one
+    ("Ready", "Todo"),          # no status by that name: the team's first not-started one
+])
+def test_sub_issue_status_follows_the_todo_setting(todo_state, expected):
+    """A new sub-issue gets it, and /api/meta names it for the app's untick."""
+    settings = load_settings()
+    settings.todo_state = todo_state
+    fake = FakeLinear()
+    client = TestClient(create_app(settings, DB(settings.db_path), linear_factory=lambda: fake,
+                                   sweep_launcher=lambda args: None))
+    assert client.post("/api/issues/id-ENG-1/sub-issues", json={"title": "Check the CSV"}).status_code == 200
+    assert fake.created[-1]["state_id"] == f"s-{expected}"
+    assert client.get("/api/meta").json()["todo_state"] == expected
+
+
 def test_meta_and_sweep(env):
     client, db, _, launched = env
     m = client.get("/api/meta").json()
     assert [s["name"] for s in m["states"]] == ["Backlog", "Todo", "Pending", "Done"]
+    assert m["todo_state"] == "Todo"
     assert m["sources"] == ["slack", "gmail", "grain", "calendar", "hubspot", "linear", "github"]
     assert client.post("/api/sweep").status_code == 202 and launched == [["--trigger", "manual"]]
     assert client.post("/api/sweep", json={"source": "fax"}).status_code == 400
@@ -452,6 +561,38 @@ def test_merge_adds_comment_links_and_subtasks_then_undoes(env):
     assert r.json()["candidate"]["status"] == "pending"
 
 
+def test_merge_sub_issues_follow_the_target(env):
+    client, db, fake, _ = env
+    dup_env(db)
+    fake.issues[0].update(team={"id": "team-ops"}, project={"id": "p-ops", "name": "Ops"})
+    reads = []
+
+    def ops_states(team_id):
+        reads.append(team_id)
+        return [{"id": "ops-next", "name": "Next", "type": "unstarted", "position": 1}]
+    fake.team_states = ops_states
+    cid = seed(db, title="Send Jordan the table", possible_duplicate="ENG-1", priority=2,
+               subtasks=[{"title": "Export the table", "due_date": "2026-11-12"}, {"title": "Send it"}])
+    r = client.post(f"/api/candidates/{cid}/merge")
+    assert r.status_code == 200, r.text
+    made = fake.created[0]
+    assert (made["team_id"], made["state_id"], made["project_id"]) == ("team-ops", "ops-next", "p-ops")
+    assert (made["label_ids"], made["priority"], made["due_date"]) == (["l-Initech & Co"], 2, "2026-11-12")
+    assert [x["title"] for x in fake.created] == ["Export the table", "Send it"]
+    assert reads == ["team-ops"]          # the target team's statuses are read once, not once per subtask
+
+    def unreachable(team_id):
+        raise LinearError("Can't reach Linear")
+    fake.team_states = unreachable
+    cid = seed(db, source_id="C1:z", title="Another", possible_duplicate="ENG-1",
+               subtasks=[{"title": "Export the table"}, {"title": "Send it"}])
+    r = client.post(f"/api/candidates/{cid}/merge")
+    assert r.status_code == 200, r.text
+    assert r.json()["warnings"] == ["Subtask not created (Export the table): Can't reach Linear",
+                                    "Subtask not created (Send it): Can't reach Linear"]
+    assert len(fake.created) == 2
+
+
 def test_merge_needs_a_flagged_duplicate(env):
     client, db, fake, _ = env
     cid = seed(db)
@@ -467,6 +608,33 @@ def test_issue_preview(env):
     assert p["description"].startswith("Rebin the grades") and p["comment_count"] == 4
     assert [c["body"] for c in p["comments"]] == ["note 2", "note 3", "note 4"]     # latest three, oldest first
     assert client.get("/api/issues/ENG-404/preview").status_code == 502
+
+
+@pytest.mark.parametrize("raw, truncated", [
+    ("x" * PREVIEW_DESCRIPTION, False),
+    ("x" * (PREVIEW_DESCRIPTION + 1), True),
+    ("  " + "x" * PREVIEW_DESCRIPTION + "\n\n", False),      # surrounding whitespace doesn't count
+])
+def test_issue_preview_says_when_the_description_was_cut(env, raw, truncated):
+    client, _, fake, _ = env
+    preview = fake.issue_preview
+    fake.issue_preview = lambda ident: {**preview(ident), "description": raw}
+    p = client.get("/api/issues/ENG-1/preview").json()
+    assert (p["description_truncated"], len(p["description"])) == (truncated, PREVIEW_DESCRIPTION)
+
+
+def test_issue_preview_lists_sub_issues(env):
+    client, _, fake, _ = env
+    parent = {"id": "id-ENG-1", "identifier": "ENG-1", "title": "Rebin Globex grades"}
+    mine = make_issue("ENG-5", "Check the CSV", state="Done")
+    mine.update(parent=parent, team={"id": "team-eng"}, assignee={"name": "Sam"}, createdAt="2026-11-05T10:00:00Z")
+    other = make_issue("OPS-7", "Rotate the key")
+    other.update(parent=parent, team={"id": "team-ops"}, createdAt="2026-11-04T10:00:00Z")
+    fake.issues += [mine, other]
+    subs = client.get("/api/issues/ENG-1/preview").json()["sub_issues"]
+    assert [(s["identifier"], s["state"]["name"], s["assignee"], s["own_team"]) for s in subs] == [
+        ("OPS-7", "Todo", None, False), ("ENG-5", "Done", "Sam", True)]
+    assert client.get("/api/issues/ENG-2/preview").json()["sub_issues"] == []
 
 
 # ---- reply drafts -------------------------------------------------------------------------------

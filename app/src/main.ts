@@ -1,8 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api, ApiError, linearImage, waitForBackend } from "./api";
+import { api, ApiError, waitForBackend } from "./api";
 import { h, link, modal, pageHead, svg } from "./dom";
 import type { Child } from "./dom";
-import { renderMarkdown } from "./markdown";
 import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
@@ -11,9 +10,11 @@ import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";
 import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskAvatar } from "./avatars";
 import type { Category } from "./avatars";
+import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues";
+import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
 
 applyTheme();
-import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
+import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
 
 type Tab = "inbox" | "today" | "client" | "dev" | "insights" | "settings";
 
@@ -101,23 +102,6 @@ function savePref(key: string, value: string) {
 }
 
 // ---- formatting -----------------------------------------------------------------------------
-function when(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const today = new Date();
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (d.toDateString() === today.toDateString()) return `Today ${time}`;
-  const y = new Date(today);
-  y.setDate(today.getDate() - 1);
-  if (d.toDateString() === y.toDateString()) return `Yesterday ${time}`;
-  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + ` ${time}`;
-}
-
-function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function dueClass(due: string | null): string {
   if (!due) return "";
   const today = localToday();
@@ -154,7 +138,7 @@ interface ToastAction { label: string; run: () => void; kbd?: string }
 
 function toast(message: string, action?: ToastAction | ToastAction[], error = false, ms?: number): HTMLElement {
   const box = document.querySelector(".toasts")!;
-  const t = h("div", { class: `toast${error ? " error" : ""}` }, h("span", {}, message));
+  const t = h("div", { class: `toast${error ? " error" : ""}`, role: error ? "alert" : null }, h("span", {}, message));
   for (const a of action ? [action].flat() : []) {
     t.append(h("button", { class: "ghost", onclick: () => { a.run(); t.remove(); } },
       a.label, a.kbd ? h("kbd", {}, a.kbd) : ""));
@@ -167,25 +151,30 @@ function toast(message: string, action?: ToastAction | ToastAction[], error = fa
 // ---- undo -----------------------------------------------------------------------------------
 // Every action that changes Linear or takes a card out of the Inbox offers Undo in its banner,
 // and ⌘Z undoes the most recent ones, one at a time, for 10 minutes.
-interface UndoEntry { done: string; run: () => Promise<void>; at: number; banner?: HTMLElement }
+export interface UndoEntry { done: string; run: () => Promise<void>; at: number; banner?: HTMLElement }
 const undoStack: UndoEntry[] = [];
 const UNDO_FOR_MS = 10 * 60_000;
 let undoing = false;
 
 /** Show the banner for an action and remember how to reverse it. */
-function offerUndo(message: string, done: string, run: () => Promise<void>, extra?: ToastAction) {
+function offerUndo(message: string, done: string, run: () => Promise<void>, extra?: ToastAction): UndoEntry {
   const entry: UndoEntry = { done, run, at: Date.now() };
   undoStack.push(entry);
   if (undoStack.length > 20) undoStack.shift();
   entry.banner = toast(message, [...(extra ? [extra] : []), { label: "Undo", kbd: "⌘Z", run: () => void undo(entry) }],
     false, 9000);
+  return entry;
+}
+
+/** ⌘Z or its banner can still undo ``entry``: it's on the stack and less than 10 minutes old. */
+function canUndo(entry: UndoEntry): boolean {
+  return undoStack.includes(entry) && Date.now() - entry.at < UNDO_FOR_MS;
 }
 
 async function undo(entry?: UndoEntry) {
   if (undoing) return;
-  const fresh = (e: UndoEntry) => Date.now() - e.at < UNDO_FOR_MS;
-  entry = entry ?? [...undoStack].reverse().find(fresh);
-  if (!entry || !fresh(entry)) { toast("Nothing to undo"); return; }
+  entry = entry ?? [...undoStack].reverse().find(canUndo);
+  if (!entry || !canUndo(entry)) { toast("Nothing to undo"); return; }
   undoStack.splice(undoStack.indexOf(entry), 1);
   entry.banner?.remove();
   undoing = true;
@@ -262,7 +251,7 @@ async function loadRun() {
  *  (A sweep can finish "ok" with one source down, e.g. an expired sign-in; the red dot is easy to miss.) */
 const FAIL_STREAK_ALERT = 2;
 function sourceAlerts() {
-  const day = isoDay(new Date());
+  const day = localToday();
   for (const o of state.run.source_overview ?? []) {
     if ((o.fail_streak ?? 0) < FAIL_STREAK_ALERT) continue;
     const name = SOURCE_NAME[o.source] ?? o.source;
@@ -448,43 +437,65 @@ async function drop(c: Candidate, reason: DropReason = "other") {
   }
 }
 
-async function editIssue(issue: Issue, change: Parameters<typeof api.editIssue>[1]) {
+/** Change an issue in Linear, with Undo. For a description edit ``issue`` is the pane's preview:
+ *  its text is what Undo puts back. Returns whether Linear took the change. ``rerender`` is false
+ *  when the caller shows the result itself. */
+function editIssue(issue: IssuePreview, change: IssueEdit, rerender?: boolean): Promise<boolean>;
+function editIssue(issue: Issue, change: Omit<IssueEdit, "description">, rerender?: boolean): Promise<boolean>;
+async function editIssue(issue: Issue | IssuePreview, change: IssueEdit, rerender = true): Promise<boolean> {
   try {
     const updated = await api.editIssue(issue.id, change);
     const status = state.meta?.states.find((s) => s.id === updated.state.id);
     const closed = closedType(status?.type ?? updated.state.type);
     state.issues = closed ? state.issues.filter((i) => i.id !== issue.id)
       : state.issues.map((i) => (i.id === issue.id ? updated : i));
+    if (change.description !== undefined) setDescription(issue.id, change.description);
     // The reverse change: put back whatever this edit replaced.
-    const before: Parameters<typeof api.editIssue>[1] = {};
+    const before: IssueEdit = {};
     if ("state_id" in change) before.state_id = issue.state.id;
     if ("priority" in change) before.priority = issue.priority;
     if ("due_date" in change) before.due_date = issue.due_date;
+    if ("title" in change) before.title = issue.title;
+    if ("client" in change) before.client = issue.client;
+    if ("project" in change) before.project = issue.project;
+    if ("description" in change && "description" in issue) before.description = issue.description;
     const what = "state_id" in change ? `moved to ${status?.name ?? updated.state.name}`
       : "priority" in change ? `priority set to ${priorityName(updated.priority)}`
+      : "title" in change ? "renamed"
+      : "description" in change ? "description saved"
+      : "client" in change ? `moved to ${updated.client ?? "Dev"}`
+      : "project" in change ? (updated.project ? `project set to ${updated.project}` : "project cleared")
       : updated.due_date ? `due ${updated.due_date}` : "due date cleared";
     offerUndo(`${issue.identifier} ${what}`, `${issue.identifier} change reverted`, async () => {
       const restored = await api.editIssue(issue.id, before);
       state.issues = state.issues.some((i) => i.id === issue.id)
         ? state.issues.map((i) => (i.id === issue.id ? restored : i))
         : [restored, ...state.issues];
+      if (before.description !== undefined) setDescription(issue.id, before.description);
     });
+    return true;
   } catch (e) {
     fail(e);
+    return false;
+  } finally {
+    if (rerender) render();
   }
-  render();
 }
 
 /** Delete an issue after a confirm: Linear moves it to its trash (restorable for 30 days there),
  *  it leaves the lists and Today here, and Undo / ⌘Z brings it back. */
 function confirmDelete(i: Issue) {
-  const subs = state.issues.filter((x) => x.parent?.id === i.id).length;
+  // The pane's list from Linear: every open sub-issue, not only yours.
+  const preview = details.get(i.id)?.issue;
+  const subs = preview?.sub_issues.filter(isOpen).length ?? 0;
+  const note = !preview ? "Its sub-issues haven't loaded here; check them in Linear afterwards."
+    : subs ? `It has ${subs} open sub-issue${subs === 1 ? "" : "s"}; check ${subs === 1 ? "it" : "them"} in Linear afterwards.` : "";
   const go = h("button", { class: "primary danger", onclick: () => { close(); void deleteIssue(i); } }, "Delete");
   const close = modal(`Delete ${i.identifier}?`, h("div", { class: "confirm-body" },
     h("p", {}, h("strong", {}, i.title)),
     h("p", { class: "muted small" }, "Linear moves it to its trash, where you can restore it for 30 days. "
       + "Undo here brings it back too."),
-    subs ? h("p", { class: "muted small" }, `It has ${subs} sub-issue${subs === 1 ? "" : "s"}; check ${subs === 1 ? "it" : "them"} in Linear afterwards.`) : ""),
+    note ? h("p", { class: "muted small" }, note) : ""),
     [h("button", { class: "ghost", onclick: () => close() }, "Cancel"), go]);
   go.focus();
 }
@@ -534,11 +545,6 @@ const PRIO_CLASS: Record<number, string> = { 1: "p-urgent", 2: "p-high", 3: "p-m
 /** Linear's order for statuses: by kind (backlog, not started, started, done, canceled,
  *  duplicate), then the team's own order within each kind. */
 const STATE_ORDER: Record<string, number> = { triage: 0, backlog: 1, unstarted: 2, started: 3, completed: 4, canceled: 5, duplicate: 6 };
-
-/** Done, canceled or duplicate: off the open lists. */
-function closedType(type: string): boolean {
-  return type === "completed" || type === "canceled" || type === "duplicate";
-}
 
 function statusClass(st: { name: string; type: string }): string {
   if (st.type === "backlog") return "s-backlog";
@@ -612,7 +618,9 @@ function priorityTag(p: number): HTMLElement | "" {
 
 
 function clientSelect(value: string | null, onChange: (v: string | null) => void) {
-  const labels = state.meta?.client_labels ?? [];
+  // A label newer than the loaded list (or none loaded) still shows as the issue's client.
+  const known = state.meta?.client_labels ?? [];
+  const labels = value && !known.includes(value) ? [value, ...known] : known;
   return quietSelect(h(
     "select",
     { class: "client", title: "Client label", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
@@ -622,7 +630,9 @@ function clientSelect(value: string | null, onChange: (v: string | null) => void
 }
 
 function projectSelect(value: string | null, onChange: (v: string | null) => void) {
-  const projects = state.meta?.projects ?? [];
+  // The list holds open projects only; an issue in a completed or canceled one still shows it.
+  const open = state.meta?.projects ?? [];
+  const projects = value && !open.includes(value) ? [value, ...open] : open;
   return quietSelect(h(
     "select",
     { class: "project", title: "Linear project", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
@@ -718,10 +728,6 @@ function subtaskEditor(c: Candidate, d: CandidateEdit): HTMLElement {
 }
 
 // ---- snooze, selection, bulk -------------------------------------------------------------------
-function isoDay(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function snoozeChoices(): { label: string; until: string }[] {
   const d = new Date();
   const tomorrow = new Date(d); tomorrow.setDate(d.getDate() + 1);
@@ -1129,7 +1135,7 @@ const ADVICE_LABEL = { drop: "Drop it", merge: "Merge", new: "Create a new issue
 // ---- suggestions handled in Linear by hand ----------------------------------------------------
 function handledWhen(iso: string | null | undefined): string {
   if (!iso) return "";
-  const days = Math.round((Date.parse(isoDay(new Date()) + "T12:00:00") - Date.parse(isoDay(new Date(iso)) + "T12:00:00")) / 864e5);
+  const days = Math.round((Date.parse(localToday() + "T12:00:00") - Date.parse(isoDay(new Date(iso)) + "T12:00:00")) / 864e5);
   return days <= 0 ? "today" : days === 1 ? "yesterday" : days < 7 ? `${days} days ago` : `on ${shortDay(isoDay(new Date(iso)))}`;
 }
 
@@ -1403,8 +1409,17 @@ function listItem(kind: "client" | "dev", i: Issue, showGroupField: "client" | "
 /** The list on the left and the selected issue in the reading pane, for Client and Dev (both
  *  groupings). ``order`` is the issues as shown, for j/k and for picking the first one. */
 function listWithPane(kind: "client" | "dev", groups: (Node | string)[], order: Issue[]): HTMLElement {
-  if (!order.some((i) => i.id === state.listSel[kind])) state.listSel[kind] = order[0]?.id ?? null;
-  listOrder = order.map((i) => i.id);
+  const view = `${kind}|${state.listLayout[kind]}|${state.showBacklog}|${state.pickedProject ?? ""}|${state.pickedClient ?? ""}|${state.filter}`;
+  // The selected issue left this list (moved, closed, deleted): select the one after it. In another
+  // view (a project, a client, a filter) start from the top.
+  if (!order.some((i) => i.id === state.listSel[kind])) {
+    const shown = new Set(order.map((i) => i.id));
+    const at = listOrder.view === view ? listOrder.ids.indexOf(state.listSel[kind] ?? "") : -1;
+    const next = at < 0 ? undefined
+      : [...listOrder.ids.slice(at + 1), ...listOrder.ids.slice(0, at).reverse()].find((id) => shown.has(id));
+    state.listSel[kind] = next ?? order[0]?.id ?? null;
+  }
+  listOrder = { view, ids: order.map((i) => i.id) };
   const sel = order.find((i) => i.id === state.listSel[kind]);
   // The rows were built before the first one was picked: mark it now, so the list shows what the pane does.
   for (const g of groups) {
@@ -1420,7 +1435,7 @@ function listWithPane(kind: "client" | "dev", groups: (Node | string)[], order: 
     sel ? issuePane(sel) : h("section", { class: "tl-pane" }, h("p", { class: "muted" }, "Pick an issue to read it here.")));
 }
 
-let listOrder: string[] = [];
+let listOrder = { view: "", ids: [] as string[] };   // the list as last shown, for j/k and the next row
 
 /** A group's heading in Client, Dev and Today: the client's logo (a project initial, a status dot,
  *  or nothing on Today), the name in bold, a short summary ("8 open · 2 late · 1 due today"), then
@@ -1438,9 +1453,9 @@ function groupHead(name: string, lead: Node | "", issues: Issue[], action: Node 
 /** ↑/↓ (or j/k) in Client and Dev. */
 function stepList(delta: number) {
   const kind = state.tab as "client" | "dev";
-  if (!listOrder.length) return;
-  const cur = listOrder.indexOf(state.listSel[kind] ?? "");
-  state.listSel[kind] = listOrder[Math.max(0, Math.min(listOrder.length - 1, cur < 0 ? 0 : cur + delta))];
+  if (!listOrder.ids.length) return;
+  const cur = listOrder.ids.indexOf(state.listSel[kind] ?? "");
+  state.listSel[kind] = listOrder.ids[Math.max(0, Math.min(listOrder.ids.length - 1, cur < 0 ? 0 : cur + delta))];
   render();
   document.querySelector(".ll-item.sel")?.scrollIntoView({ block: "nearest" });
 }
@@ -1530,10 +1545,6 @@ function weekday(day: string): string {
   return new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long" });
 }
 
-function isOpen(i: Issue): boolean {
-  return !closedType(i.state.type);
-}
-
 /** A day's plan: overdue and due-soon work first, then urgent and high priority, up to six. */
 function suggestPlan(today: string, waiting: string): Issue[] {
   const soon = addDays(today, 2);
@@ -1548,12 +1559,6 @@ function suggestPlan(today: string, waiting: string): Issue[] {
     .sort((a, b) => b[0] - a[0] || (a[1].due_date ?? "9").localeCompare(b[1].due_date ?? "9"))
     .slice(0, 6)
     .map(([, i]) => i);
-}
-
-function dueLabel(due: string, today: string): string {
-  if (due === today) return "due today";
-  const days = Math.round((Date.parse(today) - Date.parse(due)) / 864e5);
-  return days > 0 ? `${days} day${days === 1 ? "" : "s"} overdue` : `due ${due}`;
 }
 
 /** The balance rule (pill, popover, checklist): client share = client-labeled issues completed this
@@ -1607,7 +1612,7 @@ function balancePopover(behind: NonNullable<ReturnType<typeof behindSide>>,
   const total = w.client + w.dev;
   const need = neededToTarget(x, total, behind.target);
   const targetWord = Math.abs(behind.target - 0.5) < 1e-9 ? "half" : pct(behind.target);
-  const today = state.brief?.day ?? isoDay(new Date());
+  const today = state.brief?.day ?? localToday();
   const sunday = addDays(w.week, 6);
   const friday = addDays(w.week, 4);
   const daysLeft = (end: string) => Math.max(0, daysBetween(today, end) + 1);
@@ -1882,9 +1887,20 @@ function listWords(parts: string[]): string {
   return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 }
 
+/** The status Mark done and a ticked sub-issue use: the team's first completed one. */
+function doneStatus() {
+  return state.meta?.states.find((s) => s.type === "completed");
+}
+
+/** The status an unticked sub-issue goes back to, as a new one gets: Todo, as the backend works it out. */
+function todoStatus() {
+  const m = state.meta;
+  return m?.states.find((s) => s.name === m.todo_state);
+}
+
 /** Check it off: moves the issue to the team's first completed status in Linear, with undo. */
 async function completeIssue(i: Issue) {
-  const done = state.meta?.states.find((s) => s.type === "completed");
+  const done = doneStatus();
   if (!done) { toast("Couldn't find a done status for this team"); return; }
   state.briefAt = 0;                 // the wrap-up's "done today" should include it
   await editIssue(i, { state_id: done.id });
@@ -1899,71 +1915,16 @@ function todaySplit(): { open: TodayItem[]; gone: TodayItem[] } {
   };
 }
 
-// ---- the reading pane (Today, Client and Dev) -----------------------------------------------------
-type Detail = { at: number; loading?: true; error?: string; issue?: IssuePreview };
-const details = new Map<string, Detail>();           // reading pane content, by issue id
-
-function loadDetail(id: string, force = false) {
-  const d = details.get(id);
-  if (!force && d && (d.loading || Date.now() - d.at < 2 * 60_000)) return;
-  details.set(id, { ...d, at: Date.now(), loading: true });
-  api.issuePreview(id)
-    .then((issue) => details.set(id, { at: Date.now(), issue }))
-    .catch((e) => details.set(id, { at: Date.now(), error: e instanceof ApiError ? e.message : String(e) }))
-    .finally(() => {
-      document.querySelectorAll<HTMLElement>(`.tl-detail[data-id="${id}"]`).forEach((el) => el.replaceWith(detailBody(id)));
-    });
-}
-
-// Images pasted into Linear, loaded through the backend (they need the Linear key) and kept as
-// data: URLs, so a re-render shows them at once. Other sites' images stay links: loading them
-// would tell the sender you read the ticket.
-const imageCache = new Map<string, string | Promise<string>>();
-
-function isLinearUpload(url: string): boolean {
-  try { const u = new URL(url); return u.protocol === "https:" && u.host === "uploads.linear.app"; } catch { return false; }
-}
-
-function linearImageNode(alt: string, url: string): Node | null {
-  if (!isLinearUpload(url)) return null;
-  const img = h("img", { class: "md-img", alt: alt || "Image from Linear" }) as HTMLImageElement;
-  const box = link("", url, "md-figure");
-  box.title = "Open the full image";
-  box.append(img);
-  const show = (src: string) => { img.src = src; box.classList.remove("loading"); box.classList.add("loaded"); };
-  const got = imageCache.get(url);
-  if (typeof got === "string") { show(got); return box; }
-  box.classList.add("loading");
-  const p = got ?? linearImage(url).then((src) => { imageCache.set(url, src); return src; });
-  if (!got) imageCache.set(url, p);
-  p.then(show).catch((e) => {
-    imageCache.delete(url);
-    box.classList.remove("loading");
-    box.replaceChildren(`${alt ? `${alt}: ` : ""}image couldn't load ↗`);
-    box.title = `${e instanceof Error ? e.message : String(e)} Click to open it in your browser.`;
-    box.classList.add("failed");
-  });
-  return box;
-}
-
-function detailBody(id: string): HTMLElement {
-  const d = details.get(id);
-  const i = d?.issue;
-  if (!i) return h("div", { class: "tl-detail", "data-id": id },
-    h("p", { class: "muted small" }, d?.error ? `Couldn't load the details: ${d.error}` : "Loading…"));
-  const shown = [...i.comments].sort((x, y) => (y.created_at ?? "").localeCompare(x.created_at ?? ""));
-  const older = i.comment_count - shown.length;
-  return h("div", { class: "tl-detail", "data-id": id },
-    h("section", {}, h("h4", {}, "Description"),
-      i.description.trim() ? h("div", { class: "tl-desc md" }, ...renderMarkdown(i.description, { image: linearImageNode }),
-        i.description_truncated ? link("More in Linear ↗", i.url, "link small") : "")
-        : h("p", { class: "muted small" }, "No description.")),
-    h("section", {}, h("h4", {}, `Comments${i.comment_count ? ` · ${i.comment_count}` : ""}`),
-      shown.length ? h("div", {}, ...shown.map((c) => h("div", { class: "tl-comment" },
-        h("span", {}, h("b", {}, c.author), " ", h("span", { class: "muted small" }, c.created_at ? when(c.created_at) : "")),
-        h("div", { class: "tl-comment-body md" }, ...renderMarkdown(c.body, { image: linearImageNode }))))) : h("p", { class: "muted small" }, "No comments."),
-      older > 0 ? link(`${older} older in Linear ↗`, i.url, "link small") : ""),
-  );
+// ---- the reading pane's fields row (the rest of the pane is in pane.ts) --------------------------
+/** Status, priority, due date, client and project: the fields both reading panes edit in place. */
+function issueFields(i: Issue): HTMLElement[] {
+  return [
+    statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
+    priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
+    dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
+    clientSelect(i.client, (v) => void editIssue(i, { client: v })),
+    projectSelect(i.project, (v) => void editIssue(i, { project: v })),
+  ];
 }
 
 // ---- Today: one list, read in three moments ----------------------------------------------------
@@ -2488,11 +2449,7 @@ function stageBody(i: Issue, onToday: boolean): Node[] {
         confirmDelete(i);
       } }, "Delete…")));
   return [
-    h("div", { class: "tl-fields" },
-      statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
-      priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
-      dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
-      h("span", { class: "spacer" }), more),
+    h("div", { class: "tl-fields" }, ...issueFields(i), h("span", { class: "tl-actions" }, more)),
     detailBody(i.id),
   ];
 }
@@ -2523,7 +2480,7 @@ function focusStage(i: Issue, ctx: TodayCtx): Child[] {
     : actButton(`Block ${fmtMinutes(len)} at ${hm12(start)}`, "b", (btn) => void blockFirst(i, btn, len, start));
   return [
     stageTop(i, pick ? "Claude's pick" : ""),
-    h("h2", {}, i.title),
+    titleField(i, "h2"),
     pick?.why ? h("p", { class: "td-why" }, pick.why) : "",
     waiting ? draftBox(nudgeText(i), "A nudge to send") : "",
     fit ? h("div", { class: `td-fit n${fit.over ? " over" : ""}` }, fit.text,
@@ -2558,7 +2515,7 @@ function wrapStage(i: Issue, ctx: TodayCtx): Child[] {
   };
   return [
     stageTop(i, ""),
-    h("h2", {}, i.title),
+    isOpen(i) ? titleField(i, "h2") : h("h2", {}, i.title),
     a?.why ? h("p", { class: "td-why" }, a.why) : "",
     a?.action === "ask" && a.message && !decided ? draftBox(a.message, "Drafted by Claude") : "",
     decided ? h("p", { class: "td-okline" }, checkIcon(), decided)
@@ -2581,7 +2538,7 @@ function offStage(i: Issue, ctx: TodayCtx): Child[] {
   const fit = pick?.minutes ? fitFor(pick.minutes, b.agenda) : null;
   return [
     stageTop(i, a ? h("span", { class: "late" }, "not on Today") : "Claude's pick, not on Today"),
-    h("h2", {}, i.title),
+    titleField(i, "h2"),
     (a ?? pick)?.why ? h("p", { class: "td-why" }, (a ?? pick)!.why) : "",
     a?.action === "ask" && a.message && !decided ? draftBox(a.message, "Drafted by Claude") : "",
     fit ? h("div", { class: `td-fit n${fit.over ? " over" : ""}` }, fit.text) : "",
@@ -2602,7 +2559,7 @@ function todayStage(ctx: TodayCtx): HTMLElement {
         : [h("h2", {}, "Nothing left on Today."), h("p", {}, `${ctx.b.completed_today.length} done. The wrap-up comes in with the 4 PM sweep.`)])));
   }
   const body = ctx.off.includes(i) ? offStage(i, ctx) : ctx.moment === "wrapup" ? wrapStage(i, ctx) : focusStage(i, ctx);
-  return h("article", { class: "td-st", "aria-live": "polite", "aria-label": i.identifier }, ...body);
+  return h("article", { class: "td-st", "aria-label": i.identifier }, ...body);
 }
 
 // ---- actions ---------------------------------------------------------------------------------------
@@ -2633,7 +2590,7 @@ async function markDone(i: Issue, ctx: TodayCtx) {
   await completeIssue(i);
   const b = state.brief;
   if (b && !state.issues.some((x) => x.id === i.id) && !b.completed_today.some((x) => x.id === i.id)) {
-    const closed = state.meta?.states.find((s) => s.type === "completed");
+    const closed = doneStatus();
     b.completed_today = [{ ...i, state: { id: closed?.id ?? i.state.id, name: closed?.name ?? "Done", type: "completed" } }, ...b.completed_today];
     render();
   }
@@ -2723,7 +2680,7 @@ function todayKey(e: KeyboardEvent): boolean {
 function todayView(): HTMLElement {
   ensureBrief();
   const b = state.brief;
-  const day = b?.day ?? isoDay(new Date());
+  const day = b?.day ?? localToday();
   const head = pageHead("Today", { sub: new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }) });
   if (!b || !state.issuesLoaded) return h("div", { class: "td" }, head, h("p", { class: "muted" }, "Loading from Linear…"));
   const ctx = todayCtx(b);
@@ -2758,13 +2715,11 @@ function todayView(): HTMLElement {
 }
 
 /** The reading pane for one issue (Today, Client and Dev): its ID, client or project and slips,
- *  the title, one row with status, priority and due date, then Block time (on Today) or Add to
- *  Today, and ⋯; below, sub-issues, the description and the latest comments. */
+ *  the title, one row with status, priority, due date, client and project, then Block time (on
+ *  Today) or Add to Today, and ⋯; below, the description, sub-issues and comments. */
 function issuePane(i: Issue): HTMLElement {
-  const today = state.brief?.day ?? isoDay(new Date());
   const t = state.today.find((x) => x.issue_id === i.id);
   loadDetail(i.id);
-  const subs = state.issues.filter((x) => x.parent?.id === i.id);
   const more = h("details", { class: "drop-menu pane-menu" },
     h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
     h("div", { class: "menu" },
@@ -2777,21 +2732,13 @@ function issuePane(i: Issue): HTMLElement {
   return h("section", { class: "tl-pane", "aria-label": i.identifier },
     h("span", { class: "tl-meta" }, link(`${i.identifier} ↗`, i.url, "ident"), [i.client ?? i.project].filter(Boolean).map((x) => ` · ${x}`).join(""),
       state.slips?.slips[i.id] ? " · " : "", slipTag(state.slips?.slips[i.id])),
-    h("h3", {}, i.title),
-    // One row: status, priority, due date, then Block time (or Add to Today) and ⋯.
-    h("div", { class: "tl-fields" },
-      statusPill(i, (id) => { details.delete(i.id); void editIssue(i, { state_id: id }); }),
-      priorityPill(i.priority, (v) => void editIssue(i, { priority: v })),
-      dateInput(i.due_date, (v) => void editIssue(i, { due_date: v }), dueClass(i.due_date)),
-      h("span", { class: "spacer" }),
-      t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
-        onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
-      more),
-    subs.length ? h("section", {}, h("h4", {}, `Sub-issues · ${subs.length}`),
-      h("ul", { class: "tl-subs" }, ...subs.map((x) => h("li", {}, link(x.identifier, x.url, "ident"),
-        h("span", { class: "dtitle" }, x.title),
-        x.due_date && x.due_date < today ? h("span", { class: "late small" }, dueLabel(x.due_date, today).replace("overdue", "late")) : "",
-        h("span", { class: "muted small" }, x.state.name))))) : "",
+    titleField(i, "h3"),
+    // One row: status, priority, due date, client, project, then Block time (or Add to Today) and ⋯.
+    h("div", { class: "tl-fields" }, ...issueFields(i),
+      h("span", { class: "tl-actions" },
+        t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
+          onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
+        more)),
     detailBody(i.id),
   );
 }
@@ -3247,6 +3194,8 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
   }, `pushed ${s.count}×`);
 }
 
+setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, doneStatus, todoStatus, state });
+
 const settingsCtx: SettingsCtx = {
   rerender: () => { if (state.tab === "settings") { const y = window.scrollY; render(); window.scrollTo(0, y); } },
   themeChanged: () => renderHeader(),
@@ -3291,16 +3240,18 @@ function render() {
       : state.tab === "dev" && state.pickedProject ? projectView(state.pickedProject)
       : byStatus ? statusView(state.tab as "client" | "dev")
       : listView(state.tab as "client" | "dev");
-  main.replaceChildren(
-    head,
-    state.error ? h("div", { class: "banner error" }, state.error) : "",
-    state.tab === "inbox" && state.run.status !== "running" && problems.length
-      ? h("div", { class: "banner warn" },
-          ...problems.map((p) => h("div", {}, `${SOURCE_NAME[p.source]}: ${p.detail ?? "problem during the last sweep"}`)))
-      : "",
-    state.tab === "inbox" ? captureBar : "",
-    h("div", { class: "content" }, view()),
-  );
+  rebuildKeepingPane(() => {
+    main.replaceChildren(
+      head,
+      state.error ? h("div", { class: "banner error" }, state.error) : "",
+      state.tab === "inbox" && state.run.status !== "running" && problems.length
+        ? h("div", { class: "banner warn" },
+            ...problems.map((p) => h("div", {}, `${SOURCE_NAME[p.source]}: ${p.detail ?? "problem during the last sweep"}`)))
+        : "",
+      state.tab === "inbox" ? captureBar : "",
+      h("div", { class: "content" }, view()),
+    );
+  });
 }
 
 // ---- on-demand capture ----------------------------------------------------------------------
@@ -3371,7 +3322,8 @@ const SHORTCUTS: [string, string][] = [
   ["⌘Z", "Undo the last action (approve, drop, snooze, issue edit)"],
   ["⌘R", "Reload from Linear now (it also reloads every minute)"],
   ["⇧⌘R", "Reload: restart the backend and the window after a code change"],
-  ["e", "Edit the title"],
+  ["e", "Edit the title (an Inbox card, or the issue in Today, Client and Dev)"],
+  ["⇧E · ⇧S · ⇧C", "Today, Client, Dev: edit the description · add a sub-issue · comment (⌘↵ posts)"],
   ["c", "Capture a task"],
   ["/", "Filter"],
   ["⌘1 – ⌘6", "Inbox, Today, Client, Dev, Insights, Settings (also ⌘,)"],
@@ -3419,9 +3371,23 @@ function showShortcuts() {
     h("tbody", {}, ...SHORTCUTS.map(([k, v]) => h("tr", {}, h("td", {}, h("kbd", {}, k)), h("td", {}, v))))));
 }
 
+// Swapping what's under the pointer before it's released would lose the click.
+let pointerIsDown = false;
+document.addEventListener("pointerup", () => { pointerIsDown = false; }, true);
+document.addEventListener("pointercancel", () => { pointerIsDown = false; }, true);
+document.addEventListener("keydown", () => { pointerIsDown = false; }, true);
+document.addEventListener("pointermove", (e) => { if (e.buttons === 0) pointerIsDown = false; }, true);
+
+/** Run ``fn`` now, or once the pointer is released and its click has landed. */
+function afterPointer(fn: () => void) {
+  if (!pointerIsDown) fn();
+  else document.addEventListener("pointerup", () => setTimeout(fn), { once: true });
+}
+
 // A click anywhere outside an open Snooze or Drop menu closes it (including opening the other one).
 // Same for the balance popover.
 document.addEventListener("pointerdown", (e) => {
+  pointerIsDown = true;
   // (Removed in place, not re-rendered, so the click that closed it still lands on its target.)
   if (state.balanceOpen && !(e.target as Element).closest?.(".bal-anchor")) {
     state.balanceOpen = false;
@@ -3440,8 +3406,11 @@ function isTextField(el: Element | null): boolean {
     || (el.tagName === "INPUT" && ["text", "search", "url", "email", ""].includes((el as HTMLInputElement).type)));
 }
 
-/** Called by the app's Edit → Undo (⌘Z): undo typing in a text field, else the last action. */
+/** Called by the app's Edit → Undo (⌘Z): in the box a post just emptied, undo the post; in another
+ *  text field, undo typing; else the last action. */
 (window as unknown as { todohubUndo: () => void }).todohubUndo = () => {
+  const post = postToUndoIn(document.activeElement);
+  if (post) { void undo(post); return; }
   if (isTextField(document.activeElement)) {
     document.execCommand("undo");
     return;
@@ -3470,13 +3439,16 @@ document.addEventListener("keydown", (e) => {
     void refresh(true, "force");
     return;
   }
-  // ⌘Z undoes the last action, except in a text field, where it undoes typing as usual.
-  // In the app, Edit → Undo owns ⌘Z and calls todohubUndo(); this is for a plain browser.
+  // ⌘Z undoes the last action, except in a text field, where it undoes typing as usual (or the post
+  // that just emptied it). In the app, Edit → Undo owns ⌘Z and calls todohubUndo(); this is for a plain browser.
   if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z"
-      && !inApp && !isTextField(target) && !document.querySelector(".overlay")) {
-    e.preventDefault();
-    void undo();
-    return;
+      && !inApp && !document.querySelector(".overlay")) {
+    const post = postToUndoIn(target);
+    if (post || !isTextField(target)) {
+      e.preventDefault();
+      void undo(post ?? undefined);
+      return;
+    }
   }
   if (e.key === "Escape" && state.balanceOpen) { state.balanceOpen = false; render(); return; }
   if (typing) {
@@ -3497,6 +3469,8 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".overlay")) return;
+  // preventDefault: the key must not also type into the field it just focused.
+  if ((state.tab === "today" || issueList) && paneKey(e.key)) { e.preventDefault(); return; }
 
   // An open status or priority menu takes the next digit.
   const pill = document.querySelector<HTMLDetailsElement>("details.pill-menu[open]");
@@ -3543,7 +3517,7 @@ document.addEventListener("keydown", (e) => {
 
 // ---- start ----------------------------------------------------------------------------------
 async function start() {
-  document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), h("main", {}), h("div", { class: "toasts" }));
+  document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), h("main", {}), h("div", { class: "toasts", role: "status" }));
   render();
   try {
     await waitForBackend();

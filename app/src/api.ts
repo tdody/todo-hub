@@ -131,6 +131,7 @@ export interface IssuePreview extends Issue {
   description_truncated: boolean;
   comment_count: number;
   comments: { author: string; created_at: string | null; body: string }[];
+  sub_issues: SubIssue[];
 }
 
 export interface AgendaEvent {
@@ -234,6 +235,7 @@ export interface Meta {
   projects: string[];
   priorities: { value: number; name: string }[];
   sources: Source[];
+  todo_state: string | null;      // the status a new or reopened sub-issue gets; null if the team has none
 }
 
 export interface SourceStatus {
@@ -373,6 +375,19 @@ export interface IssueEdit {
   state_id?: string;
   priority?: number;
   due_date?: string | null;
+  title?: string;
+  /** Markdown; empty clears it. */
+  description?: string;
+  /** A client label's name; null makes it a Dev issue. */
+  client?: string | null;
+  /** An open project's name; null takes it out of its project. */
+  project?: string | null;
+}
+
+/** A sub-issue in the reading pane. ``own_team``: it's in TodoHub's team, so the app's statuses apply. */
+export interface SubIssue extends Issue {
+  assignee: string | null;
+  own_team: boolean;
 }
 
 export interface TodayItem {
@@ -496,6 +511,13 @@ export const api = {
   /** Undo a delete: back from Linear's trash, and onto Today at ``todayPosition`` if given. */
   restoreIssue: (id: string, todayPosition: number | null) =>
     call<Issue>("POST", `/api/issues/${encodeURIComponent(id)}/restore`, { today_position: todayPosition }),
+  /** Post a comment as you; the id lets Undo delete it. */
+  addComment: (issueId: string, body: string) =>
+    call<{ id: string }>("POST", `/api/issues/${encodeURIComponent(issueId)}/comments`, { body }),
+  deleteComment: (id: string) => call<{ deleted: string }>("DELETE", `/api/comments/${encodeURIComponent(id)}`),
+  /** A sub-issue with the parent's client, project and priority, assigned to you, in Todo. */
+  addSubIssue: (parentId: string, title: string) =>
+    call<Issue>("POST", `/api/issues/${encodeURIComponent(parentId)}/sub-issues`, { title }),
   today: () => call<Today>("GET", "/api/today"),
   logos: (clients: string[]) =>
     call<Record<string, string | null>>("GET", `/api/logos?clients=${encodeURIComponent(clients.join("|"))}`),
