@@ -111,7 +111,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 
 If `--restricted` turns out to hide your claude.ai connectors in your Claude Code version, the first sweep will show Slack, Gmail and the others as failing. In that case set `restricted = false` and rely on the deny lists; `todohub check` then warns about risky Claude Code settings.
 
-When Anthropic's connector service is down, Slack, Gmail, Grain, Calendar and HubSpot each say "Anthropic's connector service didn't respond (HTTP 503), so it wasn't read", followed by Anthropic's incident title when status.claude.com has one. Nothing is lost: the next sweep reads each of them from its last success. The end of each sweep log (`logs/sweep-*.log`, section `--- claude.ai connectors ---`) shows how the connector fetch went.
+When Anthropic's connector service is down, the connector sources a sweep couldn't read (Slack, Gmail, Grain, HubSpot, and Calendar when it was due for meeting prep) each say "Anthropic's connector service didn't respond (HTTP 503), so it wasn't read", followed by Anthropic's incident title when status.claude.com has one. Nothing is lost: the next sweep reads each of them from its last success. The end of each sweep log (`logs/sweep-*.log`, section `--- claude.ai connectors ---`) shows how the connector fetch went.
 
 ## Setup (macOS)
 
