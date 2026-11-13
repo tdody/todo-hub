@@ -236,6 +236,7 @@ export interface Meta {
   priorities: { value: number; name: string }[];
   sources: Source[];
   todo_state: string | null;      // the status a new or reopened sub-issue gets; null if the team has none
+  done_state: string | null;      // the completed status Mark done and a ticked sub-issue get; null if the team has none
 }
 
 export interface SourceStatus {
