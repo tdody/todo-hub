@@ -265,10 +265,10 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             next((s for s in states if s["type"] == "unstarted"), None)
 
     def done_status(states: list[dict]) -> dict | None:
-        """The status closing an issue moves it to: the one named ``done_state``, else the team's first completed
-        one."""
-        return next((s for s in states if s["name"] == settings.done_state), None) or \
-            next((s for s in states if s["type"] == "completed"), None)
+        """The status closing an issue moves it to: the completed one named ``done_state``, else the team's first
+        completed one."""
+        completed = [s for s in states if s["type"] == "completed"]
+        return next((s for s in completed if s["name"] == settings.done_state), None) or next(iter(completed), None)
 
     def sub_issue_team(l: Linear, m: TeamMeta, parent: dict) -> tuple[str, str]:
         """The team a sub-issue of ``parent`` goes in (the parent's, so its project fits) and the id of its Todo

@@ -212,6 +212,7 @@ def test_sub_issue_status_follows_the_todo_setting(todo_state, expected):
 @pytest.mark.parametrize("done_state, expected", [
     ("Shipped", "Shipped"),     # the setting names a completed status: it wins over the first one
     ("Closed", "Done"),         # no status by that name: the team's first completed one
+    ("Pending", "Done"),        # names a status that isn't completed: the team's first completed one
 ])
 def test_done_status_follows_the_done_setting(done_state, expected):
     """Closing from the Inbox uses it, and /api/meta names it for the app's Mark done and tick."""

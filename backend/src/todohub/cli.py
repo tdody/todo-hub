@@ -86,13 +86,17 @@ def cmd_check(_: argparse.Namespace) -> int:
             issues = client.my_open_issues()
         finally:
             client.close()
-        states = [s["name"] for s in meta.states]
+        statuses = {s["name"]: s["type"] for s in meta.states}
         print(f"Linear: OK. {len(issues)} open issues, {len(meta.client_labels)} client labels.")
         for setting in ("todo_state", "waiting_state", "done_state"):
             name = getattr(settings, setting)
-            if name not in states:
+            if name not in statuses:
                 ok = False
-                print(f"  ! No status named {name!r} (linear.{setting}). Statuses: {', '.join(states)}")
+                print(f"  ! No status named {name!r} (linear.{setting}). Statuses: {', '.join(statuses)}")
+        if statuses.get(settings.done_state, "completed") != "completed":
+            ok = False
+            print(f"  ! {settings.done_state!r} (linear.done_state) isn't a completed status, so Mark done, ticks and "
+                  "closes use the team's first completed status.")
     except (LinearError, RuntimeError) as exc:
         ok = False
         print(f"Linear: FAILED. {exc}")
