@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -207,11 +209,34 @@ def test_sub_issue_status_follows_the_todo_setting(todo_state, expected):
     assert client.get("/api/meta").json()["todo_state"] == expected
 
 
+@pytest.mark.parametrize("done_state, expected", [
+    ("Shipped", "Shipped"),     # the setting names a completed status: it wins over the first one
+    ("Closed", "Done"),         # no status by that name: the team's first completed one
+    ("Pending", "Done"),        # names a status that isn't completed: the team's first completed one
+])
+def test_done_status_follows_the_done_setting(done_state, expected):
+    """Closing from the Inbox uses it, and /api/meta names it for the app's Mark done and tick."""
+    settings = load_settings()
+    settings.done_state = done_state
+    fake = FakeLinear()
+    meta = fake.team_meta
+    shipped = {"id": "s-Shipped", "name": "Shipped", "type": "completed", "position": 4}
+    fake.team_meta = lambda *a: dataclasses.replace(meta(*a), states=[*meta(*a).states, shipped])
+    db = DB(settings.db_path)
+    client = TestClient(create_app(settings, db, linear_factory=lambda: fake, sweep_launcher=lambda args: None))
+    assert client.get("/api/meta").json()["done_state"] == expected
+    db.set_meta("open_issues", [{"identifier": "ENG-1", "title": "Rebin Globex grades"}])
+    cid = tools.propose_close(db, None, source="slack", source_id="C1:2", source_url="https://example.slack.com/archives/C1/p2",
+                              target_issue="ENG-1", why="Sent the grades.", excerpt="here they are")["id"]
+    assert client.post(f"/api/candidates/{cid}/approve").status_code == 200
+    assert fake.updated[-1] == ("id-ENG-1", {"stateId": f"s-{expected}"})
+
+
 def test_meta_and_sweep(env):
     client, db, _, launched = env
     m = client.get("/api/meta").json()
     assert [s["name"] for s in m["states"]] == ["Backlog", "Todo", "Pending", "Done"]
-    assert m["todo_state"] == "Todo"
+    assert (m["todo_state"], m["done_state"]) == ("Todo", "Done")
     assert m["sources"] == ["slack", "gmail", "grain", "calendar", "hubspot", "linear", "github"]
     assert client.post("/api/sweep").status_code == 202 and launched == [["--trigger", "manual"]]
     assert client.post("/api/sweep", json={"source": "fax"}).status_code == 400

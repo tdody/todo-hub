@@ -341,7 +341,7 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
     }));
 }
 
-/** Tick: the team's first done status, as Mark done uses; untick: Todo (todoStatus). */
+/** Tick: Done (doneStatus), as Mark done uses; untick: Todo (todoStatus). */
 async function tickSubIssue(parent: IssuePreview, sub: SubIssue) {
   const key = `${sub.id}:tick`;
   const done = sub.state.type !== "completed";
