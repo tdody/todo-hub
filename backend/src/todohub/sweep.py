@@ -532,7 +532,7 @@ def run_sweep(settings: Settings, trigger: str = "manual", only: str | None = No
                               note_section=note.section(note_ctx, agenda_from_this_run) if note_ctx else None)
         out = _invoke_claude(settings, run_id, prompt, log_path, f"sweep {run_id}, since {since.isoformat()}")
 
-        reported = {s["source"] for s in (db.get_run(run_id, with_sources=True) or {}).get("sources", [])}
+        reported = {s["source"] for s in db.get_run(run_id, with_sources=True)["sources"]}
         for source in settings.enabled_sources():
             if source not in reported:
                 db.report_source_status(run_id, source, False, "Not reported by the sweep.", None)
