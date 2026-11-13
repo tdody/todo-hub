@@ -247,7 +247,7 @@ async function loadRun() {
   }
 }
 
-/** A Mac notification when a source has failed in two sweeps in a row, at most once a day each, once the sweep has finished.
+/** A Mac notification when a source has failed in two sweeps in a row, at most once a day each, after the sweep finishes.
  *  (A sweep can finish "ok" with one source down, e.g. an expired sign-in; the red dot is easy to miss.) */
 const FAIL_STREAK_ALERT = 2;
 function sourceAlerts() {
