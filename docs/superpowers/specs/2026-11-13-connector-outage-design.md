@@ -55,7 +55,7 @@ After a sweep, if Claude Code's connector fetch ended in failure, every connecto
 
 - `fetch_failure`, with this morning's real lines: the failed attempts ending on `Connector-list fetch failed transiently; background retry …` → `"HTTP 503"`; a failure then `Fetched 14 servers` → `None`; `Fetching from …` then `Fetched 14 servers` → `None`; unknown wording → `None`; `Fetch failed (ECONNRESET) after 3 attempt(s)` → `"ECONNRESET"`.
 - `open_incident`, with a fake `get`: this morning's two incidents (the Claude Code outage and the Microsoft 365 connector one, which lists only claude.ai and Cowork) → the outage's name; no incidents → `None`; an HTTP error → `None`.
-- `run_sweep`, with the fake `claude` writing failure lines to the `--debug-file` it's given and reporting Slack failed and Linear fine, and `open_incident` patched: Slack's and the unreported Grain's details are rewritten; Linear, GitHub and Calendar's prep line are not; the log holds the `--- claude.ai connectors ---` section; the debug file is gone.
+- `run_sweep`, with the fake `claude` writing failure lines to the `--debug-file` it's given and reporting only Slack (fine), and `open_incident` patched: the details of the connector sources that failed or didn't report (Gmail, Grain, Calendar, HubSpot) are rewritten; Slack, which worked, and Linear and GitHub are not; the log holds the `--- claude.ai connectors ---` section; the debug file is gone.
 - The existing sweep tests, whose fake `claude` writes no debug lines, keep Claude's messages.
 
 ## Assumptions
