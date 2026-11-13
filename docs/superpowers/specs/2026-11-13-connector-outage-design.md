@@ -17,7 +17,7 @@ Every sweep from 08:00 to 08:38 reported Slack, Gmail, Grain, Calendar and HubSp
 
 In: sweeps (scheduled, manual, and one-source checks), for the five connector sources (`connectors.BUILTIN`: Slack, Gmail, Grain, Calendar, HubSpot).
 
-Out: plan, note, wrap-up and capture runs (they have no per-source status); grouping the Mac notifications when several sources fail at once; retrying the sweep when the service comes back (the next sweep already re-reads each failed source from its last success).
+Out: plan, note, wrap-up and capture runs (they have no per-source status); grouping the Mac notifications when several sources fail at once; retrying the sweep when the service comes back (the next sweep already re-reads each failed source from its last success). Those other runs still get the debug flags and the log section, which helps diagnose them, but nothing acts on their result.
 
 ## Behavior
 
@@ -51,7 +51,7 @@ After a sweep, if Claude Code's connector fetch ended in failure, every connecto
 
 - No debug file (the run timed out, or Claude Code didn't write one): no lines, no change.
 - status.claude.com unreachable, slow or malformed: the message has no second sentence.
-- An unknown `--debug-file` flag would make Claude Code exit with an error, failing the sweep. The installed Claude Code (2.1.319) accepts it.
+- An unknown `--debug-file` flag would make Claude Code exit with an error, failing every Claude run (sweeps, plans, notes, wrap-ups and captures all go through `_invoke_claude`). The installed Claude Code (2.1.319) accepts it.
 
 ## Testing
 

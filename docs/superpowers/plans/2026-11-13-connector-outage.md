@@ -4,7 +4,7 @@
 
 **Goal:** When a sweep can't load the claude.ai connectors because Anthropic's connector service is failing, each affected source says so, with the HTTP status and Anthropic's incident title.
 
-**Architecture:** Each Claude run also writes Claude Code's connector-fetch debug lines (`--debug=claudeai-mcp --debug-file …`). A new `outage.py` reads those lines (`connector_failure`), looks up the newest open Claude Code incident on status.claude.com (`claude_code_incident`), and builds the message (`detail`). `run_sweep` rewrites the detail of each failed connector source with it, so the sidebar, the Inbox's problems banner and the Mac notification show it without app changes.
+**Architecture:** Each Claude run also writes Claude Code's connector-fetch debug lines (`--debug=claudeai-mcp --debug-file …`). A new `outage.py` reads those lines (`connector_failure`), looks up the newest open Claude Code incident on status.claude.com (`claude_code_incident`), and builds the message (`detail`). `run_sweep` rewrites the detail of each failed connector source with it, so the sidebar, the Inbox's problems banner and the Mac notification show it. The notification waits until the sweep has finished, so it shows the final message.
 
 **Tech Stack:** Python 3 (FastAPI backend, but this is plain module code), httpx, pytest, uv.
 
@@ -28,6 +28,7 @@
 - **Create `backend/tests/test_outage.py`**: unit tests for those three functions.
 - **Modify `backend/src/todohub/sweep.py`**: `_invoke_claude` (debug flags, log section, `connector_failure`), `run_sweep` (rewrite the failed connector sources), imports.
 - **Modify `backend/tests/test_sweep.py`**: the fake `claude` copies a prepared debug file to `--debug-file`; one new end-to-end test.
+- **Modify `app/src/main.ts`** (added in review): `sourceAlerts` waits until the sweep has finished and drops a trailing period from the detail.
 - **Modify `README.md`**: one paragraph after the `--restricted` note.
 
 ---
@@ -210,6 +211,8 @@ EOF
 ---
 
 ### Task 2: Sweeps record the connector fetch and rewrite the failed connector sources
+
+> **Changed in review** (commit 8f504fe and the final review): `from . import connectors` with `connectors.BUILTIN.values()` inline instead of a `CONNECTOR_SOURCES` constant; the names `debug_path`, `fetch_lines` and `detail`; the status page is read only when a connector source failed (with a test for it); `sourceAlerts` in `app/src/main.ts` returns while a sweep runs and drops a trailing period. The code below is the first version; the committed code is the reference.
 
 **Files:**
 - Modify: `backend/src/todohub/sweep.py` (imports near line 29, `_invoke_claude` at lines 427-463, `run_sweep` after line 531)
@@ -395,7 +398,7 @@ EOF
 In `README.md`, after the paragraph that starts `If \`--restricted\` turns out to hide your claude.ai connectors`, add a blank line and:
 
 ```markdown
-When Anthropic's connector service is down, Slack, Gmail, Grain, Calendar and HubSpot each say "Anthropic's connector service didn't respond (HTTP 503)", followed by Anthropic's incident title when status.claude.com has one. Nothing is lost: the next sweep reads each of them from its last success. The end of each sweep log (`logs/sweep-*.log`, section `--- claude.ai connectors ---`) shows how the connector fetch went.
+When Anthropic's connector service is down, the connector sources a sweep couldn't read (Slack, Gmail, Grain, HubSpot, and Calendar when it was due for meeting prep) each say "Anthropic's connector service didn't respond (HTTP 503), so it wasn't read", followed by Anthropic's incident title when status.claude.com has one. Nothing is lost: the next sweep reads each of them from its last success. The end of each sweep log (`logs/sweep-*.log`, section `--- claude.ai connectors ---`) shows how the connector fetch went.
 ```
 
 - [ ] **Step 2: Commit**
