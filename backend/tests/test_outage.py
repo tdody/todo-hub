@@ -36,7 +36,7 @@ def test_connector_failure(lines, expected):
     assert outage.connector_failure(lines) == expected
 
 
-# status.claude.com's summary.json during the outage, trimmed to what claude_code_incident reads. The
+# Modelled on status.claude.com's summary.json during the outage, trimmed to what claude_code_incident reads. The
 # Microsoft 365 one doesn't list Claude Code; the Gmail one does but is older than the outage.
 SUMMARY = {"incidents": [
     {"name": "Elevated errors affecting the Microsoft 365 connector", "created_at": "2026-11-12T17:52:44.934Z",
@@ -68,6 +68,7 @@ def test_claude_code_incident_is_the_newest_listing_claude_code():
     fake_get({}, status=503),
     fake_get(error=httpx.ConnectTimeout("slow")),
     fake_get(["not", "a", "summary"]),
+    fake_get({"incidents": [SUMMARY["incidents"][0]]}),
 ])
 def test_claude_code_incident_is_none_without_one(get):
     assert outage.claude_code_incident(get) is None
