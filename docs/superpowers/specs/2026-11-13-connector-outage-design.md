@@ -41,7 +41,9 @@ After a sweep, if Claude Code's connector fetch ended in failure, every connecto
 **`backend/src/todohub/sweep.py`:**
 
 - `_invoke_claude` adds `--debug=claudeai-mcp --debug-file <sweep_dir>/claudeai-<run_id>.log` to the command. After the run it reads that file (missing means no lines), appends its lines to the run's log under `--- claude.ai connectors ---`, deletes it, and returns `connector_failure(lines)` as `out["connector_failure"]`. The flags go here rather than in `claude_command`, which `connectors.py` also uses for discovery runs it stops at start-up.
-- `run_sweep`, after marking unreported sources: when `out["connector_failure"]` is not `None`, it calls `claude_code_incident()` once and rewrites the detail of each connector source with `ok = 0` in this run, keeping its `items_scanned`.
+- `run_sweep`, after marking unreported sources: when `out["connector_failure"]` is not `None` and a connector source (`connectors.BUILTIN`) has `ok = 0` in this run, it calls `claude_code_incident()` once and rewrites the detail of each such source, keeping its `items_scanned`.
+
+**`app/src/main.ts`, `sourceAlerts`:** the Mac notification waits until the sweep has finished, as the Inbox's problems banner already does. While a sweep runs, a failed source's row still holds Claude's own text, and the notification fires at most once a day per source, so firing mid-run would show that text instead of the outage message. The notification also drops a trailing period from the detail before adding ". Failed …".
 
 **`README.md`:** next to the `--restricted` note, one line saying what an outage looks like and that the next sweep catches up.
 
