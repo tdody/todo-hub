@@ -4,7 +4,7 @@
 
 **Goal:** When a sweep can't load the claude.ai connectors because Anthropic's connector service is failing, each affected source says so, with the HTTP status and Anthropic's incident title.
 
-**Architecture:** Each Claude run also writes Claude Code's connector-fetch debug lines (`--debug=claudeai-mcp --debug-file …`). A new `outage.py` reads those lines (`fetch_failure`), looks up an open Claude Code incident on status.claude.com (`open_incident`), and builds the message (`message`). `run_sweep` rewrites the detail of each failed connector source with it, so the sidebar, the Inbox's problems banner and the Mac notification show it without app changes.
+**Architecture:** Each Claude run also writes Claude Code's connector-fetch debug lines (`--debug=claudeai-mcp --debug-file …`). A new `outage.py` reads those lines (`connector_failure`), looks up the newest open Claude Code incident on status.claude.com (`claude_code_incident`), and builds the message (`detail`). `run_sweep` rewrites the detail of each failed connector source with it, so the sidebar, the Inbox's problems banner and the Mac notification show it without app changes.
 
 **Tech Stack:** Python 3 (FastAPI backend, but this is plain module code), httpx, pytest, uv.
 
@@ -33,6 +33,8 @@
 ---
 
 ### Task 1: `outage.py`
+
+> **Changed in review** (commit 1d874a6): `fetch_failure` is `connector_failure` and treats a 4xx as no outage and `unknown` as no status; `open_incident` is `claude_code_incident` and picks the newest matching incident by `created_at`; `message` is `detail`. The code below is the first version; the committed module and its 18 tests are the reference.
 
 **Files:**
 - Create: `backend/src/todohub/outage.py`
@@ -239,7 +241,7 @@ def test_connector_outage_rewrites_the_failed_connector_sources(settings, monkey
         "2026-11-13T13:00:21.587Z [DEBUG] [claudeai-mcp] Transient fetch error (503), retrying in 500ms (attempt 1/3)\n"
         "2026-11-13T13:00:24.302Z [DEBUG] [claudeai-mcp] Connector-list fetch failed transiently; "
         "background retry 1/3 in 4000ms\n")
-    monkeypatch.setattr(sweep.outage, "open_incident", lambda: "Elevated errors on Claude Code")
+    monkeypatch.setattr(sweep.outage, "claude_code_incident", lambda: "Elevated errors on Claude Code")
     run = sweep.run_sweep(settings, "schedule")
     by_source = {s["source"]: s for s in run["sources"]}
     down = ("Anthropic's connector service didn't respond (HTTP 503), so it wasn't read. "
@@ -289,7 +291,7 @@ Replace the whole `_invoke_claude` function (lines 427-463) with:
 ```python
 def _invoke_claude(settings: Settings, run_id: int, prompt: str, log_path: Path, header: str) -> dict:
     """Run headless Claude Code once with the read-only allowlist. Never raises. ``connector_failure``
-    is how its claude.ai connector fetch ended (``outage.fetch_failure``)."""
+    is how its claude.ai connector fetch ended (``outage.connector_failure``)."""
     mcp_path = settings.sweep_dir / f"mcp-{run_id}.json"
     mcp_path.write_text(json.dumps(mcp_config(settings, run_id), indent=2))
     fetch_path = settings.sweep_dir / f"claudeai-{run_id}.log"
@@ -301,7 +303,7 @@ def _invoke_claude(settings: Settings, run_id: int, prompt: str, log_path: Path,
             cwd=settings.sweep_dir, env=_env(), capture_output=True, text=True, timeout=settings.timeout_minutes * 60,
         )
         fetch = fetch_path.read_text(errors="replace").splitlines() if fetch_path.exists() else []
-        out["connector_failure"] = outage.fetch_failure(fetch)
+        out["connector_failure"] = outage.connector_failure(fetch)
         log_path.write_text(
             f"$ claude -p <prompt> ({header})\n\n"
             f"--- prompt ---\n{prompt}\n\n--- stdout ---\n{proc.stdout}\n\n--- stderr ---\n{proc.stderr}\n"
@@ -349,7 +351,7 @@ add:
 ```python
         if out["connector_failure"] is not None:
             # Claude Code couldn't load the claude.ai connectors: say so instead of Claude's guess.
-            down = outage.message(out["connector_failure"], outage.open_incident())
+            down = outage.detail(out["connector_failure"], outage.claude_code_incident())
             for s in (db.get_run(run_id, with_sources=True) or {}).get("sources", []):
                 if not s["ok"] and s["source"] in CONNECTOR_SOURCES:
                     db.report_source_status(run_id, s["source"], False, down, s["items_scanned"])
@@ -363,7 +365,7 @@ Expected: all pass, including `test_connector_outage_rewrites_the_failed_connect
 - [ ] **Step 8: Run the whole backend suite**
 
 Run (from `backend/`): `uv run pytest -q`
-Expected: all pass (197 before this plan + 13 from Task 1 + 1 = 211).
+Expected: all pass (215 after Task 1 + 1 = 216).
 
 - [ ] **Step 9: Commit**
 
