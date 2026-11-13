@@ -27,6 +27,9 @@ FAKE_CLAUDE = textwrap.dedent("""\
     db = DB(load_settings().db_path)
     run_id = int(env["TODOHUB_RUN_ID"])
     open(os.path.join(os.environ["TODOHUB_HOME"], "argv.json"), "w").write(json.dumps(args))
+    debug = os.path.join(os.environ["TODOHUB_HOME"], "claudeai-debug.txt")
+    if "--debug-file" in args and os.path.exists(debug):
+        open(args[args.index("--debug-file") + 1], "w").write(open(debug).read())
     tools.add_candidate(db, run_id, source="slack", source_id="C9:2.0", title="Review Mona's PR",
                         signal="ask", why="Mona asked for a review.", excerpt="can you review?",
                         source_url="https://example.slack.com/archives/C9/p20",
@@ -442,3 +445,25 @@ def test_merged_hubspot_ticket_is_not_rechecked():
     db.decide(new, "approved", linear_identifier="ENG-10", linear_url="https://linear.app/x/ENG-10")
     text = sweep.watched_section(db.watched_issues(["ENG-9", "ENG-10"]), ["hubspot"])
     assert "ENG-10" in text and "ENG-9" not in text    # merged into ENG-9: closing the ticket doesn't finish it
+
+
+def test_connector_outage_rewrites_the_failed_connector_sources(settings, monkeypatch):
+    settings.home.mkdir(parents=True, exist_ok=True)
+    (settings.home / "claudeai-debug.txt").write_text(
+        "2026-11-13T13:00:20.101Z [DEBUG] [claudeai-mcp] Fetching from https://api.anthropic.com/v1/mcp_servers\n"
+        "2026-11-13T13:00:21.587Z [DEBUG] [claudeai-mcp] Transient fetch error (503), retrying in 500ms (attempt 1/3)\n"
+        "2026-11-13T13:00:24.302Z [DEBUG] [claudeai-mcp] Connector-list fetch failed transiently; "
+        "background retry 1/3 in 4000ms\n")
+    monkeypatch.setattr(sweep.outage, "claude_code_incident", lambda: "Elevated errors on Claude Code")
+    run = sweep.run_sweep(settings, "schedule")
+    by_source = {s["source"]: s for s in run["sources"]}
+    down = ("Anthropic's connector service didn't respond (HTTP 503), so it wasn't read. "
+            'Anthropic reports "Elevated errors on Claude Code" (status.claude.com).')
+    # The fake reports only Slack; the other connector sources are unreported, so failed.
+    assert {s for s, v in by_source.items() if v["detail"] == down} == {"gmail", "grain", "calendar", "hubspot"}
+    assert by_source["slack"]["detail"] == "3 searches"           # it worked: untouched
+    assert "Can't find gh" in by_source["github"]["detail"]       # not a connector: untouched
+    assert by_source["linear"]["ok"]
+    log = open(run["log_path"]).read()
+    assert "--- claude.ai connectors ---\n" in log and "Transient fetch error (503)" in log
+    assert not list(settings.sweep_dir.glob("claudeai-*.log"))    # the debug file is cleaned up
