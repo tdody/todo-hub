@@ -26,17 +26,24 @@ FETCHED = "2026-11-13T14:41:46.119Z [DEBUG] [claudeai-mcp] Fetched 14 servers"
     ([FETCHING, OUTAGE[-1]], ""),            # failed, with no status anywhere
     ([FETCHING, "2026-11-13T13:49:19.301Z [DEBUG] [claudeai-mcp] Something new"], None),  # wording it doesn't know
     ([], None),                              # no debug file
+    ([FETCHING, "2026-11-13T13:49:16.587Z [DEBUG] [claudeai-mcp] Transient fetch error (502), retrying in 500ms (attempt 1/3)",
+      "2026-11-13T13:49:19.301Z [DEBUG] [claudeai-mcp] Fetch failed (503) after 3 attempt(s)"], "HTTP 503"),  # latest wins
+    (["2026-11-13T13:49:19.301Z [DEBUG] [hooks] fetch failed (503)"], None),   # not the connector fetch
+    ([FETCHING, "2026-11-13T13:49:15.020Z [DEBUG] [claudeai-mcp] Fetch failed (401) after 1 attempt(s)"], None),  # sign-in, not an outage
+    ([FETCHING, "2026-11-13T13:49:15.020Z [DEBUG] [claudeai-mcp] Fetch failed (unknown) after 1 attempt(s)"], ""),
 ])
-def test_fetch_failure(lines, expected):
-    assert outage.fetch_failure(lines) == expected
+def test_connector_failure(lines, expected):
+    assert outage.connector_failure(lines) == expected
 
 
-# status.claude.com's summary.json during the outage, trimmed to what open_incident reads. The Microsoft
-# 365 one comes first and doesn't list Claude Code, so it must be skipped.
+# status.claude.com's summary.json during the outage, trimmed to what claude_code_incident reads. The
+# Microsoft 365 one doesn't list Claude Code; the Gmail one does but is older than the outage.
 SUMMARY = {"incidents": [
-    {"name": "Elevated errors affecting the Microsoft 365 connector", "status": "identified",
+    {"name": "Elevated errors affecting the Microsoft 365 connector", "created_at": "2026-11-12T17:52:44.934Z",
      "components": [{"name": "claude.ai"}, {"name": "Claude Cowork"}]},
-    {"name": "Elevated errors on claude.ai, the Claude API, and Claude Code", "status": "investigating",
+    {"name": "Elevated errors affecting the Gmail connector", "created_at": "2026-11-13T09:58:02.100Z",
+     "components": [{"name": "claude.ai"}, {"name": "Claude Code"}]},
+    {"name": "Elevated errors on claude.ai, the Claude API, and Claude Code", "created_at": "2026-11-13T13:09:50.199Z",
      "components": [{"name": "claude.ai"}, {"name": "Claude API (api.anthropic.com)"}, {"name": "Claude Code"},
                     {"name": "Claude Cowork"}]},
 ]}
@@ -51,8 +58,9 @@ def fake_get(body=None, status=200, error=None):
     return get
 
 
-def test_open_incident_names_the_one_listing_claude_code():
-    assert outage.open_incident(fake_get(SUMMARY)) == "Elevated errors on claude.ai, the Claude API, and Claude Code"
+def test_claude_code_incident_is_the_newest_listing_claude_code():
+    assert outage.claude_code_incident(fake_get(SUMMARY)) == \
+        "Elevated errors on claude.ai, the Claude API, and Claude Code"
 
 
 @pytest.mark.parametrize("get", [
@@ -61,13 +69,13 @@ def test_open_incident_names_the_one_listing_claude_code():
     fake_get(error=httpx.ConnectTimeout("slow")),
     fake_get(["not", "a", "summary"]),
 ])
-def test_open_incident_is_none_without_one(get):
-    assert outage.open_incident(get) is None
+def test_claude_code_incident_is_none_without_one(get):
+    assert outage.claude_code_incident(get) is None
 
 
-def test_message():
-    assert outage.message("HTTP 503", None) == \
+def test_detail():
+    assert outage.detail("HTTP 503", None) == \
         "Anthropic's connector service didn't respond (HTTP 503), so it wasn't read."
-    assert outage.message("", "Elevated errors on Claude Code") == (
+    assert outage.detail("", "Elevated errors on Claude Code") == (
         "Anthropic's connector service didn't respond, so it wasn't read. "
         'Anthropic reports "Elevated errors on Claude Code" (status.claude.com).')
