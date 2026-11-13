@@ -49,8 +49,9 @@ def claude_code_incident(get: Callable[..., httpx.Response] = httpx.get) -> str 
     try:
         resp = get(STATUS_URL, timeout=5)
         resp.raise_for_status()
-        listing = [i for i in resp.json()["incidents"] if any(c["name"] == "Claude Code" for c in i["components"])]
-        return max(listing, key=lambda i: i["created_at"])["name"] if listing else None
+        claude_code_incidents = [i for i in resp.json()["incidents"]
+                                 if any(c["name"] == "Claude Code" for c in i["components"])]
+        return max(claude_code_incidents, key=lambda i: i["created_at"])["name"] if claude_code_incidents else None
     except Exception as exc:    # the incident line is optional: never fail a sweep over it
         log.warning("Couldn't read Anthropic's status page: %s", exc)
         return None
