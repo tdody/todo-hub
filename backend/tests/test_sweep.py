@@ -468,3 +468,14 @@ def test_connector_outage_rewrites_the_failed_connector_sources(settings, monkey
     log = open(run["log_path"]).read()
     assert "--- claude.ai connectors ---\n" in log and "Transient fetch error (503)" in log
     assert not list(settings.sweep_dir.glob("claudeai-*.log"))    # the debug file is cleaned up
+
+
+def test_connector_outage_reads_the_status_page_only_when_a_connector_source_failed(settings, monkeypatch):
+    settings.home.mkdir(parents=True, exist_ok=True)
+    (settings.home / "claudeai-debug.txt").write_text(
+        "2026-11-13T13:00:21.587Z [DEBUG] [claudeai-mcp] Transient fetch error (503), retrying in 500ms (attempt 1/3)\n")
+    def no_call():
+        raise AssertionError("the status page was read")
+    monkeypatch.setattr(sweep.outage, "claude_code_incident", no_call)
+    run = sweep.run_sweep(settings, "manual", only="slack")      # the fake reports Slack fine
+    assert {s["source"]: s["detail"] for s in run["sources"]} == {"slack": "3 searches"}
