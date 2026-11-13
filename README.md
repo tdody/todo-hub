@@ -183,7 +183,7 @@ Create a snitch with a **daily** interval and put its URL in `snitch_url`. Each 
 | Key | Default | What it does |
 | --- | --- | --- |
 | `linear.team_key` | empty (required) | Key of the team new issues go to, e.g. `ENG` |
-| `linear.todo_state` / `waiting_state` / `done_state` | `Todo` / `Pending` / `Done` | Statuses for approved tasks, waiting items, closes |
+| `linear.todo_state` / `waiting_state` / `done_state` | `Todo` / `Pending` / `Done` | Statuses for approved tasks; waiting items; Mark done, ticked sub-issues and approved closes (a completed status) |
 | `linear.followup_days` | `3` | Working days before a "waiting on" item is due |
 | `linear.default_priority` | `4` (low) | When a candidate has none and you didn't pick one |
 | `linear.missions_initiative` | `Q4 Missions` | The Linear initiative your missions live in, by name or id; the weekly check-in groups your work by its projects |
