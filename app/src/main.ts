@@ -247,16 +247,17 @@ async function loadRun() {
   }
 }
 
-/** A Mac notification when a source has failed in two sweeps in a row, at most once a day each.
+/** A Mac notification when a source has failed in two sweeps in a row, at most once a day each, once the sweep has finished.
  *  (A sweep can finish "ok" with one source down, e.g. an expired sign-in; the red dot is easy to miss.) */
 const FAIL_STREAK_ALERT = 2;
 function sourceAlerts() {
+  if (state.run.status === "running") return;     // a running sweep may still replace a source's detail
   const day = localToday();
   for (const o of state.run.source_overview ?? []) {
     if ((o.fail_streak ?? 0) < FAIL_STREAK_ALERT) continue;
     const name = SOURCE_NAME[o.source] ?? o.source;
     void notifyOnce(`source-fail-${o.source}-${day}`, `TodoHub: ${name} keeps failing`,
-      `${o.detail ?? "It reported a problem"}. Failed ${o.fail_streak} sweeps in a row`
+      `${(o.detail ?? "It reported a problem").replace(/\.$/, "")}. Failed ${o.fail_streak} sweeps in a row`
       + `${o.failing_since ? `, since ${shortWhen(o.failing_since)}` : ""}. Check it in Settings → Sources.`);
   }
 }

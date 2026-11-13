@@ -29,7 +29,6 @@ from .selfcmd import self_command
 from . import connectors, handled, mutes, note, outage, plan, sources, wrapup
 
 log = logging.getLogger("todohub.sweep")
-CONNECTOR_SOURCES = set(connectors.BUILTIN.values())     # the sources a sweep reads through claude.ai connectors
 
 TZ = ZoneInfo("America/New_York")
 TODO_DB_TOOLS = [
@@ -430,20 +429,20 @@ def _invoke_claude(settings: Settings, run_id: int, prompt: str, log_path: Path,
     is how its claude.ai connector fetch ended (``outage.connector_failure``)."""
     mcp_path = settings.sweep_dir / f"mcp-{run_id}.json"
     mcp_path.write_text(json.dumps(mcp_config(settings, run_id), indent=2))
-    fetch_path = settings.sweep_dir / f"claudeai-{run_id}.log"
+    debug_path = settings.sweep_dir / f"claudeai-{run_id}.log"
     out: dict = {"status": "error", "cost": None, "turns": None, "error": None, "result": {},
                  "connector_failure": None}
     try:
         proc = subprocess.run(
-            [*claude_command(settings, prompt, mcp_path), "--debug=claudeai-mcp", "--debug-file", str(fetch_path)],
+            [*claude_command(settings, prompt, mcp_path), "--debug=claudeai-mcp", "--debug-file", str(debug_path)],
             cwd=settings.sweep_dir, env=_env(), capture_output=True, text=True, timeout=settings.timeout_minutes * 60,
         )
-        fetch = fetch_path.read_text(errors="replace").splitlines() if fetch_path.exists() else []
-        out["connector_failure"] = outage.connector_failure(fetch)
+        fetch_lines = debug_path.read_text(errors="replace").splitlines() if debug_path.exists() else []
+        out["connector_failure"] = outage.connector_failure(fetch_lines)
         log_path.write_text(
             f"$ claude -p <prompt> ({header})\n\n"
             f"--- prompt ---\n{prompt}\n\n--- stdout ---\n{proc.stdout}\n\n--- stderr ---\n{proc.stderr}\n"
-            "\n--- claude.ai connectors ---\n" + "".join(f"{line}\n" for line in fetch)
+            "\n--- claude.ai connectors ---\n" + "".join(f"{line}\n" for line in fetch_lines)
         )
         try:
             result = json.loads(proc.stdout)
@@ -467,7 +466,7 @@ def _invoke_claude(settings: Settings, run_id: int, prompt: str, log_path: Path,
         out["error"] = f"Timed out after {settings.timeout_minutes} minutes."
     finally:
         mcp_path.unlink(missing_ok=True)
-        fetch_path.unlink(missing_ok=True)
+        debug_path.unlink(missing_ok=True)
     return out
 
 
@@ -539,10 +538,12 @@ def run_sweep(settings: Settings, trigger: str = "manual", only: str | None = No
                 db.report_source_status(run_id, source, False, "Not reported by the sweep.", None)
         if out["connector_failure"] is not None:
             # Claude Code couldn't load the claude.ai connectors: say so instead of Claude's guess.
-            down = outage.detail(out["connector_failure"], outage.claude_code_incident())
-            for s in (db.get_run(run_id, with_sources=True) or {}).get("sources", []):
-                if not s["ok"] and s["source"] in CONNECTOR_SOURCES:
-                    db.report_source_status(run_id, s["source"], False, down, s["items_scanned"])
+            failed = [s for s in db.get_run(run_id, with_sources=True)["sources"]
+                      if not s["ok"] and s["source"] in connectors.BUILTIN.values()]
+            if failed:
+                detail = outage.detail(out["connector_failure"], outage.claude_code_incident())
+                for s in failed:
+                    db.report_source_status(run_id, s["source"], False, detail, s["items_scanned"])
 
         db.finish_run(run_id, out["status"], cost_usd=out["cost"], num_turns=out["turns"], error=out["error"])
         if out["status"] == "ok":
