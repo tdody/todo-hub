@@ -459,7 +459,8 @@ def test_connector_outage_rewrites_the_failed_connector_sources(settings, monkey
     by_source = {s["source"]: s for s in run["sources"]}
     down = ("Anthropic's connector service didn't respond (HTTP 503), so it wasn't read. "
             'Anthropic reports "Elevated errors on Claude Code" (status.claude.com).')
-    # The fake reports only Slack; the other connector sources are unreported, so failed.
+    # The fake reports only Slack. Gmail, Grain and HubSpot go unreported, so failed; so does Calendar,
+    # because on a fresh database meeting prep is due and the sweep doesn't pre-report it as done.
     assert {s for s, v in by_source.items() if v["detail"] == down} == {"gmail", "grain", "calendar", "hubspot"}
     assert by_source["slack"]["detail"] == "3 searches"           # it worked: untouched
     assert "Can't find gh" in by_source["github"]["detail"]       # not a connector: untouched
