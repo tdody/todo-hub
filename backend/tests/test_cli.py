@@ -66,11 +66,13 @@ def test_check_warns_about_each_status_setting_linear_lacks(tmp_home, monkeypatc
     from conftest import FakeLinear
     tmp_home.mkdir(parents=True, exist_ok=True)
     (tmp_home / "config.toml").write_text(
-        '[linear]\ntodo_state = "Todo"\nwaiting_state = "Blocked"\ndone_state = "Closed"\n'
+        '[linear]\ntodo_state = "Todo"\nwaiting_state = "Blocked"\ndone_state = "Pending"\n'
         '[sweep]\ngithub_reviews = false\n')
     monkeypatch.setattr(cli, "Linear", lambda key: FakeLinear())
     assert cli.cmd_check(None) == 1
-    warnings = [line.strip() for line in capsys.readouterr().out.splitlines() if "No status named" in line]
-    statuses = "Statuses: Backlog, Todo, Pending, Done"
-    assert warnings == [f"! No status named 'Blocked' (linear.waiting_state). {statuses}",
-                        f"! No status named 'Closed' (linear.done_state). {statuses}"]
+    warnings = [line.strip() for line in capsys.readouterr().out.splitlines() if line.strip().startswith("!")]
+    assert warnings == [
+        "! No status named 'Blocked' (linear.waiting_state). Statuses: Backlog, Todo, Pending, Done",
+        "! 'Pending' (linear.done_state) isn't a completed status, so Mark done, ticks and closes use the team's "
+        "first completed status.",
+    ]
