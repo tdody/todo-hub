@@ -26,18 +26,20 @@ from pydantic import BaseModel, Field
 
 from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
-from . import logos, mutes, schedule, stats, summary, tools
+from . import logos, mutes, pulls, schedule, stats, summary, tools
 from .categories import categorize
 from .config import (SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings,
                      get_linear_key, load_settings, read_overrides, source_state, write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
 from .selfcmd import self_command
-from .sweep import next_working_day
+from .sources import SourceError
+from .sweep import _env, next_working_day
 from .tools import ToolError
 
 TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420"]
 META_TTL_SECONDS = 600
+PULLS_TTL_SECONDS = 300       # a read takes GitHub about 40 points and 7 seconds
 SOURCE_NAMES = {"slack": "Slack message", "gmail": "Email", "grain": "Grain meeting", "calendar": "Calendar event",
                 "hubspot": "HubSpot", "manual": "Link"}
 
@@ -899,6 +901,25 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             slip_cache.update(at=time.time(), data={
                 "slips": stats.due_slips(raw, settings.client_label_group), "checked": len(raw), "error": None})
         return slip_cache["data"]
+
+    pull_cache: dict = {"at": 0.0, "data": None, "read_at": None, "error": None, "error_at": None}
+    pull_lock = threading.Lock()
+
+    @app.get("/api/pulls", dependencies=auth)
+    def pull_requests(refresh: bool = False) -> dict:
+        """Open pull requests from GitHub (see pulls.py), read again after 5 minutes. When gh fails, the
+        last good read comes back with the error."""
+        with pull_lock:
+            if refresh or time.time() - pull_cache["at"] > PULLS_TTL_SECONDS:
+                now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                try:
+                    pull_cache.update(data=pulls.read(settings, _env()), read_at=now, error=None, error_at=None)
+                except SourceError as exc:
+                    pull_cache.update(error=str(exc), error_at=now)
+                pull_cache["at"] = time.time()
+            empty = {"login": None, "mine": [], "review": [], "mine_total": 0, "review_total": 0}
+            return {**(pull_cache["data"] or empty), "read_at": pull_cache["read_at"],
+                    "error": pull_cache["error"], "error_at": pull_cache["error_at"]}
 
     @app.get("/api/digest", dependencies=auth)
     def weekly_digest(week: int = 0) -> dict:
