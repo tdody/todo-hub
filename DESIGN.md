@@ -208,6 +208,18 @@ components:
     typography: "{typography.meta}"
     rounded: "{rounded.pill}"
     padding: "2px 10px"
+  pill-stage-draft:
+    backgroundColor: "{colors.surface-2}"
+    textColor: "{colors.muted}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.pill}"
+    padding: "2px 10px"
+  pill-stage-changes-requested:
+    backgroundColor: "{colors.warn-bg}"
+    textColor: "{colors.warn-ink}"
+    typography: "{typography.meta}"
+    rounded: "{rounded.pill}"
+    padding: "2px 10px"
   card:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
@@ -455,6 +467,9 @@ Soft and friendly, small and calm.
 
 - **Style:** full-pill, 12px at 600, 2px × 10px; status pills start with a 7px dot in their own ink color, and both show a faint caret when clickable.
 - **State:** clicking opens a menu listing every option with its number key; hover adds a 1px ring in the pill's own color at 25%. In a row's meta line they shrink to 11px.
+- **Pull request stages:** the stage pill starts a row's meta line, before the repo and number. It is not clickable and shows no caret.
+- **Draft:** Shaded Paper fill, Pencil text and a hollow dot (a 1.5px ring). It never uses a dashed outline, because a dashed outline means Backlog.
+- **Changes requested:** Morning Amber (`warn-bg` fill, `warn-ink` text). In review reuses `s-prog`, and Approved reuses `s-done`.
 
 ### Chips
 
@@ -472,6 +487,29 @@ Soft and friendly, small and calm.
 
 - **List item:** no border or fill at rest; hover shows a 60% Paper wash; selected becomes Paper with an accent-tinted border, the Selected row shadow and a 600 title. One line of 12px meta under the title.
 - **Reading pane:** Paper, Hairline border, 12px corners, 16px × 18px padding. The ID (a link), client or project, the 18px title, then one row of pills and fields, then actions above a hairline, then sections under uppercase labels.
+
+### The view strip (Pull requests)
+
+One row of plain segments. Each segment is a count over a label, and one segment is pressed.
+
+- **Shape:** Paper, Hairline border, 8px corners, the Whisper shadow. Hairlines divide the segments, and the segments share the width equally.
+- **Segment:** a 20px tabular count at 700 over a 12px Pencil label, 8px × 14px padding. The number keys 1 to N press the segments.
+- **Pressed:** a 7% accent tint and a 2px accent line along the bottom edge. The label turns Ink at 600.
+- **Hover:** a segment that is not pressed shows Shaded Paper.
+- **Filter note:** an optional 12px tabular note under the count, in its tone: Alarm Red at 600, Morning Amber ink or Done Green ("2 CI failing").
+- **Note states:** a click presses the segment and filters the table to that part. Hover on a note that is not pressed underlines it. A pressed note gets a full-pill wash in its tone (`bad-bg`, `warn-bg`, `s-done-bg`) and a 10px × that clears it.
+- **Focus:** segments and notes use the 2px accent focus outline of all buttons. On a segment, the outline is inside the button, because the strip clips what is outside it.
+- **Narrow windows:** below 1000px the notes go away. A segment with no note keeps an empty line, so the counts stay aligned.
+
+### The stack rail (Pull requests)
+
+A stack of pull requests sorts, shows and lights up as one unit.
+
+- **Summary row:** heads each stack. "Stack of 3" at 13px and 600, then a meta line with the repo and the merge order ("initech #71 → #72 → #73"). Each cell holds the one value that the table sorts the stack by.
+- **Rail:** a narrow first column. The summary row has a square knot (8px, 2px corners), and each pull request has a round 8px knot. 2px lines join the knots. The rail color is Pencil mixed 78% with the Desk.
+- **Rows:** no hairline divides the rows of a stack; only the last row has one. In an opened row the line runs through. A pull request on its own has no rail.
+- **Highlight:** pointing at any row of a stack turns the knots and lines of the whole stack Ink. Another stack or leaving the tab clears it.
+- **Context rows:** a pull request that the view or the filter leaves out stays in its place, in Pencil at 400, with no status colors. A stack never splits.
 
 ### Inputs / Fields
 
