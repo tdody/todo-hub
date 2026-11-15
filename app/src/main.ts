@@ -3,6 +3,7 @@ import { api, ApiError, waitForBackend } from "./api";
 import { h, link, modal, pageHead, svg } from "./dom";
 import type { Child } from "./dom";
 import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
+import { loadPulls, pullsCount, pullsKey, pullsView, setupPulls } from "./pulls";
 import { notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
@@ -16,7 +17,7 @@ import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingP
 applyTheme();
 import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
 
-type Tab = "inbox" | "today" | "client" | "dev" | "insights" | "settings";
+type Tab = "inbox" | "today" | "client" | "dev" | "pulls" | "insights" | "settings";
 
 const PRIORITIES = [
   { value: 1, name: "Urgent" },
@@ -271,6 +272,7 @@ function editing(): boolean {
  *  10 minutes old); "force" re-reads labels, projects and statuses from Linear, and re-checks
  *  the Inbox against Linear for suggestions handled there by hand. */
 async function refresh(all = false, meta: "keep" | "reload" | "force" = "keep") {
+  if (meta === "force" && state.tab === "pulls") void loadPulls(true);     // GitHub too, alongside Linear
   try {
     // Linear may be unreachable (no key yet, offline); the queue still works without it.
     if (!state.meta || meta !== "keep") state.meta = await api.meta(meta === "force");
@@ -2905,6 +2907,8 @@ const NAV_ICON: Record<Tab, string[]> = {
   client: ["M4.5 6.5h11A1.5 1.5 0 0 1 17 8v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15V8a1.5 1.5 0 0 1 1.5-1.5z",
            "M7.5 6.5V5A1.5 1.5 0 0 1 9 3.5h2A1.5 1.5 0 0 1 12.5 5v1.5M3 11h14"],
   dev: ["M7 6 3 10l4 4M13 6l4 4-4 4M11.2 4.5 8.8 15.5"],
+  pulls: ["M3.7 4.8a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0-3.6 0M3.7 15.2a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0-3.6 0",
+          "M12.7 15.2a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0-3.6 0M5.5 6.6v6.8M14.5 13.4V8.3a2 2 0 0 0-2-2H9.2M10.8 4.6 9.1 6.3l1.7 1.7"],
   insights: ["M4.5 16.5v-5M8.5 16.5v-9M12.5 16.5v-6.5M16.5 16.5v-11"],
   settings: ["M15.33 7.99L17.42 8.34L17.42 11.66L15.33 12.01L15.19 12.35L16.42 14.07L14.07 16.42L12.35 15.19L12.01 15.33L11.66 17.42L8.34 17.42L7.99 15.33L7.65 15.19L5.93 16.42L3.58 14.07L4.81 12.35L4.67 12.01L2.58 11.66L2.58 8.34L4.67 7.99L4.81 7.65L3.58 5.93L5.93 3.58L7.65 4.81L7.99 4.67L8.34 2.58L11.66 2.58L12.01 4.67L12.35 4.81L14.07 3.58L16.42 5.93L15.19 7.65z",
              "M10 7.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z"],
@@ -3113,13 +3117,15 @@ function renderHeader() {
   const counts: Record<Tab, number> = {
     inbox: state.candidates.length,
     today: state.issuesLoaded ? todaySplit().open.length : state.today.length,
+    pulls: pullsCount() ?? 0,
     insights: 0,
     settings: 0,
     client: state.issues.filter((i) => i.list === "client").length,
     dev: state.issues.filter((i) => i.list === "dev").length,
   };
   const item = (id: Tab, label: string, key: number) => {
-    const showCount = id !== "insights" && id !== "settings" && (id === "inbox" || id === "today" || state.issuesLoaded);
+    const showCount = id === "pulls" ? pullsCount() !== null
+      : id !== "insights" && id !== "settings" && (id === "inbox" || id === "today" || state.issuesLoaded);
     const on = state.tab === id && !((id === "client" || id === "dev") && state.pickedClient);
     return h("button", {
       class: `nav${on ? " active" : ""}`, title: `${label} (⌘${key})`, "aria-current": on ? "page" : undefined,
@@ -3141,7 +3147,7 @@ function renderHeader() {
       }, "+")),
     h("nav", { class: "side-nav", "aria-label": "Sections" },
       item("inbox", "Inbox", 1), item("today", "Today", 2), item("client", "Client", 3), item("dev", "Dev", 4),
-      item("insights", "Insights", 5), h("div", { class: "nav-gap" }), item("settings", "Settings", 6)),
+      item("pulls", "Pull requests", 5), item("insights", "Insights", 6), h("div", { class: "nav-gap" }), item("settings", "Settings", 7)),
     clients.length > 0 ? h("div", { class: "side-group" }, "Clients") : "",
     clients.length > 0 ? h("div", { class: "side-clients" },
       ...shown.map((c) => h("button", {
@@ -3197,6 +3203,11 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
 }
 
 setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, doneStatus, todoStatus, state });
+setupPulls({
+  rerender: () => { if (state.tab === "pulls" && !editing()) render(); else renderHeader(); },
+  toast: (m) => void toast(m),
+  issues: () => state.issues,
+});
 
 const settingsCtx: SettingsCtx = {
   rerender: () => { if (state.tab === "settings") { const y = window.scrollY; render(); window.scrollTo(0, y); } },
@@ -3238,6 +3249,7 @@ function render() {
     state.tab === "inbox" ? inboxView()
       : state.tab === "today" ? todayView()
       : state.tab === "settings" ? settingsView(settingsCtx)
+      : state.tab === "pulls" ? pullsView()
       : state.tab === "insights" ? insightsView(() => { if (state.tab === "insights") render(); }, (t, ids) => goTab(t, ids))
       : state.tab === "dev" && state.pickedProject ? projectView(state.pickedProject)
       : byStatus ? statusView(state.tab as "client" | "dev")
@@ -3315,7 +3327,7 @@ async function submitCapture() {
 
 // ---- keyboard -----------------------------------------------------------------------------------
 const SHORTCUTS: [string, string][] = [
-  ["j / k", "Next / previous task"],
+  ["j / k", "Next / previous task or pull request"],
   ["a", "Approve (or close / post / track)"],
   ["d, then 1–5", "Drop, with a reason"],
   ["s, then 1–3", "Snooze: tomorrow / next Monday / in a week"],
@@ -3328,17 +3340,18 @@ const SHORTCUTS: [string, string][] = [
   ["⇧E · ⇧S · ⇧C", "Today, Client, Dev: edit the description · add a sub-issue · comment (⌘↵ posts)"],
   ["c", "Capture a task"],
   ["/", "Filter"],
-  ["⌘1 – ⌘6", "Inbox, Today, Client, Dev, Insights, Settings (also ⌘,)"],
+  ["⌘1 – ⌘7", "Inbox, Today, Client, Dev, Pull requests, Insights, Settings (also ⌘,)"],
   ["⌥⌘T", "Capture from anywhere (when TodoHub is running)"],
   ["⌘↵ · m · b", "Today: mark done · move to tomorrow's list · block time"],
   ["n · d · a · o", "Today: copy the nudge or message · Claude's due date · add to Today · open in Linear"],
   ["x · ↵", "Today, in the morning: check a suggestion · start the day"],
   ["v", "Client / Dev: group by client or project ↔ by status"],
+  ["1 – 5 · Space · o · l", "Pull requests: pick a view · open or close the row · open it in GitHub · open its Linear issue"],
   ["t", "Theme: follow the Mac → light → dark → daylight (follows the time of day)"],
   ["r", "Sources: each one's status, ↻ to check one, Run all"],
   ["?", "This list"],
 ];
-const TAB_ORDER: Tab[] = ["inbox", "today", "client", "dev", "insights", "settings"];
+const TAB_ORDER: Tab[] = ["inbox", "today", "client", "dev", "pulls", "insights", "settings"];
 
 function markFocus() {
   document.querySelectorAll<HTMLElement>(".card").forEach((el) => {
@@ -3428,7 +3441,7 @@ document.addEventListener("keydown", (e) => {
     goTab("settings");
     return;
   }
-  if ((e.metaKey || e.ctrlKey) && /^[1-6]$/.test(e.key)) {
+  if ((e.metaKey || e.ctrlKey) && /^[1-7]$/.test(e.key)) {
     e.preventDefault();
     goTab(TAB_ORDER[Number(e.key) - 1]);
     return;
@@ -3464,6 +3477,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (state.tab === "today" && !document.querySelector(".overlay") && todayKey(e)) return;
+  if (state.tab === "pulls" && !document.querySelector(".overlay") && pullsKey(e)) return;
   const issueList = (state.tab === "client" || state.tab === "dev") && !document.querySelector(".overlay");
   if (issueList && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
     e.preventDefault();
@@ -3538,6 +3552,7 @@ async function start() {
   onDesktopEvent("capture", () => { state.tab = "inbox"; render(); captureInput.focus(); });
   onDesktopEvent("run-now", () => void runNow());
   await refresh(true);
+  void loadPulls();                  // for the sidebar's count
   pollWhileRunning();
   setInterval(() => void refresh(state.tab !== "inbox").then(pollWhileRunning), 60_000);
   setInterval(briefReminders, 60_000);
