@@ -304,7 +304,7 @@ The light is the system's one personality. The Daylight theme moves the desk thr
 
 **Key Characteristics:**
 
-- Flat paper on a pale desk: hairline borders and tonal steps, shadows only for things that float.
+- Flat paper on a pale desk: hairline borders and tonal steps. Things in the page flow get a whisper of shadow at most; only things that float get real shadows.
 - One accent, Early-Light Navy, used for what you act on and where you are.
 - Morning Amber is both the warning color and the morning glow.
 - System font only; hierarchy from size and weight; tabular figures for every count, date and ID.
@@ -439,7 +439,7 @@ Flat by default. Depth comes from three tonal steps (Desk, Paper, Shaded Paper) 
 
 ### Named Rules
 
-**The Float-Only Shadow Rule.** A shadow means "this is above the page and will go away". Nothing that lives in the page flow gets more than the Whisper.
+**The Float-Only Shadow Rule.** A shadow means "this is above the page and will go away". Nothing that lives in the page flow gets more than the Whisper or the Selected row shadow.
 
 ## Shapes
 
@@ -577,6 +577,6 @@ Under the band, Claude's note (a 15px 600 lead sentence, then 14px prose with is
 - **Don't** make it playful or gamified: no confetti, streaks, mascots or celebratory emoji. A done item gets a check and a strikethrough; that is the celebration.
 - **Don't** let source or task-type colors spread beyond chip text, icons and avatar tints. No Slack-purple headers, no Gmail-red rows.
 - **Don't** add colored left stripes beyond Urgent, High and the digest's landing highlight.
-- **Don't** add shadows to things in the page flow; only menus, popovers, toasts and dialogs float.
+- **Don't** give things in the page flow more than the Whisper or the Selected row shadow; only menus, popovers, toasts and dialogs get real shadows.
 - **Don't** add a webfont or a second typeface.
 - **Don't** add a refresh button or chrome that is only decoration.

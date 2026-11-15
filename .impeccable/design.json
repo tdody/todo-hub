@@ -1177,7 +1177,7 @@
     "northStar": "The Morning Desk",
     "overview": "**Creative North Star: \"The Morning Desk\"**\n\nTodoHub is a quiet, well-lit desk with the day laid out before you start. The desk is a pale cool grey; on it sit white sheets of paper with hairline edges, and one deep navy pen marks what you act on. Nothing on the desk is there for show. The warmth comes from the window: the light changes through the day, and the top of Today paints the sky outside: night in the morning, a thin band of daylight through the day, dusk at the wrap-up.\n\nEverything is soft and friendly but never loose. Text is the Mac's own system font at a compact 14px, with 12–13px detail lines. Corners are gently rounded, status and priority are rounded pills in gentle tints, and fields that hold nothing stay out of sight until you hover or tab to them. Attention is spent only on what is late, urgent, waiting on someone, or failing; everything else stays calm.\n\nThe light is the system's one personality. The Daylight theme moves the desk through cream (morning), clear white (day), warm sand (afternoon), lavender (dusk) and indigo (night), and Today carries a painted sky with a sun that follows the real one. The interface itself does not decorate. It is not an enterprise dashboard, it is not playful or gamified, and the colors of Slack, Gmail and the other sources never spread past their small chips.",
     "keyCharacteristics": [
-      "Flat paper on a pale desk: hairline borders and tonal steps, shadows only for things that float.",
+      "Flat paper on a pale desk: hairline borders and tonal steps. Things in the page flow get a whisper of shadow at most; only things that float get real shadows.",
       "One accent, Early-Light Navy, used for what you act on and where you are.",
       "Morning Amber is both the warning color and the morning glow.",
       "System font only; hierarchy from size and weight; tabular figures for every count, date and ID.",
@@ -1213,7 +1213,7 @@
       },
       {
         "name": "The Float-Only Shadow Rule",
-        "body": "A shadow means \"this is above the page and will go away\". Nothing that lives in the page flow gets more than the Whisper.",
+        "body": "A shadow means \"this is above the page and will go away\". Nothing that lives in the page flow gets more than the Whisper or the Selected row shadow.",
         "section": "elevation"
       }
     ],
@@ -1231,7 +1231,7 @@
       "**Don't** make it playful or gamified: no confetti, streaks, mascots or celebratory emoji. A done item gets a check and a strikethrough; that is the celebration.",
       "**Don't** let source or task-type colors spread beyond chip text, icons and avatar tints. No Slack-purple headers, no Gmail-red rows.",
       "**Don't** add colored left stripes beyond Urgent, High and the digest's landing highlight.",
-      "**Don't** add shadows to things in the page flow; only menus, popovers, toasts and dialogs float.",
+      "**Don't** give things in the page flow more than the Whisper or the Selected row shadow; only menus, popovers, toasts and dialogs get real shadows.",
       "**Don't** add a webfont or a second typeface.",
       "**Don't** add a refresh button or chrome that is only decoration."
     ]
