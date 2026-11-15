@@ -404,6 +404,48 @@ export interface Today {
   items: TodayItem[];
 }
 
+/** An open pull request, from GitHub (backend pulls.py). Bots' comments and reviews are left out. */
+export interface PullRequest {
+  number: number;
+  title: string;
+  url: string;
+  repo: string;                    // "owner/name"
+  author: string;
+  stage: "draft" | "in_review" | "changes_requested" | "approved";
+  created_at: string;
+  updated_at: string;
+  additions: number;
+  deletions: number;
+  base: string;                    // branch names
+  head: string;
+  conflicts: boolean;
+  ci: { state: "failing" | "running" | "passing" | "none"; total: number; done: number;
+        failing: { name: string; seconds: number | null; url: string | null }[] };   // url: the run's log
+  comments: number;
+  /** Unresolved review threads whose last comment is not yours (of the newest 30). */
+  open_threads: number;
+  threads_unread: number;          // older threads than the newest 30
+  threads: { author: string; path: string; line: number | null; at: string; text: string }[];
+  reviewers: { login: string; state: "waiting" | "approved" | "changes_requested" | "commented"; at: string | null }[];
+  /** Linear identifiers named in the branch or the title, e.g. "ENG-646". */
+  refs: string[];
+  /** Yours only: the pull request this one is built on (its base branch is that one's branch). */
+  stacked_on?: number | null;
+  asked_at: string;                // when your review was asked for
+  reviewed_before: boolean;        // you reviewed it before this request
+}
+
+export interface Pulls {
+  login: string | null;
+  mine: PullRequest[];
+  review: PullRequest[];
+  mine_total: number;              // GitHub's count; more than mine.length when some were not read
+  review_total: number;
+  read_at: string | null;          // the last good read
+  error: string | null;            // why the last read failed
+  error_at: string | null;
+}
+
 interface BackendInfo {
   url: string;
   token: string;
@@ -505,6 +547,7 @@ export const api = {
   undo: (id: number) => call<{ candidate: Candidate; warnings: string[] }>("POST", `/api/candidates/${id}/undo`),
   issues: () => call<Issue[]>("GET", "/api/issues"),
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
+  pulls: (refresh = false) => call<Pulls>("GET", `/api/pulls${refresh ? "?refresh=true" : ""}`),
   editIssue: (id: string, edit: IssueEdit) => call<Issue>("PATCH", `/api/issues/${encodeURIComponent(id)}`, edit),
   /** Move an issue to Linear's trash (restorable there for 30 days); it also leaves Today. */
   deleteIssue: (id: string) =>

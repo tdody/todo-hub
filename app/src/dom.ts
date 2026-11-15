@@ -58,7 +58,9 @@ export function modal(title: string, body: Node, actions: Node[] = [], cls = "")
   return close;
 }
 
-export type PageTab = { id: string; label: string; on: boolean; select: () => void };
+/** ``count`` shows beside the label; ``controls`` is the id of the panel the tab shows (the tab then
+ *  gets the id "tab-<id>", and only the selected tab is in the Tab order). */
+export type PageTab = { id: string; label: string; on: boolean; select: () => void; count?: number; controls?: string };
 
 /** Every page's header: the title (with a short count beside it), then underline tabs when the
  *  page has views. ``right`` (the filter) sits on the tab line, or on the title line when there
@@ -71,6 +73,9 @@ export function pageHead(title: string, opts: { sub?: string; tabs?: PageTab[]; 
   return h("div", { class: "page-head" }, titleLine,
     h("div", { class: "page-tabline" },
       h("div", { class: "page-tabs", role: "tablist", "aria-label": opts.label ?? `${title} view` },
-        ...opts.tabs.map((t) => h("button", { role: "tab", class: t.on ? "on" : "", "aria-selected": String(t.on), onclick: t.select }, t.label))),
+        ...opts.tabs.map((t) => h("button", {
+          role: "tab", class: t.on ? "on" : "", "aria-selected": String(t.on), onclick: t.select,
+          id: t.controls && `tab-${t.id}`, "aria-controls": t.controls, tabindex: t.controls && (t.on ? "0" : "-1"),
+        }, t.label, t.count !== undefined && h("span", { class: "count" }, String(t.count))))),
       opts.right ? h("span", { class: "page-right" }, opts.right) : ""));
 }
