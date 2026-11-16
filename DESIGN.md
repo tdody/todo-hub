@@ -467,7 +467,7 @@ Soft and friendly, small and calm.
 
 - **Style:** full-pill, 12px at 600, 2px × 10px; status pills start with a 7px dot in their own ink color, and both show a faint caret when clickable.
 - **State:** clicking opens a menu listing every option with its number key; hover adds a 1px ring in the pill's own color at 25%. In a row's meta line they shrink to 11px.
-- **Pull request stages:** the stage pill starts a row's meta line, before the repo and number. It is not clickable and shows no caret.
+- **Pull request stages:** the stage pill starts a row's meta line, before the repo and number. It is not clickable and shows no caret. The Linear issue later in the line is an issue chip with the ID only, and a click opens the issue in Linear.
 - **Draft:** Shaded Paper fill, Pencil text and a hollow dot (a 1.5px ring). It never uses a dashed outline, because a dashed outline means Backlog.
 - **Changes requested:** Morning Amber (`warn-bg` fill, `warn-ink` text). In review reuses `s-prog`, and Approved reuses `s-done`.
 
@@ -503,12 +503,14 @@ One row of plain segments. Each segment is a count over a label, and one segment
 
 ### The stack rail (Pull requests)
 
-A stack of pull requests sorts, shows and lights up as one unit.
+A stack of pull requests sorts, shows, lights up and folds as one unit.
 
-- **Summary row:** heads each stack. "Stack of 3" at 13px and 600, then a meta line with the repo and the merge order ("initech #71 → #72 → #73"). Each cell holds the one value that the table sorts the stack by.
+- **Summary row:** heads each stack. A chevron in the open column, "Stack of 3" at 13px and 600, then a meta line with the repo and the merge order ("initech #71 → #72 → #73"). Each cell holds the one value that the table sorts the stack by.
 - **Rail:** a narrow first column. The summary row has a square knot (8px, 2px corners), and each pull request has a round 8px knot. 2px lines join the knots. The rail color is Pencil mixed 78% with the Desk.
 - **Rows:** no hairline divides the rows of a stack; only the last row has one. In an opened row the line runs through. A pull request on its own has no rail.
 - **Highlight:** pointing at any row of a stack turns the knots and lines of the whole stack Ink. Another stack or leaving the tab clears it.
+- **Fold:** a click on the rail or on the summary row folds the stack to its summary row, and another click unfolds it. The chevron points down when the stack is open and right when it is folded.
+- **Folded:** the line stops at the square knot, and a hairline closes the summary row. The knot grows to 16px (4px corners) in Pencil and holds the count in the Desk color, 10px at 700. The rail color is too light for text: Desk on it gives 3.4:1 in light mode, and Desk on Pencil gives 5.3:1.
 - **Context rows:** a pull request that the view or the filter leaves out stays in its place, in Pencil at 400, with no status colors. A stack never splits.
 
 ### Inputs / Fields

@@ -52,6 +52,7 @@ const st = {
   note: false,                          // the view's note filters the table
   sorts: { mine: { id: "step", dir: 1 }, review: { id: "step", dir: 1 } } as Record<Side, { id: string; dir: number }>,
   open: new Set<string>(),
+  foldedStacks: new Set<string>(),      // stacks that show only their summary row
   sel: null as string | null,
   filter: "",
   fold: false,                          // drafts in no stack
@@ -119,6 +120,7 @@ function membersOf(root: PullRequest): PullRequest[] {
   walk(root);
   return out;
 }
+const isFolded = (u: Unit) => u.all.length > 1 && st.foldedStacks.has(u.id);
 
 // ---- the next step: one per pull request, from GitHub data only --------------------------------
 const STEP = (label: string, tone: Tone, rank: number, needs: boolean): Step => ({ label, tone, rank, needs });
@@ -157,6 +159,9 @@ function linearOf(p: PullRequest): { ident: string; issue?: Issue; url: string |
   const workspace = issues[0]?.url.match(/^https:\/\/linear\.app\/[^/]+\/issue\//)?.[0];
   return { ident, issue, url: issue?.url ?? (workspace ? workspace + ident : null) };
 }
+/** The Linear issue's ID as a chip that opens it in Linear. The l key does the same from the keyboard. */
+const linearRef = (ident: string) =>
+  h("button", { class: "ref", "data-act": "lin", tabindex: "-1", title: `Open ${ident} in Linear` }, h("span", { class: "k" }, ident));
 
 // ---- views and columns --------------------------------------------------------------------------
 const mine = () => st.data?.mine ?? [];
@@ -264,14 +269,15 @@ function metaLine(p: PullRequest, u: Unit): HTMLElement {
     if (p.reviewed_before) rest.push(h("span", { class: "amb" }, "asked again"));
   }
   const lin = linearOf(p);
-  if (lin) rest.push(h("span", { class: "ref" }, h("span", { class: "k" }, lin.ident)));
+  if (lin) rest.push(linearRef(lin.ident));
   if (u.all.length > 1) rest.push(`${u.all.indexOf(p) + 1} of ${u.all.length}`);
   return h("span", { class: "m" }, keep, ...rest.map((b) => h("span", { class: "b" }, b)));
 }
 
+/** A stack's rail. A click on it folds the stack; the summary row's button does it from the keyboard. */
 function rail(u: Unit, p: PullRequest, detail = false): HTMLElement {
-  const td = h("td", { class: "rail", "aria-hidden": "true" });
-  if (u.all.length < 2) return td;
+  if (u.all.length < 2) return h("td", { class: "rail", "aria-hidden": "true" });
+  const td = h("td", { class: "rail", "aria-hidden": "true", title: "Fold the stack" });
   const last = u.all.indexOf(p) === u.all.length - 1;
   if (detail) {
     if (!last) td.append(h("span", { class: "ln thru" }));
@@ -281,9 +287,9 @@ function rail(u: Unit, p: PullRequest, detail = false): HTMLElement {
   return td;
 }
 
-/** A stack's first row: it shows the value the table sorts the stack by. */
+/** A stack's first row: it shows the value the table sorts the stack by. A click folds or unfolds the stack. */
 function stackRow(u: Unit): HTMLElement {
-  const ms = u.all, step = COLS[1];
+  const ms = u.all, step = COLS[1], folded = isFolded(u);
   const top = ms.reduce((a, b) => (step.key(b) < step.key(a) ? b : a));
   const s = stepOf(top);
   const fail = ms.filter((p) => p.ci.state === "failing").length, run = ms.filter((p) => p.ci.state === "running").length;
@@ -292,10 +298,11 @@ function stackRow(u: Unit): HTMLElement {
     : ms.some((p) => p.ci.state === "passing") ? h("span", { class: "ok" }, icon("ok"), "Passing")
     : h("span", { class: "mute" }, "No checks");
   const sum = (f: (p: PullRequest) => number) => ms.reduce((n, p) => n + f(p), 0);
-  return h("tr", { class: "sum", "data-stack": u.id },
-    h("td", { class: "rail", "aria-hidden": "true" }, h("span", { class: "knot head" }), h("span", { class: "ln dn" })),
-    h("td", { class: "x" }),
-    h("td", { class: "t" }, h("span", { class: "sk" }, `Stack of ${ms.length}`),
+  return h("tr", { class: `sum${folded ? " folded" : ""}`, "data-stack": u.id },
+    h("td", { class: "rail", "aria-hidden": "true", title: folded ? "Unfold the stack" : "Fold the stack" },
+      h("span", { class: "knot head" }, folded && String(ms.length)), !folded && h("span", { class: "ln dn" })),
+    h("td", { class: "x" }, icon("rt")),
+    h("td", { class: "t" }, h("button", { class: "sk", "aria-expanded": String(!folded) }, `Stack of ${ms.length}`),
       h("span", { class: "m" }, h("span", { class: "b" }, ms[0].repo.split("/")[1]),
         h("span", { class: "b" }, `merge order ${ms.map((p) => `#${p.number}`).join(" → ")}`))),
     h("td", { class: "st" }, h("span", { class: `step ${s.tone}`, title: s.label }, s.label), " ", h("span", { class: "mute" }, `#${top.number}`)),
@@ -368,7 +375,7 @@ function sideBox(p: PullRequest): Node[] {
     ? ` · due ${new Date(lin.issue.due_date + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" })}` : "";
   return [
     lbl("Linear"),
-    lin ? li("", h("span", { class: "ref" }, h("span", { class: "k" }, lin.ident)),
+    lin ? li("", linearRef(lin.ident),
       h("span", {}, lin.issue ? lin.issue.state.name : "", h("span", { class: "m" }, lin.issue ? due : "not one of your open issues")))
       : note("No Linear issue in the branch name or title."),
     lbl("Reviews"),
@@ -477,7 +484,8 @@ function table(us: Unit[], folded: PullRequest[]): HTMLElement {
         return h("th", { class: c.cls, "aria-sort": on ? (sort.dir > 0 ? "ascending" : "descending") : undefined },
           h("button", { "data-sort": c.id, title: c.tip }, label(c), icon(on ? (sort.dir > 0 ? "up" : "dn") : "ud")));
       }))),
-    h("tbody", {}, ...us.flatMap((u) => [...(u.all.length > 1 ? [stackRow(u)] : []), ...u.all.flatMap((p) => prRow(p, u))])),
+    h("tbody", {}, ...us.flatMap((u) => [...(u.all.length > 1 ? [stackRow(u)] : []),
+      ...(isFolded(u) ? [] : u.all.flatMap((p) => prRow(p, u)))])),
     h("tbody", {}, ...(folded.length ? [
       h("tr", { class: "fold-h" }, h("td", { colspan: "8" },
         h("button", { class: "fold-b", "data-fold": "", "aria-expanded": String(st.fold) },
@@ -497,7 +505,7 @@ function panel(): HTMLElement {
   const loose = (p: PullRequest) => side === "mine" && p.stage === "draft" && membersOf(rootOf(p)).length < 2;
   const us = units(shown.filter((p) => !loose(p)));
   const folded = side === "mine" && !st.note && (v.id === "needs" || v.id === "all") ? base.filter(loose) : [];
-  const order = [...us.flatMap((u) => u.all), ...(st.fold ? folded : [])].map(keyOf);
+  const order = [...us.flatMap((u) => (isFolded(u) ? [] : u.all)), ...(st.fold ? folded : [])].map(keyOf);
   if (!st.sel || !order.includes(st.sel)) st.sel = order[0] ?? null;
 
   const rows = us.length > 0 || folded.length > 0;
@@ -515,13 +523,15 @@ function panel(): HTMLElement {
 }
 
 type Focus = { on: "filter"; from: number | null; to: number | null } | { on: "act"; act: string; key: string | null }
-  | { on: "table" } | { on: "tab" } | null;
+  | { on: "stack"; id: string } | { on: "table" } | { on: "tab" } | null;
 function focusNow(): Focus {
   const a = document.activeElement;
   if (a === filterInput) return { on: "filter", from: filterInput.selectionStart, to: filterInput.selectionEnd };
   if (a instanceof HTMLElement && a.dataset.act && root?.contains(a)) {
     return { on: "act", act: a.dataset.act, key: a.closest<HTMLElement>("tr")?.dataset.key ?? null };
   }
+  const stack = a?.matches(".sk") && a.closest<HTMLElement>("tr")?.dataset.stack;
+  if (stack) return { on: "stack", id: stack };
   if (a?.closest(".pr-table")) return { on: "table" };
   if (a?.closest(".prs [role=tab]")) return { on: "tab" };
   return null;
@@ -533,7 +543,8 @@ function refocus(f: Focus) {
   } else if (f?.on === "act") {
     const row = f.key ? `tr[data-key="${CSS.escape(f.key)}"] ` : "";
     root?.querySelector<HTMLElement>(`${row}[data-act="${f.act}"]`)?.focus();
-  } else if (f?.on === "table") focusSel(false);
+  } else if (f?.on === "stack") root?.querySelector<HTMLElement>(`tr.sum[data-stack="${CSS.escape(f.id)}"] .sk`)?.focus();
+  else if (f?.on === "table") focusSel(false);
   else if (f?.on === "tab") document.getElementById(`tab-${st.side}`)?.focus();
 }
 
@@ -622,6 +633,19 @@ function toggle(key: string) {
   st.sel = key;
   paint();
 }
+/** Fold a stack to its summary row, or unfold it. A selection in the stack moves to the next row, else the one before. */
+function foldStack(id: string) {
+  if (!st.foldedStacks.delete(id)) {
+    st.foldedStacks.add(id);
+    const rows = [...(root?.querySelectorAll<HTMLElement>("tr.pr-row") ?? [])];
+    const at = rows.findIndex((r) => r.dataset.key === st.sel);
+    if (at >= 0 && rows[at].dataset.stack === id) {
+      const outside = (r: HTMLElement) => r.dataset.stack !== id;
+      st.sel = (rows.slice(at).find(outside) ?? rows.slice(0, at).reverse().find(outside))?.dataset.key ?? null;
+    }
+  }
+  paint();
+}
 function pickView(id: string) { st.view[st.side] = id; st.note = false; paint(); }
 function switchSide(side: Side) {
   if (side === st.side) return;
@@ -646,6 +670,9 @@ function act(kind: string, p: PullRequest | undefined) {
 }
 
 function onClick(e: MouseEvent) {
+  // a stack's rail, or its summary row, folds the stack
+  const stack = (e.target as Element).closest("td.rail, tr.sum")?.closest<HTMLElement>("tr[data-stack]")?.dataset.stack;
+  if (stack) return foldStack(stack);
   const t = (e.target as Element).closest<HTMLElement>("[data-view],[data-note],[data-sort],[data-fold],[data-act],[data-clear],tr.pr-row");
   if (!t) return;
   const d = t.dataset;
