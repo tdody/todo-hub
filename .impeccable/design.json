@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-10T14:16:09+00:00",
+  "generatedAt": "2026-11-15T19:51:38+00:00",
   "title": "Design System: TodoHub",
   "extensions": {
     "colorMeta": {
@@ -327,8 +327,8 @@
       "s-done-ink": {
         "role": "signal",
         "displayName": "Done Pill Ink",
-        "canonical": "#2f7d57",
-        "oklch": "oklch(53.1% 0.098 159.0)",
+        "canonical": "#2b7451",
+        "oklch": "oklch(50.3% 0.092 159.4)",
         "tonalRamp": [
           "#050e08",
           "#112b1e",
@@ -1078,7 +1078,29 @@
       "refersTo": "pill-status-todo",
       "description": "Clickable pills for Linear status and priority; a menu with number keys opens on click.",
       "html": "<span class=\"ds-pill ds-todo\"><i></i>Todo</span> <span class=\"ds-pill ds-prog\"><i></i>In Progress</span> <span class=\"ds-pill ds-pend\"><i></i>Pending</span> <span class=\"ds-pill ds-done\"><i></i>Done</span> <span class=\"ds-pill ds-backlog\"><i></i>Backlog</span> <span class=\"ds-pill ds-urgent\">Urgent</span> <span class=\"ds-pill ds-high\">High</span> <span class=\"ds-pill ds-med\">Medium</span> <span class=\"ds-pill ds-low\">Low</span>",
-      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 6px; font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; padding: 2px 10px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; cursor: pointer; } .ds-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; } .ds-pill:hover { filter: brightness(0.97); box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 25%, transparent); } .ds-todo { background: var(--s-todo-bg, #eef1f5); color: var(--s-todo-ink, #3d4756); } .ds-prog { background: var(--s-prog-bg, #e5edf8); color: var(--s-prog-ink, #1f4f8f); } .ds-pend { background: var(--s-pend-bg, #efe9f7); color: var(--s-pend-ink, #5b3a8a); } .ds-done { background: var(--s-done-bg, #e6f2ea); color: var(--s-done-ink, #2f7d57); } .ds-backlog { border: 1px dashed var(--muted, #5d6878); color: var(--muted, #5d6878); } .ds-urgent { background: var(--p-urgent-bg, #d1462f); color: var(--p-urgent-ink, #ffffff); } .ds-high { background: var(--p-high-bg, #fde6d8); color: var(--p-high-ink, #a8420f); } .ds-med { background: var(--p-med-bg, #f1ecdc); color: var(--p-med-ink, #6b5a1d); } .ds-low { color: var(--muted, #5d6878); border-color: var(--border, #dfe3e8); }"
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 6px; font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; padding: 2px 10px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; cursor: pointer; } .ds-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; } .ds-pill:hover { filter: brightness(0.97); box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 25%, transparent); } .ds-todo { background: var(--s-todo-bg, #eef1f5); color: var(--s-todo-ink, #3d4756); } .ds-prog { background: var(--s-prog-bg, #e5edf8); color: var(--s-prog-ink, #1f4f8f); } .ds-pend { background: var(--s-pend-bg, #efe9f7); color: var(--s-pend-ink, #5b3a8a); } .ds-done { background: var(--s-done-bg, #e6f2ea); color: var(--s-done-ink, #2b7451); } .ds-backlog { border: 1px dashed var(--muted, #5d6878); color: var(--muted, #5d6878); } .ds-urgent { background: var(--p-urgent-bg, #d1462f); color: var(--p-urgent-ink, #ffffff); } .ds-high { background: var(--p-high-bg, #fde6d8); color: var(--p-high-ink, #a8420f); } .ds-med { background: var(--p-med-bg, #f1ecdc); color: var(--p-med-ink, #6b5a1d); } .ds-low { color: var(--muted, #5d6878); border-color: var(--border, #dfe3e8); }"
+    },
+    {
+      "name": "Pull Request Stage Pills",
+      "kind": "chip",
+      "refersTo": "pill-stage-draft",
+      "description": "The stage of a pull request, first on its meta line. Draft and Changes requested are new; In review and Approved reuse s-prog and s-done.",
+      "html": "<span class=\"ds-pill ds-draft\"><i></i>Draft</span> <span class=\"ds-pill ds-prog\"><i></i>In review</span> <span class=\"ds-pill ds-chg\"><i></i>Changes requested</span> <span class=\"ds-pill ds-done\"><i></i>Approved</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 6px; font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; padding: 2px 10px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; } .ds-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; } .ds-draft { background: var(--surface-2, #f0f2f5); color: var(--muted, #5d6878); } .ds-draft i { background: none; box-shadow: inset 0 0 0 1.5px currentColor; } .ds-chg { background: var(--warn-bg, #fff4dc); color: var(--warn-ink, #7a4b00); } .ds-prog { background: var(--s-prog-bg, #e5edf8); color: var(--s-prog-ink, #1f4f8f); } .ds-done { background: var(--s-done-bg, #e6f2ea); color: var(--s-done-ink, #2b7451); }"
+    },
+    {
+      "name": "View Strip",
+      "kind": "nav",
+      "description": "The Pull requests views: plain segments, a count over a label, one pressed; a filter note filters the table to its part.",
+      "html": "<div class=\"ds-strip\"><div class=\"ds-seg ds-on\"><button class=\"ds-seg-b\" aria-pressed=\"true\"><b>7</b><span>Needs you</span></button><button class=\"ds-seg-n ds-red\" aria-pressed=\"false\">2 CI failing</button></div><div class=\"ds-seg\"><button class=\"ds-seg-b\" aria-pressed=\"false\"><b>4</b><span>In review</span></button><button class=\"ds-seg-n ds-amb ds-pr\" aria-pressed=\"true\">1 waiting 2+ days</button></div><div class=\"ds-seg\"><button class=\"ds-seg-b\" aria-pressed=\"false\"><b>12</b><span>All open</span></button><span class=\"ds-seg-n\">&nbsp;</span></div></div>",
+      "css": ".ds-strip { display: flex; max-width: 560px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; background: var(--surface, #ffffff); border: 1px solid var(--border, #dfe3e8); border-radius: 8px; box-shadow: var(--shadow, 0 1px 2px rgba(20, 30, 45, 0.06)); overflow: hidden; } .ds-seg { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; padding-bottom: 8px; border-left: 1px solid var(--border, #dfe3e8); } .ds-seg:first-child { border-left: 0; } .ds-seg:not(.ds-on):hover { background: var(--surface-2, #f0f2f5); } .ds-seg.ds-on { background: color-mix(in srgb, var(--accent, #1f3a5f) 7%, var(--surface, #ffffff)); box-shadow: inset 0 -2px 0 var(--accent, #1f3a5f); } .ds-seg-b { width: 100%; border: 0; background: none; text-align: left; padding: 8px 14px 0; display: flex; flex-direction: column; align-items: flex-start; cursor: pointer; color: var(--ink, #1b2330); font: inherit; } .ds-seg-b b { font-size: 20px; font-weight: 700; line-height: 1.25; font-variant-numeric: tabular-nums; } .ds-seg-b span { font-size: 12px; color: var(--muted, #5d6878); } .ds-on .ds-seg-b span { color: var(--ink, #1b2330); font-weight: 600; } .ds-seg-b:focus-visible, .ds-seg-n:focus-visible { outline: 2px solid var(--accent, #1f3a5f); } .ds-seg-n { margin: 1px 0 0 10px; padding: 0 4px; border: 0; border-radius: 999px; background: none; font: 12px -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; font-variant-numeric: tabular-nums; white-space: nowrap; } button.ds-seg-n { cursor: pointer; } button.ds-seg-n:not(.ds-pr):hover { text-decoration: underline; text-underline-offset: 2px; } .ds-red { color: var(--bad, #b3261e); font-weight: 600; } .ds-amb { color: var(--warn-ink, #7a4b00); } .ds-amb.ds-pr { background: var(--warn-bg, #fff4dc); font-weight: 600; padding: 0 8px; }"
+    },
+    {
+      "name": "Stack Rail",
+      "kind": "custom",
+      "description": "A grey rail with a square head joins a stack's pull requests under its summary row; pointing at one lights the whole stack.",
+      "html": "<table class=\"ds-stk\"><tr><td class=\"ds-rail\"><span class=\"ds-knot ds-head\"></span><span class=\"ds-ln ds-dn\"></span></td><td><b>Stack of 2</b><span class=\"ds-m\">initech · merge order #71 → #72</span></td></tr><tr><td class=\"ds-rail\"><span class=\"ds-ln ds-up\"></span><span class=\"ds-knot\"></span><span class=\"ds-ln ds-dn\"></span></td><td>Add the lead export<span class=\"ds-m\">Draft · initech #71 · Ana</span></td></tr><tr class=\"ds-ctx\"><td class=\"ds-rail\"><span class=\"ds-ln ds-up\"></span><span class=\"ds-knot\"></span></td><td>Schedule the export for ENG-716<span class=\"ds-m\">In review · initech #72 · Raj</span></td></tr></table>",
+      "css": ".ds-stk { border-collapse: collapse; width: 420px; font: 14px -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; color: var(--ink, #1b2330); --rail: color-mix(in srgb, var(--muted, #5d6878) 78%, var(--bg, #f6f7f9)); } .ds-stk td { padding: 7px 10px; vertical-align: top; } .ds-stk b { font-size: 13px; font-weight: 600; } .ds-stk tr:last-child td { border-bottom: 1px solid var(--border, #dfe3e8); } .ds-m { display: block; font-size: 12px; color: var(--muted, #5d6878); } .ds-ctx td { color: var(--muted, #5d6878); } .ds-stk td.ds-rail { position: relative; width: 18px; padding: 0; } .ds-knot { position: absolute; left: 5px; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--rail); } .ds-knot.ds-head { border-radius: 2px; } .ds-ln { position: absolute; left: 8px; width: 2px; background: var(--rail); } .ds-ln.ds-up { top: 0; height: 15px; } .ds-ln.ds-dn { top: 19px; bottom: -1px; } .ds-stk:hover .ds-knot, .ds-stk:hover .ds-ln { background: var(--ink, #1b2330); }"
     },
     {
       "name": "Chips",
@@ -1155,7 +1177,7 @@
     "northStar": "The Morning Desk",
     "overview": "**Creative North Star: \"The Morning Desk\"**\n\nTodoHub is a quiet, well-lit desk with the day laid out before you start. The desk is a pale cool grey; on it sit white sheets of paper with hairline edges, and one deep navy pen marks what you act on. Nothing on the desk is there for show. The warmth comes from the window: the light changes through the day, and the top of Today paints the sky outside: night in the morning, a thin band of daylight through the day, dusk at the wrap-up.\n\nEverything is soft and friendly but never loose. Text is the Mac's own system font at a compact 14px, with 12–13px detail lines. Corners are gently rounded, status and priority are rounded pills in gentle tints, and fields that hold nothing stay out of sight until you hover or tab to them. Attention is spent only on what is late, urgent, waiting on someone, or failing; everything else stays calm.\n\nThe light is the system's one personality. The Daylight theme moves the desk through cream (morning), clear white (day), warm sand (afternoon), lavender (dusk) and indigo (night), and Today carries a painted sky with a sun that follows the real one. The interface itself does not decorate. It is not an enterprise dashboard, it is not playful or gamified, and the colors of Slack, Gmail and the other sources never spread past their small chips.",
     "keyCharacteristics": [
-      "Flat paper on a pale desk: hairline borders and tonal steps, shadows only for things that float.",
+      "Flat paper on a pale desk: hairline borders and tonal steps. Things in the page flow get a whisper of shadow at most; only things that float get real shadows.",
       "One accent, Early-Light Navy, used for what you act on and where you are.",
       "Morning Amber is both the warning color and the morning glow.",
       "System font only; hierarchy from size and weight; tabular figures for every count, date and ID.",
@@ -1191,7 +1213,7 @@
       },
       {
         "name": "The Float-Only Shadow Rule",
-        "body": "A shadow means \"this is above the page and will go away\". Nothing that lives in the page flow gets more than the Whisper.",
+        "body": "A shadow means \"this is above the page and will go away\". Nothing that lives in the page flow gets more than the Whisper or the Selected row shadow.",
         "section": "elevation"
       }
     ],
@@ -1209,7 +1231,7 @@
       "**Don't** make it playful or gamified: no confetti, streaks, mascots or celebratory emoji. A done item gets a check and a strikethrough; that is the celebration.",
       "**Don't** let source or task-type colors spread beyond chip text, icons and avatar tints. No Slack-purple headers, no Gmail-red rows.",
       "**Don't** add colored left stripes beyond Urgent, High and the digest's landing highlight.",
-      "**Don't** add shadows to things in the page flow; only menus, popovers, toasts and dialogs float.",
+      "**Don't** give things in the page flow more than the Whisper or the Selected row shadow; only menus, popovers, toasts and dialogs get real shadows.",
       "**Don't** add a webfont or a second typeface.",
       "**Don't** add a refresh button or chrome that is only decoration."
     ]
