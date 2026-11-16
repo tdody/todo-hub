@@ -911,15 +911,32 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         last good read comes back with the error."""
         with pull_lock:
             if refresh or time.time() - pull_cache["at"] > PULLS_TTL_SECONDS:
-                now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                started = datetime.now(timezone.utc).replace(microsecond=0)
+                # One clock: the app asks again 5 minutes after read_at or error_at, so the cache ages from the same instant.
+                pull_cache["at"] = started.timestamp()
                 try:
-                    pull_cache.update(data=pulls.read(settings, _env()), read_at=now, error=None, error_at=None)
+                    pull_cache.update(data=pulls.read(settings, _env()), read_at=started.isoformat(), error=None, error_at=None)
                 except SourceError as exc:
-                    pull_cache.update(error=str(exc), error_at=now)
-                pull_cache["at"] = time.time()
-            empty = {"login": None, "mine": [], "review": [], "mine_total": 0, "review_total": 0}
-            return {**(pull_cache["data"] or empty), "read_at": pull_cache["read_at"],
-                    "error": pull_cache["error"], "error_at": pull_cache["error_at"]}
+                    pull_cache.update(error=str(exc), error_at=started.isoformat())
+            return pulls_payload()
+
+    @app.post("/api/pulls/{owner}/{name}/{number}", dependencies=auth)
+    def pull_request_again(owner: str, name: str, number: int) -> dict:
+        """Read one pull request again and put it in the last read. The 5-minute read of the list is unchanged."""
+        with pull_lock:
+            if pull_cache["data"] is None:      # the backend restarted after the app read the list
+                raise HTTPException(409, "There is no list to update yet. Use Refresh all.")
+            try:
+                pr = pulls.read_one(settings, f"{owner}/{name}", number, _env())
+            except SourceError as exc:
+                raise HTTPException(502, str(exc))
+            pull_cache["data"] = pulls.updated(pull_cache["data"], f"{owner}/{name}", number, pr)
+            return pulls_payload()
+
+    def pulls_payload() -> dict:
+        empty = {"login": None, "mine": [], "review": [], "mine_total": 0, "review_total": 0}
+        return {**(pull_cache["data"] or empty), "read_at": pull_cache["read_at"],
+                "error": pull_cache["error"], "error_at": pull_cache["error_at"]}
 
     @app.get("/api/digest", dependencies=auth)
     def weekly_digest(week: int = 0) -> dict:
