@@ -4,6 +4,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, ApiError } from "./api";
 import type { Issue, PullRequest, Pulls } from "./api";
+import { clientLogo } from "./avatars";
 import { h, pageHead, svg } from "./dom";
 
 export interface PullsCtx {
@@ -163,6 +164,24 @@ function linearOf(p: PullRequest): { ident: string; issue?: Issue; url: string |
 const linearRef = (ident: string) =>
   h("button", { class: "ref", "data-act": "lin", tabindex: "-1", title: `Open ${ident} in Linear` }, h("span", { class: "k" }, ident));
 
+// ---- groups: the client label, else the project, of the pull request's Linear issue ------------
+/** null is "No client or project": no Linear issue, or one that is not one of your open issues. */
+type Group = { kind: "client" | "project"; name: string } | null;
+/** The one way to ask which client or project a pull request belongs to. A stack's is its base's. */
+function groupOf(p: PullRequest): Group {
+  const issue = linearOf(p)?.issue;
+  if (issue?.client) return { kind: "client", name: issue.client };
+  return issue?.project ? { kind: "project", name: issue.project } : null;
+}
+const groupKey = (g: Group) => (g ? `${g.kind}:${g.name}` : "none");
+const groupName = (g: Group) => g?.name ?? "No client or project";
+/** The client's logo, the project's initial, or "–", as in Client and Dev. */
+const groupMark = (g: Group) => (g?.kind === "client" ? clientLogo(g.name)
+  : h("span", { class: "ll-initial", "aria-hidden": "true" }, g ? g.name.slice(0, 1).toUpperCase() : "–"));
+/** The Client / project cell. ``named`` false leaves it empty, under a row that names the same group. */
+const groupCell = (g: Group, named = true) => h("td", { class: "grp" },
+  named && h("span", { class: `gi${g ? "" : " none"}`, title: groupName(g) }, groupMark(g), h("span", {}, groupName(g))));
+
 // ---- views and columns --------------------------------------------------------------------------
 const mine = () => st.data?.mine ?? [];
 const VIEWS: Record<Side, View[]> = {
@@ -203,6 +222,9 @@ const STEP_COL: Col = { id: "step", label: "Next step", first: 1, cls: "c-st", u
 const COLS: Col[] = [
   { id: "number", label: "#", key: (p) => p.number, first: -1, cls: "c-num", unit: "min", tip: "Pull request number" },
   { id: "title", label: "Pull request", key: (p) => p.title.toLowerCase(), first: 1, unit: "base" },
+  // name order, No client or project last; a stack sorts by its base's group
+  { id: "group", label: "Client / project", first: 1, cls: "c-grp", unit: "base",
+    key: (p) => { const g = groupOf(p); return `${g ? 0 : 1}${groupName(g).toLowerCase()}`; } },
   STEP_COL,
   { id: "ci", label: "CI", key: (p) => CI_RANK[p.ci.state], first: 1, cls: "c-ci", unit: "min" },
   { id: "comments", label: "Comments", key: (p) => p.open_threads * 1000 + p.comments, first: -1, cls: "c-cm", unit: "sum",
@@ -211,8 +233,10 @@ const COLS: Col[] = [
   { id: "updated", label: "Updated", key: (p) => Date.parse(p.updated_at), first: -1, cls: "c-up r", unit: "max" },
 ];
 
+/** The table's columns: Client / project only in Mine. */
+const shownCols = () => COLS.filter((c) => c.id !== "group" || st.side === "mine");
 /** The column the table sorts by. */
-const sortCol = () => COLS.find((c) => c.id === st.sorts[st.side].id) ?? STEP_COL;
+const sortCol = () => shownCols().find((c) => c.id === st.sorts[st.side].id) ?? STEP_COL;
 
 function units(shown: PullRequest[]): Unit[] {
   const sort = st.sorts[st.side], col = sortCol();
@@ -223,13 +247,16 @@ function units(shown: PullRequest[]): Unit[] {
     if (!seen.has(id)) seen.set(id, { id, all: st.side === "mine" ? membersOf(root) : [p], shown: new Set() });
     seen.get(id)!.shown.add(p);
   }
-  const value = (u: Unit) => {
-    const ks = u.all.map(col.key);
-    if (col.unit === "base" || typeof ks[0] === "string") return ks[0];
+  const value = (u: Unit, c: Col) => {
+    const ks = u.all.map(c.key);
+    if (c.unit === "base" || typeof ks[0] === "string") return ks[0];
     const ns = ks as number[];
-    return col.unit === "min" ? Math.min(...ns) : col.unit === "max" ? Math.max(...ns) : ns.reduce((a, b) => a + b, 0);
+    return c.unit === "min" ? Math.min(...ns) : c.unit === "max" ? Math.max(...ns) : ns.reduce((a, b) => a + b, 0);
   };
-  return [...seen.values()].sort((a, b) => { const x = value(a), y = value(b); return (x < y ? -1 : x > y ? 1 : 0) * sort.dir; });
+  const cmp = (x: number | string, y: number | string) => (x < y ? -1 : x > y ? 1 : 0);
+  // rows with the same value sort by Next step
+  return [...seen.values()].sort((a, b) =>
+    cmp(value(a, col), value(b, col)) * sort.dir || cmp(value(a, STEP_COL), value(b, STEP_COL)));
 }
 
 // ---- cells and rows -------------------------------------------------------------------------------
@@ -294,7 +321,7 @@ function rail(u: Unit, p: PullRequest, detail = false): HTMLElement {
 }
 
 /** A stack's first row: it shows the value the table sorts the stack by. A click folds or unfolds the stack. */
-function stackRow(u: Unit): HTMLElement {
+function stackRow(u: Unit, grp?: HTMLElement): HTMLElement {
   const ms = u.all, step = STEP_COL, folded = isFolded(u);
   const top = ms.reduce((a, b) => (step.key(b) < step.key(a) ? b : a));
   const s = stepOf(top);
@@ -312,6 +339,7 @@ function stackRow(u: Unit): HTMLElement {
     h("td", { class: "t" }, h("button", { class: "sk", "aria-expanded": String(!folded) }, `Stack of ${ms.length}`),
       h("span", { class: "m" }, h("span", { class: "b" }, ms[0].repo.split("/")[1]),
         h("span", { class: "b" }, `merge order ${ms.map((p) => `#${p.number}`).join(" → ")}`))),
+    grp,
     h("td", { class: "st" }, h("span", { class: `step ${s.tone}`, title: s.label }, s.label), " ", h("span", { class: "mute" }, `#${top.number}`)),
     h("td", { class: "ci" }, ci),
     h("td", { class: "cm" }, commentsCell(sum((p) => p.comments), sum((p) => p.open_threads))),
@@ -319,7 +347,7 @@ function stackRow(u: Unit): HTMLElement {
     h("td", { class: "up r" }, ago(Math.min(...ms.map((p) => since(p.updated_at))))));
 }
 
-function prRow(p: PullRequest, u: Unit): HTMLElement[] {
+function prRow(p: PullRequest, u: Unit, grp?: HTMLElement): HTMLElement[] {
   const key = keyOf(p), stacked = u.all.length > 1, open = st.open.has(key);
   const cls = ["pr-row", stacked && "stk", stacked && u.all.indexOf(p) === u.all.length - 1 && "last", open && "open",
     st.sel === key && "sel", !u.shown.has(p) && "ctx"].filter(Boolean).join(" ");
@@ -331,6 +359,7 @@ function prRow(p: PullRequest, u: Unit): HTMLElement[] {
       h("button", { class: "tt", id: domId(key), tabindex: st.sel === key ? "0" : "-1", "aria-expanded": String(open),
         "aria-controls": open ? `${domId(key)}-d` : undefined }, p.title),
       metaLine(p, u)),
+    grp,
     h("td", { class: "st" }, stepCell(p)),
     h("td", { class: "ci" }, ciCell(p)),
     h("td", { class: "cm" }, commentsCell(p.comments, p.open_threads)),
@@ -398,7 +427,7 @@ function detailRow(p: PullRequest, u: Unit): HTMLElement {
   const key = keyOf(p), lin = st.side === "mine" ? linearOf(p) : null;
   return h("tr", { class: `detail${st.sel === key ? " sel" : ""}`, "data-key": key, "data-stack": u.all.length > 1 ? u.id : undefined },
     rail(u, p, true),
-    h("td", { colspan: String(COLS.length + 1), id: `${domId(key)}-d` },
+    h("td", { colspan: String(shownCols().length + 1), id: `${domId(key)}-d` },
       h("h2", { class: "vh" }, `#${p.number} ${p.title}`),
       h("div", { class: "dgrid" },
         h("section", { class: "box" }, ...checksBox(p),
@@ -480,24 +509,50 @@ function strip(base: PullRequest[], have: boolean): HTMLElement {
   }));
 }
 
+/** The rows of the units. With the Client / project column, each pull request names its own group and
+ *  a stack's summary row names the stack's. Sorted by that column, a name shows only where the group
+ *  changes, and that row gets a darker line above it; a stack member then names its group only when it
+ *  is not the stack's. */
+function bodyRows(us: Unit[]): HTMLElement[] {
+  const withGroup = shownCols().some((c) => c.id === "group");
+  const runs = withGroup && st.sorts[st.side].id === "group";
+  const out: HTMLElement[] = [];
+  let above: string | null = null;
+  for (const u of us) {
+    const g = groupOf(u.all[0]), k = groupKey(g), starts = k !== above;
+    const cell = withGroup ? groupCell(g, !runs || starts) : undefined;
+    const first = u.all.length > 1 ? [stackRow(u, cell)] : prRow(u.all[0], u, cell);
+    if (runs && starts && above !== null) first[0].classList.add("run");
+    above = k;
+    out.push(...first);
+    if (u.all.length < 2 || isFolded(u)) continue;
+    for (const p of u.all) {
+      const own = groupOf(p);
+      out.push(...prRow(p, u, withGroup ? groupCell(own, !runs || groupKey(own) !== k) : undefined));
+    }
+  }
+  return out;
+}
+
 function table(us: Unit[], folded: PullRequest[]): HTMLElement {
-  const sort = st.sorts[st.side], v = viewOf(), col = sortCol();
+  const sort = st.sorts[st.side], v = viewOf(), col = sortCol(), cols = shownCols();
   const label = (c: Col) => (st.side === "review" && c.id === "step" ? "Waiting" : c.label);
+  const withGroup = cols.some((c) => c.id === "group");
   return h("table", { class: "pr-table" },
     h("caption", { class: "vh" }, `${v.label}, sorted by ${label(col)}`),
     h("thead", {}, h("tr", {}, h("th", {}, h("span", { class: "vh" }, "Stack")), h("th", {}, h("span", { class: "vh" }, "Open")),
-      ...COLS.map((c) => {
+      ...cols.map((c) => {
         const on = sort.id === c.id;
         return h("th", { class: c.cls, "aria-sort": on ? (sort.dir > 0 ? "ascending" : "descending") : undefined },
           h("button", { "data-sort": c.id, title: c.tip }, label(c), icon(on ? (sort.dir > 0 ? "up" : "dn") : "ud")));
       }))),
-    h("tbody", {}, ...us.flatMap((u) => [...(u.all.length > 1 ? [stackRow(u)] : []),
-      ...(isFolded(u) ? [] : u.all.flatMap((p) => prRow(p, u)))])),
+    h("tbody", {}, ...bodyRows(us)),
     h("tbody", {}, ...(folded.length ? [
-      h("tr", { class: "fold-h" }, h("td", { colspan: String(COLS.length + 2) },
+      h("tr", { class: "fold-h" }, h("td", { colspan: String(cols.length + 2) },
         h("button", { class: "fold-b", "data-fold": "", "aria-expanded": String(st.fold) },
           h("span", {}, plural(folded.length, "draft")), icon("rt")))),
-      ...(st.fold ? folded.flatMap((p) => prRow(p, { id: keyOf(p), all: [p], shown: new Set([p]) })) : []),
+      ...(st.fold ? folded.flatMap((p) => prRow(p, { id: keyOf(p), all: [p], shown: new Set([p]) },
+        withGroup ? groupCell(groupOf(p)) : undefined)) : []),
     ] : [])));
 }
 
