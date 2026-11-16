@@ -13,12 +13,13 @@ from .db import DB
 BUNDLE_ID = "com.tom.periscope.app"
 REPOS_KEY = "periscope_repos"            # meta: {"project:<name>" or "client:<label>": repo path}
 LAST_REPO_KEY = "periscope_last_repo"    # meta: the repo last picked for any issue
-TIMEOUT_SECONDS = 120                    # a start fetches, makes the worktree, then waits for Claude's screen
+QUICK_SECONDS = 15
+START_SECONDS = 120                      # a start fetches, makes the worktree, then waits for Claude's screen
 _TOKEN = re.compile(r"\{(identifier|title|url)\}")
 
 
 class PeriscopeError(RuntimeError):
-    """Periscope refused or didn't answer. ``status`` is 409 for its start guards, else 502."""
+    """Periscope refused, did not answer, or could not be brought to the front. ``status`` is 409 for its start guards, else 502."""
 
     def __init__(self, message: str, status: int = 502):
         super().__init__(message)
@@ -27,18 +28,18 @@ class PeriscopeError(RuntimeError):
 
 class Periscope:
     def __init__(self, url: str, transport: httpx.BaseTransport | None = None):
-        self.http = httpx.Client(base_url=url.rstrip("/"), timeout=TIMEOUT_SECONDS, transport=transport)
+        self._client = httpx.Client(base_url=url.rstrip("/"), transport=transport)
 
     def close(self) -> None:
-        self.http.close()
+        self._client.close()
 
-    def _call(self, method: str, path: str, body: dict | None = None) -> dict:
+    def _call(self, method: str, path: str, body: dict | None = None, timeout: int = QUICK_SECONDS) -> dict:
         try:
-            resp = self.http.request(method, path, json=body)
+            resp = self._client.request(method, path, json=body, timeout=timeout)
         except httpx.TimeoutException:
-            raise PeriscopeError(f"Periscope didn't answer in {TIMEOUT_SECONDS} s.") from None
+            raise PeriscopeError(f"Periscope didn't answer in {timeout} s.") from None
         except httpx.TransportError:
-            raise PeriscopeError(f"Periscope is not running at {self.http.base_url.netloc.decode()}.") from None
+            raise PeriscopeError(f"Periscope is not running at {self._client.base_url.netloc.decode()}.") from None
         if resp.is_error:
             try:
                 detail = resp.json().get("detail")
@@ -55,7 +56,8 @@ class Periscope:
     def start(self, *, repo: str, branch: str, ticket: str, title: str, prompt: str) -> dict:
         """{mode: "spawned", pid, path, reused}, or {mode: "existing", pid} when a Claude is already on the branch."""
         return self._call("POST", "/api/linear/start",
-                          {"repo": repo, "branch": branch, "ticket": ticket, "title": title, "prompt": prompt})
+                          {"repo": repo, "branch": branch, "ticket": ticket, "title": title, "prompt": prompt},
+                          START_SECONDS)
 
     def select(self, pid: str) -> None:
         self._call("POST", "/api/select", {"pid": pid})

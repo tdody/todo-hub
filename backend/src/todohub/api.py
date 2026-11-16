@@ -947,10 +947,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
         """Ask periscope to start Claude on the branch with the prompt, then remember the repo for the issue's
         project (or client). A Claude already on the branch is answered as mode "existing"."""
+        branch = body.branch.strip()
+        if not branch:
+            raise HTTPException(400, "The branch is empty")
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
         try:
             result = periscope_call(lambda p: p.start(
-                repo=body.repo, branch=body.branch.strip(), ticket=issue["identifier"], title=issue["title"],
+                repo=body.repo, branch=branch, ticket=issue["identifier"], title=issue["title"],
                 prompt=body.prompt))
         except HTTPException as exc:
             if exc.status_code == 409:
@@ -962,11 +965,11 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.post("/api/periscope/show", dependencies=auth)
     def periscope_show(body: PeriscopeShowIn) -> dict:
         """Select the pane in periscope, then bring periscope to the front."""
-        periscope_call(lambda p: p.select(body.pid))
-        try:
+        def select_then_front(p: Periscope) -> None:
+            p.select(body.pid)
             front()
-        except PeriscopeError as exc:
-            raise HTTPException(502, str(exc))
+
+        periscope_call(select_then_front)
         return {"ok": True}
 
     @app.get("/api/slips", dependencies=auth)
