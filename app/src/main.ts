@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, ApiError, waitForBackend } from "./api";
-import { h, link, modal, pageHead, svg } from "./dom";
+import { h, link, loadPref, modal, pageHead, savePref, svg } from "./dom";
 import type { Child } from "./dom";
 import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { loadPulls, pullsCount, pullsKey, pullsView, setupPulls } from "./pulls";
@@ -90,17 +90,10 @@ const state = {
   pickedProject: null as string | null, // a project from the sidebar: its Client and Dev issues together
 };
 
-/** Per-machine UI choices. Storage can be unavailable; the app then just uses the defaults. */
-function loadPref(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
 /** "board" is the old name for the by-status layout. */
 function layoutPref(key: string): "group" | "status" {
   const v = loadPref(key);
   return v === "status" || v === "board" ? "status" : "group";
-}
-function savePref(key: string, value: string) {
-  try { localStorage.setItem(key, value); } catch { /* not remembered */ }
 }
 
 // ---- formatting -----------------------------------------------------------------------------

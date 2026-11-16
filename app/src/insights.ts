@@ -2,16 +2,9 @@
 // due dates, approval rate, sweep history). Weekly digest: one week written out (backend digest.py).
 import { api, ApiError } from "./api";
 import type { ApprovalStats, BalanceStats, Digest, PullWeeks, Run, Slips } from "./api";
-import { h, link, modal, pageHead, svg } from "./dom";
+import { h, link, loadPref, modal, pageHead, savePref, svg } from "./dom";
 
 type GoTab = (tab: "inbox" | "client" | "dev", highlight?: string[]) => void;
-
-function loadPref(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-function savePref(key: string, value: string) {
-  try { localStorage.setItem(key, value); } catch { /* not remembered */ }
-}
 
 let mode: "overview" | "digest" = loadPref("todohub.insightsView") === "digest" ? "digest" : "overview";
 let digestWeek = 0;                          // 0 = this week, 1 = last week, …
