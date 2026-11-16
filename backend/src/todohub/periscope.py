@@ -37,7 +37,8 @@ class Periscope:
         try:
             resp = self._client.request(method, path, json=body, timeout=timeout)
         except httpx.TimeoutException:
-            raise PeriscopeError(f"Periscope didn't answer in {timeout} s.") from None
+            late = " It may still start Claude." if timeout == START_SECONDS else ""
+            raise PeriscopeError(f"Periscope didn't answer in {timeout} s.{late}") from None
         except httpx.TransportError:
             raise PeriscopeError(f"Periscope is not running at {self._client.base_url.netloc.decode()}.") from None
         if resp.is_error:

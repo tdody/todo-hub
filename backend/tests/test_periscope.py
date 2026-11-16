@@ -84,7 +84,7 @@ def test_client_when_periscope_is_down_or_slow():
         Periscope(URL, transport=httpx.MockTransport(refuse)).catalog()
     with pytest.raises(PeriscopeError, match="Periscope didn't answer in 15 s."):
         Periscope(URL, transport=httpx.MockTransport(slow)).catalog()
-    with pytest.raises(PeriscopeError, match="Periscope didn't answer in 120 s."):
+    with pytest.raises(PeriscopeError, match="Periscope didn't answer in 120 s. It may still start Claude."):
         Periscope(URL, transport=httpx.MockTransport(slow)).start(
             repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p")
 

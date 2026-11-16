@@ -13,7 +13,7 @@ import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskA
 import type { Category } from "./avatars";
 import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues";
 import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
-import { closePeriscope, dismissPeriscope, isPeriscopeOpen, periscopeItem, periscopePopover, setupPeriscope } from "./periscope";
+import { closePeriscope, dismissPeriscope, forgetPeriscope, isPeriscopeOpen, periscopeItem, periscopePopover, setupPeriscope } from "./periscope";
 
 applyTheme();
 import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
@@ -2931,6 +2931,7 @@ function goTab(id: Tab, highlight: string[] = []) {
   if (state.pickedProject) state.filter = "";
   state.pickedClient = null;
   state.pickedProject = null;
+  forgetPeriscope();
   state.tab = id;
   state.highlight = new Set(highlight);
   if (highlight.length) {
@@ -2948,6 +2949,7 @@ function goTab(id: Tab, highlight: string[] = []) {
 }
 
 function pickClient(name: string) {
+  forgetPeriscope();
   state.tab = "client";
   state.filter = name;
   state.pickedClient = name;
@@ -2959,6 +2961,7 @@ function pickClient(name: string) {
 /** One project from the sidebar: every open issue in it, Client and Dev together (a client issue
  *  can belong to a project too), grouped by status. The filter then searches within it. */
 function pickProject(name: string) {
+  forgetPeriscope();
   state.tab = "dev";
   state.filter = "";
   state.pickedClient = name;
@@ -3563,7 +3566,7 @@ async function start() {
     setDaylightLocation(location);
     if (currentTheme() === "daylight") { applyTheme(); renderHeader(); }
   }).catch(() => undefined);
-  onDesktopEvent("capture", () => { state.tab = "inbox"; render(); captureInput.focus(); });
+  onDesktopEvent("capture", () => { forgetPeriscope(); state.tab = "inbox"; render(); captureInput.focus(); });
   onDesktopEvent("run-now", () => void runNow());
   await refresh(true);
   void loadPulls();                  // for the sidebar's count
