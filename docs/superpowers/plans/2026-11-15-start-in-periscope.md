@@ -1260,6 +1260,10 @@ In the `settings.json` row, change "sources added, paused or removed; the schedu
   - In the Errors table, add a row: "Periscope does not answer in time (15 s; 120 s for a start) | "Periscope didn't answer in 15 s." (or 120 s)". Add a row: "The branch is blank | "The branch is empty" (400). The popover's **Start** is already disabled then."
   - In "Changes" → `config.py`, the Settings page writes the prompt to `settings.json` as `{"periscope": {"prompt": …}}`, like `daylight`, not as a key `periscope_prompt`.
   - In "Changes" → `api.py`, **Show** runs the select and `open -b` in one `periscope_call`, so a failure of either becomes one error toast.
+  - In "The popover": **Start** is disabled until Repo, Branch and Prompt all have text. While periscope starts Claude, **Cancel** is disabled too (it could not stop the start); Esc or a click outside hides the popover, and the result still comes as a toast.
+  - In "The control": while the popover is open, page keys do nothing, wherever the focus is (⌘1-⌘7, ⌘, and ⌘R still work). **p** does nothing while the balance popover is open.
+  - In "After Start": the toast with **Show** stays 9 s, like an Undo toast.
+  - In "Changes" → `app/src/styles.css`: the popover is no wider than the issue's fields row, so the pane never clips it.
 
 - [ ] **Step 4: Commit**
 
@@ -1312,7 +1316,10 @@ Ask the user before the next part: it edits their real `config.toml`. Add `peris
 4. Press **p**, then **↵**: **Start** shows "Starting…" for about 2 s; then the toast "Started ENG-… in periscope" with **Show**. The stub prints the `/api/linear/start` body with the issue's ticket and title.
 5. Click **Show**: the stub prints `/api/select {'pid': 'stub'}`. (`open -b` brings the real Periscope app forward if it runs.)
 5b. A slow start: stop the stub, start it again with `STUB_START_S=100` in front of `python3`, press **p**, then **↵**. **Start** shows "Starting…" for about 100 s, then the success toast appears. This checks that the webview's `fetch` waits as long as the backend's 120 s. If an error toast appears near 60 s instead, stop and report it: the webview gives up first.
-6. Today: the same item is first in **⋯**, and **p** works. With the focus on **Start**, press **m**: the issue does not move.
+6. Today: the same item is first in **⋯**, and **p** works. With the focus on **Start**, press **m**: the issue does not move. Then wait 60 s, or switch to another app and back: **Start** still has the focus, and **m** and **⌘↵** still do nothing to the issue.
+6b. At the default window size (1120 px wide), in Client and in Today: the popover is whole (its left border and the field labels show), and its right edge is under the ⋯.
+6c. Pick another repo in the select: the select keeps the focus. Clear the branch: **Start** is disabled and the hint changes as you type.
+6d. Press **j** (or **k**) with the focus outside the popover, during "Asking periscope…": the popover goes with the old issue, and **Esc** then works as usual.
 7. Stop the stub, press **p**: the error toast says "Periscope is not running at 127.0.0.1:17376."
 8. Settings → Periscope: change the prompt, **Save**, reopen the popover: it uses the new text. **Reset to default** restores it.
 
