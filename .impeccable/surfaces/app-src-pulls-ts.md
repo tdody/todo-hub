@@ -38,6 +38,13 @@ Point at one pull request of a stack and the whole stack lights up; the stack's 
 - The tab reads GitHub about every 5 minutes after the last read; it need not be exact. Refresh all (beside the filter, or ⌘R) reads now and starts the 5 minutes again.
 - Refresh in an opened row reads that one pull request again; it does not change the 5 minutes of the list.
 
+- The pull request number has its own sortable column, **#**, in Mine and To review (2026-11-16). The meta line keeps only the repo name.
+- Mine groups by client or project: the client label of the Linear issue, else its project, else "No client or project". It combines prototype A (sections, from the Group control or g) and prototype B (a sortable Client / project column when the groups are off). The column hides in the sections.
+- Pull requests with no client or project share one group, not one group for each repo.
+- To review has no column and no groups: on 2026-11-16, none of its 7 pull requests named one of his open issues.
+- The Client / project column shows only in windows wider than 1400px. At the default 1120px, the titles would get no room. The groups work at every width.
+- Size folds below 1200px (it was 1000px): with **#**, the titles had about 135px at the default 1120px window.
+
 ## Decided in the build (from real GitHub data, to confirm)
 
 - The Linear issue comes from the branch name or title, when its team key is one his issues use; its status and due date show when it is one of his open issues.
