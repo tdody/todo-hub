@@ -198,10 +198,12 @@ const VIEWS: Record<Side, View[]> = {
 const viewOf = () => VIEWS[st.side].find((v) => v.id === st.view[st.side]) ?? VIEWS[st.side][0];
 
 // A header's first click sorts the way you most often want.
+const STEP_COL: Col = { id: "step", label: "Next step", first: 1, cls: "c-st", unit: "min",
+  key: (p) => (st.side === "mine" ? stepOf(p).rank * 1e13 + Date.parse(p.updated_at) : Date.parse(p.asked_at)) };
 const COLS: Col[] = [
+  { id: "number", label: "#", key: (p) => p.number, first: -1, cls: "c-num", unit: "min", tip: "Pull request number" },
   { id: "title", label: "Pull request", key: (p) => p.title.toLowerCase(), first: 1, unit: "base" },
-  { id: "step", label: "Next step", first: 1, cls: "c-st", unit: "min",
-    key: (p) => (st.side === "mine" ? stepOf(p).rank * 1e13 + Date.parse(p.updated_at) : Date.parse(p.asked_at)) },
+  STEP_COL,
   { id: "ci", label: "CI", key: (p) => CI_RANK[p.ci.state], first: 1, cls: "c-ci", unit: "min" },
   { id: "comments", label: "Comments", key: (p) => p.open_threads * 1000 + p.comments, first: -1, cls: "c-cm", unit: "sum",
     tip: "Sorts by open threads, then by comments" },
@@ -209,9 +211,11 @@ const COLS: Col[] = [
   { id: "updated", label: "Updated", key: (p) => Date.parse(p.updated_at), first: -1, cls: "c-up r", unit: "max" },
 ];
 
+/** The column the table sorts by. */
+const sortCol = () => COLS.find((c) => c.id === st.sorts[st.side].id) ?? STEP_COL;
+
 function units(shown: PullRequest[]): Unit[] {
-  const sort = st.sorts[st.side];
-  const col = COLS.find((c) => c.id === sort.id) ?? COLS[1];
+  const sort = st.sorts[st.side], col = sortCol();
   const seen = new Map<string, Unit>();
   for (const p of shown) {
     const root = st.side === "mine" ? rootOf(p) : p;
@@ -251,18 +255,20 @@ function stepCell(p: PullRequest): Node {
   return h("span", { class: `step ${s.tone}`, title: s.label }, s.label);
 }
 
+/** "#2374": a Pencil "#", then the number. */
+const numCell = (n: number, cls = "num") => h("td", { class: cls }, h("span", { class: "hash" }, "#"), String(n));
+
 function stagePill(stage: PullRequest["stage"]): HTMLElement {
   return h("span", { class: `pill ${STAGE[stage][1]}` }, h("span", { class: "pdot" }), STAGE[stage][0]);
 }
 
-/** The line under a title. The stage, "Conflicts" and the repo and number always show (the repo name
- *  shortens); when the line is full, the rest drops out whole, from the end: "N of M" first, as the rail
- *  shows the place in the stack. */
+/** The line under a title. The stage, "Conflicts" and the repo name always show (the repo name ends in
+ *  an ellipsis when it does not fit); when the line is full, the rest drops out whole, from the end:
+ *  "N of M" first, as the rail shows the place in the stack. */
 function metaLine(p: PullRequest, u: Unit): HTMLElement {
   const keep = h("span", { class: "keep" }, st.side === "mine" && stagePill(p.stage),
     p.conflicts && h("span", { class: "b red" }, "Conflicts"),
-    // the number first: drawn right to left, so a repo name that does not fit drops out whole
-    h("span", { class: "b id", title: p.repo }, h("span", {}, `#${p.number}`), h("span", {}, p.repo.split("/")[1])));
+    h("span", { class: "b id", title: p.repo }, p.repo.split("/")[1]));
   const rest: (Node | string)[] = [];
   if (st.side === "review") {
     rest.push(`by ${p.author}`);
@@ -289,7 +295,7 @@ function rail(u: Unit, p: PullRequest, detail = false): HTMLElement {
 
 /** A stack's first row: it shows the value the table sorts the stack by. A click folds or unfolds the stack. */
 function stackRow(u: Unit): HTMLElement {
-  const ms = u.all, step = COLS[1], folded = isFolded(u);
+  const ms = u.all, step = STEP_COL, folded = isFolded(u);
   const top = ms.reduce((a, b) => (step.key(b) < step.key(a) ? b : a));
   const s = stepOf(top);
   const fail = ms.filter((p) => p.ci.state === "failing").length, run = ms.filter((p) => p.ci.state === "running").length;
@@ -302,6 +308,7 @@ function stackRow(u: Unit): HTMLElement {
     h("td", { class: "rail", "aria-hidden": "true", title: folded ? "Unfold the stack" : "Fold the stack" },
       h("span", { class: "knot head" }, folded && String(ms.length)), !folded && h("span", { class: "ln dn" })),
     h("td", { class: "x" }, icon("rt")),
+    numCell(Math.min(...ms.map((p) => p.number)), "num mute"),
     h("td", { class: "t" }, h("button", { class: "sk", "aria-expanded": String(!folded) }, `Stack of ${ms.length}`),
       h("span", { class: "m" }, h("span", { class: "b" }, ms[0].repo.split("/")[1]),
         h("span", { class: "b" }, `merge order ${ms.map((p) => `#${p.number}`).join(" → ")}`))),
@@ -319,6 +326,7 @@ function prRow(p: PullRequest, u: Unit): HTMLElement[] {
   const row = h("tr", { class: cls, "data-key": key, "data-stack": stacked ? u.id : undefined },
     rail(u, p),
     h("td", { class: "x" }, icon("rt")),
+    numCell(p.number),
     h("td", { class: "t" },
       h("button", { class: "tt", id: domId(key), tabindex: st.sel === key ? "0" : "-1", "aria-expanded": String(open),
         "aria-controls": open ? `${domId(key)}-d` : undefined }, p.title),
@@ -390,7 +398,7 @@ function detailRow(p: PullRequest, u: Unit): HTMLElement {
   const key = keyOf(p), lin = st.side === "mine" ? linearOf(p) : null;
   return h("tr", { class: `detail${st.sel === key ? " sel" : ""}`, "data-key": key, "data-stack": u.all.length > 1 ? u.id : undefined },
     rail(u, p, true),
-    h("td", { colspan: "7", id: `${domId(key)}-d` },
+    h("td", { colspan: String(COLS.length + 1), id: `${domId(key)}-d` },
       h("h2", { class: "vh" }, `#${p.number} ${p.title}`),
       h("div", { class: "dgrid" },
         h("section", { class: "box" }, ...checksBox(p),
@@ -473,8 +481,7 @@ function strip(base: PullRequest[], have: boolean): HTMLElement {
 }
 
 function table(us: Unit[], folded: PullRequest[]): HTMLElement {
-  const sort = st.sorts[st.side], v = viewOf();
-  const col = COLS.find((c) => c.id === sort.id) ?? COLS[1];
+  const sort = st.sorts[st.side], v = viewOf(), col = sortCol();
   const label = (c: Col) => (st.side === "review" && c.id === "step" ? "Waiting" : c.label);
   return h("table", { class: "pr-table" },
     h("caption", { class: "vh" }, `${v.label}, sorted by ${label(col)}`),
@@ -487,7 +494,7 @@ function table(us: Unit[], folded: PullRequest[]): HTMLElement {
     h("tbody", {}, ...us.flatMap((u) => [...(u.all.length > 1 ? [stackRow(u)] : []),
       ...(isFolded(u) ? [] : u.all.flatMap((p) => prRow(p, u)))])),
     h("tbody", {}, ...(folded.length ? [
-      h("tr", { class: "fold-h" }, h("td", { colspan: "8" },
+      h("tr", { class: "fold-h" }, h("td", { colspan: String(COLS.length + 2) },
         h("button", { class: "fold-b", "data-fold": "", "aria-expanded": String(st.fold) },
           h("span", {}, plural(folded.length, "draft")), icon("rt")))),
       ...(st.fold ? folded.flatMap((p) => prRow(p, { id: keyOf(p), all: [p], shown: new Set([p]) })) : []),
