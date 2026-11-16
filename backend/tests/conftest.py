@@ -17,7 +17,8 @@ def make_issue(identifier, title, client=None, state="Todo", due=None, priority=
         labels.append({"id": f"l-{client}", "name": client, "parent": {"id": "g-client", "name": "client"}})
     return {
         "id": f"id-{identifier}", "identifier": identifier, "title": title,
-        "url": f"https://linear.app/x/issue/{identifier}", "priority": priority, "dueDate": due,
+        "url": f"https://linear.app/x/issue/{identifier}", "branchName": f"me/{identifier.lower()}",
+        "priority": priority, "dueDate": due,
         "updatedAt": "2026-11-03T12:00:00Z", "completedAt": completed,
         "state": {"id": f"s-{state}", "name": state, "type": "unstarted"},
         "project": None, "parent": None, "labels": {"nodes": labels},
