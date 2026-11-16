@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, ApiError, waitForBackend } from "./api";
-import { h, link, modal, pageHead, svg } from "./dom";
+import { h, link, loadPref, modal, pageHead, savePref, svg } from "./dom";
 import type { Child } from "./dom";
 import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { loadPulls, pullsCount, pullsKey, pullsView, setupPulls } from "./pulls";
@@ -9,7 +9,7 @@ import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIc
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
 import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";
-import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskAvatar } from "./avatars";
+import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, groupMark, taskAvatar } from "./avatars";
 import type { Category } from "./avatars";
 import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues";
 import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
@@ -90,17 +90,10 @@ const state = {
   pickedProject: null as string | null, // a project from the sidebar: its Client and Dev issues together
 };
 
-/** Per-machine UI choices. Storage can be unavailable; the app then just uses the defaults. */
-function loadPref(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
 /** "board" is the old name for the by-status layout. */
 function layoutPref(key: string): "group" | "status" {
   const v = loadPref(key);
   return v === "status" || v === "board" ? "status" : "group";
-}
-function savePref(key: string, value: string) {
-  try { localStorage.setItem(key, value); } catch { /* not remembered */ }
 }
 
 // ---- formatting -----------------------------------------------------------------------------
@@ -2811,8 +2804,7 @@ function listView(kind: "client" | "dev"): HTMLElement {
   const sections = names.map((name) => {
     const list = groups.get(name)!.sort(sortIssues);
     const all = list.flatMap((i) => [i, ...(children.get(i.id) ?? [])]);
-    const lead = kind === "client" && name !== "No project" ? clientLogo(name)
-      : h("span", { class: "ll-initial", "aria-hidden": "true" }, name === "No project" ? "–" : name.slice(0, 1).toUpperCase());
+    const lead = groupMark(name === "No project" ? null : { kind: kind === "client" ? "client" : "project", name });
     return h("section", { class: "ll-group" },
       groupHead(name, lead, all,
         kind === "client" && name !== "No project"
@@ -3356,6 +3348,7 @@ const SHORTCUTS: [string, string][] = [
   ["x · ↵", "Today, in the morning: check a suggestion · start the day"],
   ["v", "Client / Dev: group by client or project ↔ by status"],
   ["1 – 5 · Space · o · l", "Pull requests: pick a view · open or close the row · open it in GitHub · open its Linear issue. ⌘R refreshes all"],
+  ["g", "Pull requests (Mine): group by client or project"],
   ["t", "Theme: follow the Mac → light → dark → daylight (follows the time of day)"],
   ["r", "Sources: each one's status, ↻ to check one, Run all"],
   ["?", "This list"],

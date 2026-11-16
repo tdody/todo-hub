@@ -79,3 +79,11 @@ export function pageHead(title: string, opts: { sub?: string; tabs?: PageTab[]; 
         }, t.label, t.count !== undefined && h("span", { class: "count" }, String(t.count))))),
       opts.right ? h("span", { class: "page-right" }, opts.right) : ""));
 }
+
+/** Per-machine UI choices. Storage can be unavailable; the app then uses the defaults. */
+export function loadPref(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+export function savePref(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* not remembered */ }
+}

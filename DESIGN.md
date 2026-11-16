@@ -411,7 +411,7 @@ The window is a fixed 224px sidebar beside the page. The page is centered with a
 
 **Today fits the window.** Today alone does not scroll as a page: the sky, Claude's note and the two columns fill the window height (480px minimum), and the list and the pane each scroll on their own. The list and the pane take the same columns as Client and Dev (1fr and 1.05fr, 16px apart).
 
-**Page header.** Title and count on one line (32px minimum height), then underline tabs 22px apart on a hairline, with the filter (220px) at the right end of the tab line. There is no refresh button.
+**Page header.** Title and count on one line (32px minimum height), then underline tabs 22px apart on a hairline, with the filter (220px) at the right end of the tab line. There is no refresh button, except **Refresh all** on Pull requests, which sits before the filter, after the Group control.
 
 **Rhythm.** 2px between list rows, 6–10px between controls and inside rows, 12px around groups of controls, 16px between page sections, 22px between groups. The spacing tokens in the frontmatter are these steps.
 
@@ -467,7 +467,7 @@ Soft and friendly, small and calm.
 
 - **Style:** full-pill, 12px at 600, 2px × 10px; status pills start with a 7px dot in their own ink color, and both show a faint caret when clickable.
 - **State:** clicking opens a menu listing every option with its number key; hover adds a 1px ring in the pill's own color at 25%. In a row's meta line they shrink to 11px.
-- **Pull request stages:** the stage pill starts a row's meta line, before the repo and number. It is not clickable and shows no caret. The Linear issue later in the line is an issue chip with the ID only, and a click opens the issue in Linear.
+- **Pull request stages:** the stage pill starts a row's meta line, before the repo name. It is not clickable and shows no caret. The Linear issue later in the line is an issue chip with the ID only, and a click opens the issue in Linear.
 - **Draft:** Shaded Paper fill, Pencil text and a hollow dot (a 1.5px ring). It never uses a dashed outline, because a dashed outline means Backlog.
 - **Changes requested:** Morning Amber (`warn-bg` fill, `warn-ink` text). In review reuses `s-prog`, and Approved reuses `s-done`.
 
@@ -512,6 +512,17 @@ A stack of pull requests sorts, shows, lights up and folds as one unit.
 - **Fold:** a click on the rail or on the summary row folds the stack to its summary row, and another click unfolds it. The chevron points down when the stack is open and right when it is folded.
 - **Folded:** the line stops at the square knot, and a hairline closes the summary row. The knot grows to 16px (4px corners) in Pencil and holds the count in the Desk color, 10px at 700. The rail color is too light for text: Desk on it gives 3.4:1 in light mode, and Desk on Pencil gives 5.3:1.
 - **Context rows:** a pull request that the view or the filter leaves out stays in its place, in Pencil at 400, with no status colors. A stack never splits.
+
+### Groups (Pull requests)
+
+Mine shows the client or project of each pull request: in a column when the groups are off, and in sections when they are on.
+
+- **Number column:** the first sortable column, 64px wide. A Pencil "#", then the number in Ink, 13px tabular. A stack's summary row shows its lowest number, all in Pencil.
+- **Client / project column:** 168px, after the title. It shows only in Mine with the groups off, in windows wider than 1400px. An 18px client logo or project initial with 5px corners, then the name at 13px with an ellipsis. "No client or project" has a "–" initial and a Pencil name.
+- **Group starts:** sorted by Client / project, a darker line (Pencil 40% into Hairline) starts each group, and a name shows on a group's first row and where the row above is in another group.
+- **Group control:** a 12px Pencil "Group" label and the segmented control (None · Client or project), before Refresh all. Paper, a Hairline border, 7px corners, 12px Pencil text, as tall as Refresh all and the filter. The pressed one has the accent fill and 600 text.
+- **Section heading:** a row across the table. A chevron (down when open, right when folded), the 26px logo or initial, the name at 16px and 700, the 12px Pencil summary ("5 open · 2 need you · 1 CI failing", the CI part in Alarm Red), then a Hairline rule to the edge. 22px above it (10px for the first), 6px below it, a Hairline under it. A click folds the section to its heading.
+- **Narrow windows:** Client / project folds below 1400px and Size below 1200px, so the titles keep about 235px at the default 1120px window. Below 1000px the "Group" label hides, Refresh all shows only its icon, and the filter can shrink to 120px, so the header line fits from 760px.
 
 ### Inputs / Fields
 
