@@ -56,7 +56,7 @@ Out:
 
 - The **Group** control is in the header line, before **Refresh all**. It shows only in Mine. It is the `.segmented` control: **None** and **Client or project**, each a button with `aria-pressed`.
 - **g** turns the groups on and off in Mine. In To review, **g** does nothing.
-- Below 1000 px, the "Group" label hides, **Refresh all** shows only its icon, and the filter shrinks to 120 px, so the header line fits from 760 px.
+- Below 1000 px, the "Group" label hides, **Refresh all** shows only its icon, and the filter can shrink to 120 px, so the header line fits from 760 px.
 - The app remembers the choice on this Mac, in `todohub.pullsGroups`. The default is off.
 - When the groups are on:
   - The Client / project column hides, because each section heading names the group. The title gets the width back.
