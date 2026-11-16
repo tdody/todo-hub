@@ -485,6 +485,7 @@ button.star:hover { background: var(--surface-2); }
 .chart .bar-client { fill: var(--accent); }
 .chart .bar-dev { fill: var(--dev-fill); }
 .chart .bar-empty { fill: var(--empty-fill); }
+.chart .bar-merged { fill: var(--accent); }
 .chart .target { stroke: var(--warn-ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .chart .grid { stroke: var(--border); stroke-width: 1; }
 .chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
