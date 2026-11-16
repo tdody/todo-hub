@@ -4,12 +4,15 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from todohub import periscope
+from todohub.api import create_app
 from todohub.config import load_settings
 from todohub.db import DB
 from todohub.periscope import (LAST_REPO_KEY, REPOS_KEY, Periscope, PeriscopeError, default_repo, fill_prompt,
                                remember_repo)
+from conftest import FakeLinear
 
 URL = "http://127.0.0.1:17374"
 CATALOG = {
@@ -125,3 +128,85 @@ def test_bring_to_front_failure(monkeypatch):
     monkeypatch.setattr(periscope.subprocess, "run", fail)
     with pytest.raises(PeriscopeError, match="Could not bring Periscope to the front."):
         periscope.bring_to_front()
+
+
+START = {"repo": "/dev/api", "branch": " me/eng-1 ", "prompt": "Read ENG-1."}
+
+
+@pytest.fixture
+def env(peri):
+    settings = load_settings()
+    db = DB(settings.db_path)
+    fronted = []
+    app = create_app(settings, db, linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=peri.transport),
+                     front_fn=lambda: fronted.append(True))
+    return TestClient(app), db, fronted
+
+
+def test_options_fill_the_popover(env):
+    client, db, _ = env
+    db.set_meta(REPOS_KEY, {"client:Globex": "/dev/web"})
+    r = client.get("/api/issues/id-ENG-1/periscope")
+    assert r.status_code == 200
+    assert r.json() == {
+        "repos": [{"repo": "/dev/api", "label": "api"}, {"repo": "/dev/web", "label": "web"}],
+        "repo": "/dev/web",
+        "hint": "Remembered for Globex.",
+        "branch": "me/eng-1",
+        "branch_worktrees": ["/dev/web"],
+        "prompt": "Read Linear ticket ENG-1 (https://linear.app/x/issue/ENG-1) and its comments with the Linear "
+                  "tools. Sum up the ask, then propose a plan. Do not change code until I agree.",
+    }
+
+
+def test_start_sends_the_issue_and_remembers_the_repo(env, peri):
+    client, db, _ = env
+    r = client.post("/api/issues/id-ENG-1/periscope", json=START)
+    assert r.status_code == 200 and r.json() == SPAWNED
+    assert peri.calls[-1] == ("POST", "/api/linear/start", {
+        "repo": "/dev/api", "branch": "me/eng-1", "ticket": "ENG-1", "title": "Rebin Globex grades",
+        "prompt": "Read ENG-1."})
+    assert db.get_meta(REPOS_KEY) == {"client:Globex": "/dev/api"}
+    assert db.get_meta(LAST_REPO_KEY) == "/dev/api"
+
+
+def test_a_claude_already_on_the_branch_is_answered_and_the_repo_remembered(env, peri):
+    client, db, _ = env
+    peri.answer = httpx.Response(200, json={"mode": "existing", "pid": "p1"})
+    r = client.post("/api/issues/id-ENG-2/periscope", json=START)
+    assert r.json() == {"mode": "existing", "pid": "p1"}
+    assert db.get_meta(REPOS_KEY) is None and db.get_meta(LAST_REPO_KEY) == "/dev/api"
+
+
+def test_a_start_periscope_refuses_says_it_is_already_starting(env, peri):
+    client, db, _ = env
+    peri.answer = httpx.Response(409, json={"detail": "start already running"})
+    r = client.post("/api/issues/id-ENG-1/periscope", json=START)
+    assert r.status_code == 409 and r.json() == {"error": "Periscope is already starting ENG-1."}
+    assert db.get_meta(LAST_REPO_KEY) is None
+
+
+def test_other_periscope_errors_carry_its_detail(env, peri):
+    client, db, _ = env
+    peri.answer = httpx.Response(502, json={"detail": "spawn failed: no server"})
+    r = client.post("/api/issues/id-ENG-1/periscope", json=START)
+    assert r.status_code == 502 and r.json() == {"error": "spawn failed: no server"}
+    assert db.get_meta(LAST_REPO_KEY) is None
+
+
+def test_options_when_periscope_is_not_running():
+    def refuse(request):
+        raise httpx.ConnectError("refused")
+
+    settings = load_settings()
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=httpx.MockTransport(refuse)))
+    r = TestClient(app).get("/api/issues/id-ENG-1/periscope")
+    assert r.status_code == 502 and r.json() == {"error": "Periscope is not running at 127.0.0.1:17374."}
+
+
+def test_show_selects_the_pane_then_brings_periscope_forward(env, peri):
+    client, _, fronted = env
+    assert client.post("/api/periscope/show", json={"pid": "k"}).json() == {"ok": True}
+    assert peri.calls[-1] == ("POST", "/api/select", {"pid": "k"}) and fronted == [True]

@@ -28,10 +28,12 @@ from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
 from . import logos, mutes, pulls, schedule, stats, summary, tools
 from .categories import categorize
-from .config import (SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings,
-                     get_linear_key, load_settings, read_overrides, source_state, write_overrides)
+from .config import (DEFAULT_PERISCOPE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST,
+                     SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides, source_state,
+                     write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
+from .periscope import Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, remember_repo
 from .selfcmd import self_command
 from .sources import SourceError
 from .sweep import _env, next_working_day
@@ -96,6 +98,20 @@ class DaylightIn(BaseModel):
     place: str = Field(default="", max_length=80)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+class PeriscopePromptIn(BaseModel):
+    prompt: str = Field(max_length=8000)       # empty: back to the default
+
+
+class PeriscopeStartIn(BaseModel):
+    repo: str = Field(min_length=1, max_length=500)       # a repo path from periscope's catalog
+    branch: str = Field(min_length=1, max_length=250)
+    prompt: str = Field(min_length=1, max_length=8000)
+
+
+class PeriscopeShowIn(BaseModel):
+    pid: str = Field(min_length=1, max_length=100)
 
 
 # The Settings page's sources, in the order it lists them: key, name, what it reads, how.
@@ -187,11 +203,15 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                sweep_launcher: Callable[[list[str]], None] | None = None,
                block_fn: Callable[..., str | None] | None = None,
                draft_fn: Callable[[str, str], str | None] | None = None,
+               periscope_factory: Callable[[], Periscope] | None = None,
+               front_fn: Callable[[], None] | None = None,
                scheduler=schedule) -> FastAPI:
     settings = settings or load_settings()
     db = db or DB(settings.db_path)
     db.release()     # approvals interrupted by a crash go back to the Inbox
     linear_factory = linear_factory or (lambda: Linear(get_linear_key()))
+    periscope_factory = periscope_factory or (lambda: Periscope(settings.periscope_url))
+    front = front_fn or bring_to_front
     token = os.environ.get("TODOHUB_TOKEN")
 
     def default_launcher(args: list[str]) -> None:
@@ -239,6 +259,15 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             raise HTTPException(502, str(exc))
         except RuntimeError as exc:   # missing API key
             raise HTTPException(503, str(exc))
+        finally:
+            client.close()
+
+    def periscope_call(fn: Callable[[Periscope], object]):
+        client = periscope_factory()
+        try:
+            return fn(client)
+        except PeriscopeError as exc:
+            raise HTTPException(exc.status, str(exc))
         finally:
             client.close()
 
@@ -356,6 +385,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "schedule": schedule.describe(settings, scheduler.installed()) | {"supported": scheduler.supported()},
             "daylight": {"place": settings.daylight_place, "latitude": settings.daylight_latitude,
                          "longitude": settings.daylight_longitude},
+            "periscope": {"prompt": settings.periscope_prompt, "default_prompt": DEFAULT_PERISCOPE_PROMPT},
         }
 
     @app.get("/api/settings", dependencies=auth)
@@ -400,6 +430,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if (body.latitude is None) != (body.longitude is None):
             raise HTTPException(400, "Give both latitude and longitude, or neither")
         save_override("daylight", body.model_dump())
+        return settings_body()
+
+    @app.put("/api/settings/periscope", dependencies=auth)
+    def set_periscope(body: PeriscopePromptIn) -> dict:
+        """The prompt Start in periscope sends; an empty one goes back to the default."""
+        save_override("periscope", {"prompt": body.prompt.strip()})
         return settings_body()
 
     # ---- review queue -----------------------------------------------------------------
@@ -889,6 +925,49 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         }
 
     slip_cache: dict = {"at": 0.0, "data": None}
+
+    # ---- Start in periscope -----------------------------------------------------------------
+    @app.get("/api/issues/{issue_id}/periscope", dependencies=auth)
+    def periscope_options(issue_id: str) -> dict:
+        """What the popover shows first: periscope's repos, the one to select and why, Linear's branch, the
+        repos with a worktree already on it, and the Settings page's prompt filled in for the issue."""
+        raw = linear_call(lambda l: l.get_issue(issue_id))
+        issue = shape_issue(raw, settings)
+        catalog = periscope_call(lambda p: p.catalog())
+        repos = [{"repo": r["repo"], "label": r["label"]} for r in catalog["repos"]]
+        repo, hint = default_repo(db, issue, [r["repo"] for r in repos])
+        branch = raw["branchName"]
+        return {
+            "repos": repos, "repo": repo, "hint": hint, "branch": branch,
+            "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"] if w["branch"] == branch}),
+            "prompt": fill_prompt(settings.periscope_prompt, issue),
+        }
+
+    @app.post("/api/issues/{issue_id}/periscope", dependencies=auth)
+    def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
+        """Ask periscope to start Claude on the branch with the prompt, then remember the repo for the issue's
+        project (or client). A Claude already on the branch is answered as mode "existing"."""
+        issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
+        try:
+            result = periscope_call(lambda p: p.start(
+                repo=body.repo, branch=body.branch.strip(), ticket=issue["identifier"], title=issue["title"],
+                prompt=body.prompt))
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                raise HTTPException(409, f"Periscope is already starting {issue['identifier']}.")
+            raise
+        remember_repo(db, issue, body.repo)
+        return result
+
+    @app.post("/api/periscope/show", dependencies=auth)
+    def periscope_show(body: PeriscopeShowIn) -> dict:
+        """Select the pane in periscope, then bring periscope to the front."""
+        periscope_call(lambda p: p.select(body.pid))
+        try:
+            front()
+        except PeriscopeError as exc:
+            raise HTTPException(502, str(exc))
+        return {"ok": True}
 
     @app.get("/api/slips", dependencies=auth)
     def slips(refresh: bool = False) -> dict:
