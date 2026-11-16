@@ -421,7 +421,7 @@ class Periscope:
         return self._call("GET", "/api/open/catalog")
 
     def start(self, *, repo: str, branch: str, ticket: str, title: str, prompt: str) -> dict:
-        """{mode: "spawned", pid, path, reused}, or {mode: "focused", pid} when a Claude is already on the branch."""
+        """{mode: "spawned", pid, path, reused}, or {mode: "existing", pid} when a Claude is already on the branch."""
         return self._call("POST", "/api/linear/start",
                           {"repo": repo, "branch": branch, "ticket": ticket, "title": title, "prompt": prompt})
 
@@ -538,9 +538,9 @@ def test_start_sends_the_issue_and_remembers_the_repo(env, peri):
 
 def test_a_claude_already_on_the_branch_is_answered_and_the_repo_remembered(env, peri):
     client, db, _ = env
-    peri.answer = httpx.Response(200, json={"mode": "focused", "pid": "p1"})
+    peri.answer = httpx.Response(200, json={"mode": "existing", "pid": "p1"})
     r = client.post("/api/issues/id-ENG-2/periscope", json=START)
-    assert r.json() == {"mode": "focused", "pid": "p1"}
+    assert r.json() == {"mode": "existing", "pid": "p1"}
     assert db.get_meta(REPOS_KEY) is None and db.get_meta(LAST_REPO_KEY) == "/dev/api"
 
 
@@ -700,7 +700,7 @@ After the `GET /api/issues/{ident}/preview` route, add:
     @app.post("/api/issues/{issue_id}/periscope", dependencies=auth)
     def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
         """Ask periscope to start Claude on the branch with the prompt, then remember the repo for the issue's
-        project (or client). A Claude already on the branch is answered as mode "focused"."""
+        project (or client). A Claude already on the branch is answered as mode "existing"."""
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
         try:
             result = periscope_call(lambda p: p.start(
@@ -766,7 +766,7 @@ export interface PeriscopeOptions {
 }
 
 export interface PeriscopeStart {
-  mode: "spawned" | "focused";                  // focused: a Claude was already on the branch
+  mode: "spawned" | "existing";                 // existing: a Claude was already on the branch
   pid: string | null;
 }
 ```
@@ -898,7 +898,7 @@ async function start(i: Issue) {
     const r = await api.startInPeriscope(i.id, { repo: p.repo, branch: p.branch.trim(), prompt: p.prompt });
     if (open === p) closePeriscope();
     const pid = r.pid;
-    ctx.toast(r.mode === "focused" ? `${i.identifier} is already open in periscope` : `Started ${i.identifier} in periscope`,
+    ctx.toast(r.mode === "existing" ? `${i.identifier} is already open in periscope` : `Started ${i.identifier} in periscope`,
       pid ? { label: "Show", run: () => void showPane(pid) } : undefined);
   } catch (e) {
     p.starting = false;
