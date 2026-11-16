@@ -513,6 +513,17 @@ A stack of pull requests sorts, shows, lights up and folds as one unit.
 - **Folded:** the line stops at the square knot, and a hairline closes the summary row. The knot grows to 16px (4px corners) in Pencil and holds the count in the Desk color, 10px at 700. The rail color is too light for text: Desk on it gives 3.4:1 in light mode, and Desk on Pencil gives 5.3:1.
 - **Context rows:** a pull request that the view or the filter leaves out stays in its place, in Pencil at 400, with no status colors. A stack never splits.
 
+### Groups (Pull requests)
+
+Mine shows the client or project of each pull request: in a column when the groups are off, and in sections when they are on.
+
+- **Number column:** the first sortable column, 64px wide. A Pencil "#", then the number in Ink, 13px tabular. A stack's summary row shows its lowest number, all in Pencil.
+- **Client / project column:** 168px, after the title. It shows only in Mine with the groups off, in windows wider than 1400px. An 18px client logo or project initial with 5px corners, then the name at 13px with an ellipsis. "No client or project" has a "–" initial and a Pencil name.
+- **Group starts:** sorted by Client / project, a darker line (Pencil 40% into Hairline) starts each group, and a name shows on a group's first row and where the row above is in another group.
+- **Group control:** a 12px Pencil "Group" label and the segmented control (None · Client or project), before Refresh all. Paper, a Hairline border, 7px corners, 12px Pencil text, as tall as Refresh all and the filter. The pressed one has the accent fill and 600 text.
+- **Section heading:** a row across the table. A chevron (down when open, right when folded), the 26px logo or initial, the name at 16px and 700, the 12px Pencil summary ("5 open · 2 need you · 1 CI failing", the CI part in Alarm Red), then a Hairline rule to the edge. 22px above it (10px for the first), 6px below it, a Hairline under it. A click folds the section to its heading.
+- **Narrow windows:** Client / project folds below 1400px and Size below 1200px, so the titles keep about 235px at the default 1120px window. Below 1000px the "Group" label hides, Refresh all shows only its icon, and the filter can shrink to 120px, so the header line fits from 760px.
+
 ### Inputs / Fields
 
 - **Style:** Paper with a Hairline border, 6px corners, 13px text.
