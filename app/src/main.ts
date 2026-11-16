@@ -3207,7 +3207,7 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
 }
 
 setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, doneStatus, todoStatus, state });
-setupPeriscope({ render, toast: (m, a) => void toast(m, a), fail });
+setupPeriscope({ render, toast: (m, a) => void toast(m, a, false, 9000), fail });   // 9 s for Show, like Undo
 setupPulls({
   rerender: () => { if (state.tab === "pulls" && !editing()) render(); else renderHeader(); },
   toast: (m) => void toast(m),
@@ -3473,7 +3473,12 @@ document.addEventListener("keydown", (e) => {
     }
   }
   if (e.key === "Escape" && state.balanceOpen) { state.balanceOpen = false; render(); return; }
-  if (e.key === "Escape" && isPeriscopeOpen()) { closePeriscope(); return; }
+  // The periscope popover takes the keys: Esc closes it, its own keydown handles ↵, and no key acts
+  // on the issue behind it. The ⌘ keys above still work.
+  if (isPeriscopeOpen()) {
+    if (e.key === "Escape") closePeriscope();
+    return;
+  }
   if (typing) {
     if (e.key === "Escape") target.blur();
     return;
@@ -3493,6 +3498,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".overlay")) return;
+  if (e.key === "p" && state.balanceOpen) return;      // one popover at a time
   // preventDefault: the key must not also type into the field it just focused.
   if ((state.tab === "today" || issueList) && paneKey(e.key)) { e.preventDefault(); return; }
 
