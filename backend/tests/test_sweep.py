@@ -506,6 +506,8 @@ def test_no_run_starts_claude_before_linear_has_named_the_user(settings, monkeyp
             raise LinearError("Linear is down")
 
     monkeypatch.setattr(sweep, "Linear", Down)
-    for run in (sweep.run_sweep(settings), sweep.run_capture(settings, "https://example.slack.com/archives/C9/p20")):
-        assert run["status"] == "error" and "your name from Linear" in run["error"]
+    for run in (sweep.run_sweep(settings), sweep.run_capture(settings, "https://example.slack.com/archives/C9/p20"),
+                sweep.run_plan(settings), sweep.run_note(settings), sweep.run_wrapup(settings)):
+        assert run["status"] == "error" and run["error"] == sweep.NO_USER
     assert not (settings.home / "argv.json").exists()            # Claude never ran
+    assert sweep.run_sweep(settings, only="github")["status"] == "ok"   # reads GitHub without Claude, or a name

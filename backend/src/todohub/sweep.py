@@ -106,13 +106,18 @@ class User:
         return {"user": self.described, "name": self.name, "first_name": self.first_name}
 
 
-NO_USER = "Couldn't read your name from Linear, so there's no one to look for tasks for. Run `todohub check`."
+NO_USER = ("Linear hasn't been read on this Mac yet, so there's no name to look for tasks for. "
+           "`todohub check` says what's wrong with Linear.")
 
 
-def current_user(settings: Settings, db: DB) -> User | None:
-    """The user, from the name ``refresh_linear_context`` last read. None until Linear has answered once."""
+def run_user(settings: Settings, db: DB, run_id: int) -> User | None:
+    """The user, from the name ``refresh_linear_context`` last read. Until Linear has answered once
+    there is none, and the run is finished as an error."""
     name = db.get_meta("user_name", "").strip()
-    return User(name, settings.about_me) if name else None
+    if not name:
+        db.finish_run(run_id, "error", error=NO_USER)
+        return None
+    return User(name, settings.about_me)
 
 
 def _fmt(dt: datetime) -> str:
@@ -535,10 +540,6 @@ def run_sweep(settings: Settings, trigger: str = "manual", only: str | None = No
         db.set_meta("run_scopes", scopes)
 
         open_issues = refresh_linear_context(settings, db)
-        user = current_user(settings, db)
-        if user is None:
-            db.finish_run(run_id, "error", error=NO_USER)
-            return db.get_run(run_id, with_sources=True) or {}
         recheck_pending(settings, db, open_issues)
         if settings.github_reviews:
             sources.sync_github(settings, db, run_id, _env())
@@ -546,6 +547,9 @@ def run_sweep(settings: Settings, trigger: str = "manual", only: str | None = No
                     if settings.linear_mentions else None)
         if only == "github":                # no Claude needed: GitHub was read above
             db.finish_run(run_id, "ok", cost_usd=0.0, num_turns=0)
+            return db.get_run(run_id, with_sources=True) or {}
+        user = run_user(settings, db, run_id)
+        if user is None:
             return db.get_run(run_id, with_sources=True) or {}
         prep = meeting_prep_due(db) or only == "calendar"   # asked for: read the calendar again
         if settings.calendar_tools and not prep:
@@ -625,13 +629,12 @@ def run_plan(settings: Settings) -> dict:
         log_path = _log_path(settings, "plan")
         run_id = db.start_run("plan", now_iso(), str(log_path))
         refresh_linear_context(settings, db)          # the identifiers report_plan checks against
+        user = run_user(settings, db, run_id)
+        if user is None:
+            return db.get_run(run_id) or {}
         ctx = plan.gather(settings, db)
         if ctx is None:
             db.finish_run(run_id, "error", error="Couldn't read Linear, so there's nothing to plan from.")
-            return db.get_run(run_id) or {}
-        user = current_user(settings, db)
-        if user is None:
-            db.finish_run(run_id, "error", error=NO_USER)
             return db.get_run(run_id) or {}
         out = _invoke_claude(settings, run_id, build_plan_prompt(settings, user, ctx), log_path, f"plan {run_id}")
         saved = (db.get_meta("plans", {}) or {}).get(ctx["today"].isoformat(), {}).get("run_id") == run_id
@@ -657,13 +660,12 @@ def run_note(settings: Settings) -> dict:
         log_path = _log_path(settings, "note")
         run_id = db.start_run("note", now_iso(), str(log_path))
         refresh_linear_context(settings, db)          # the identifiers report_note checks refs against
+        user = run_user(settings, db, run_id)
+        if user is None:
+            return db.get_run(run_id) or {}
         ctx = note.gather(settings, db)
         if ctx is None:
             db.finish_run(run_id, "error", error="Couldn't read Linear, so there's nothing to write the note from.")
-            return db.get_run(run_id) or {}
-        user = current_user(settings, db)
-        if user is None:
-            db.finish_run(run_id, "error", error=NO_USER)
             return db.get_run(run_id) or {}
         out = _invoke_claude(settings, run_id, build_note_prompt(settings, user, ctx), log_path, f"note {run_id}")
         saved = (db.get_meta("notes", {}) or {}).get(ctx["today"].isoformat(), {}).get("run_id") == run_id
@@ -687,13 +689,12 @@ def run_wrapup(settings: Settings) -> dict:
         log_path = _log_path(settings, "wrapup")
         run_id = db.start_run("wrapup", now_iso(), str(log_path))
         refresh_linear_context(settings, db)          # the identifiers report_wrapup checks against
+        user = run_user(settings, db, run_id)
+        if user is None:
+            return db.get_run(run_id) or {}
         ctx = wrapup.gather(settings, db)
         if ctx is None:
             db.finish_run(run_id, "error", error="Couldn't read Linear, so there's nothing to wrap up.")
-            return db.get_run(run_id) or {}
-        user = current_user(settings, db)
-        if user is None:
-            db.finish_run(run_id, "error", error=NO_USER)
             return db.get_run(run_id) or {}
         out = _invoke_claude(settings, run_id, build_wrapup_prompt(settings, user, ctx), log_path, f"wrap-up {run_id}")
         saved = (db.get_meta("wrapups", {}) or {}).get(ctx["today"].isoformat(), {}).get("run_id") == run_id
@@ -723,9 +724,8 @@ def run_capture(settings: Settings, text: str) -> dict:
         log_path = _log_path(settings, "capture")
         run_id = db.start_run("capture", now_iso(), str(log_path))
         open_issues = refresh_linear_context(settings, db)
-        user = current_user(settings, db)
+        user = run_user(settings, db, run_id)
         if user is None:
-            db.finish_run(run_id, "error", error=NO_USER)
             return db.get_run(run_id) or {}
         prompt = build_capture_prompt(settings, user, text, db.get_meta("client_labels", []), open_issues)
         out = _invoke_claude(settings, run_id, prompt, log_path, f"capture {run_id}")
