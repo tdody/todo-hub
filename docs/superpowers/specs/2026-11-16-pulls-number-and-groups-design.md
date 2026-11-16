@@ -48,7 +48,7 @@ Out:
 - A cell shows the client's logo (`clientLogo`, as in Client and Dev) or the project's initial (`ll-initial`), then the name. The name gets an ellipsis when it is too long. **No client or project** shows "–" as its initial, and its name is in Pencil.
 - Each pull request row shows its own group. A stack's summary row shows the stack's group.
 - Sorted by this column, the groups are in name order, and **No client or project** comes last. Inside a group, the rows sort by Next step: in every column, rows with the same value sort by Next step. A stack sorts by the group of its base pull request.
-- Sorted by this column, a cell shows the name only when it is different from the row above. The first row of each group gets a darker line above it (Pencil 40% into Hairline).
+- Sorted by this column, a cell shows the name on the first row of each group and where the row above is in another group. The first row of each group gets a darker line above it (Pencil 40% into Hairline).
 - The first click sorts A to Z.
 - Below 1400 px, the column folds to zero width, as Size does below 1200 px. Its cells stay, so the colspans still fit. At the default window (1120 px) the table is 840 px wide, and the fixed columns with **#** take 690 px, so there is no room for this column. The groups work at every width.
 - Size folds below 1200 px (it folded below 1000 px before this change). With **#**, the titles had about 135 px at the default window; without Size they get about 235 px.
