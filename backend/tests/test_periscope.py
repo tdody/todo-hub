@@ -18,7 +18,8 @@ URL = "http://127.0.0.1:17374"
 CATALOG = {
     "repos": [{"repo": "/dev/api", "label": "api", "default_branch": "main", "branches": []},
               {"repo": "/dev/web", "label": "web", "default_branch": "main", "branches": []}],
-    "worktrees": [{"path": "/dev/worktrees/web/me-eng-1", "repo": "/dev/web", "branch": "me/eng-1", "is_main": False}],
+    "worktrees": [{"path": "/dev/worktrees/web/me-eng-1", "repo": "/dev/web", "branch": "me/eng-1", "is_main": False},
+                  {"path": "/dev/api", "repo": "/dev/api", "branch": "main", "is_main": True}],
     "roots": ["/dev"],
 }
 SPAWNED = {"mode": "spawned", "pid": "k", "path": "/dev/worktrees/api/me-eng-1", "reused": False}
@@ -81,8 +82,11 @@ def test_client_when_periscope_is_down_or_slow():
 
     with pytest.raises(PeriscopeError, match=r"Periscope is not running at 127\.0\.0\.1:17374\."):
         Periscope(URL, transport=httpx.MockTransport(refuse)).catalog()
-    with pytest.raises(PeriscopeError, match="Periscope didn't answer in 120 s."):
+    with pytest.raises(PeriscopeError, match="Periscope didn't answer in 15 s."):
         Periscope(URL, transport=httpx.MockTransport(slow)).catalog()
+    with pytest.raises(PeriscopeError, match="Periscope didn't answer in 120 s."):
+        Periscope(URL, transport=httpx.MockTransport(slow)).start(
+            repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p")
 
 
 def test_fill_prompt_fills_three_tokens_and_keeps_other_braces():
@@ -210,3 +214,35 @@ def test_show_selects_the_pane_then_brings_periscope_forward(env, peri):
     client, _, fronted = env
     assert client.post("/api/periscope/show", json={"pid": "k"}).json() == {"ok": True}
     assert peri.calls[-1] == ("POST", "/api/select", {"pid": "k"}) and fronted == [True]
+
+
+def test_a_blank_branch_is_a_400_and_periscope_is_not_asked(env, peri):
+    client, _, _ = env
+    r = client.post("/api/issues/id-ENG-1/periscope", json={**START, "branch": "   "})
+    assert r.status_code == 400 and r.json() == {"error": "The branch is empty"}
+    assert peri.calls == []
+
+
+def test_show_when_periscope_cannot_be_brought_forward(peri):
+    def fail():
+        raise PeriscopeError("Could not bring Periscope to the front.")
+
+    settings = load_settings()
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=peri.transport), front_fn=fail)
+    r = TestClient(app).post("/api/periscope/show", json={"pid": "k"})
+    assert r.status_code == 502 and r.json() == {"error": "Could not bring Periscope to the front."}
+
+
+def test_show_when_periscope_is_not_running_does_not_bring_it_forward():
+    def refuse(request):
+        raise httpx.ConnectError("refused")
+
+    fronted = []
+    settings = load_settings()
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=httpx.MockTransport(refuse)),
+                     front_fn=lambda: fronted.append(True))
+    r = TestClient(app).post("/api/periscope/show", json={"pid": "k"})
+    assert r.status_code == 502 and r.json() == {"error": "Periscope is not running at 127.0.0.1:17374."}
+    assert fronted == []
