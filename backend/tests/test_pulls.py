@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,7 +55,7 @@ def run(name, conclusion="SUCCESS", status="COMPLETED"):
 
 def fake_gh(tmp_path, settings, mine=(), review=()):
     """A gh that prints the given pull requests and counts its runs in calls.txt. A read of one pull
-    request prints one.json instead."""
+    request prints one.json instead, and the weekly read prints weekly.json."""
     out, calls = tmp_path / "gh.json", tmp_path / "calls.txt"
     out.write_text(json.dumps({"data": {
         "viewer": {"login": ME},
@@ -62,7 +63,7 @@ def fake_gh(tmp_path, settings, mine=(), review=()):
         "review": {"issueCount": len(review), "nodes": list(review)},
     }}))
     gh = tmp_path / "gh"
-    gh.write_text(f'#!/bin/sh\necho x >> {calls}\ncase "$*" in *owner=*) cat {tmp_path / "one.json"};; *) cat {out};; esac\n')
+    gh.write_text(f'#!/bin/sh\necho x >> {calls}\ncase "$*" in *owner=*) cat {tmp_path / "one.json"};; *reviewed-by*) cat {tmp_path / "weekly.json"};; *) cat {out};; esac\n')
     gh.chmod(0o755)
     settings.gh_path = str(gh)
     return out, calls
@@ -153,3 +154,45 @@ def test_refresh_one_pull_request(settings, tmp_path):
     r = client.post("/api/pulls/initech/platform/9")
     assert r.status_code == 502 and "Could not resolve" in r.json()["error"]
     assert [p["number"] for p in client.get("/api/pulls").json()["mine"]] == [2]    # the last read stays
+
+
+def weekly_json(tmp_path, merged, *reviewed):
+    """What GitHub returns for pulls.weekly: per week, the merged pull requests as (additions, deletions);
+    only the last two weeks list them."""
+    def pr(number, *reviews):
+        return {"repository": {"nameWithOwner": "initech/platform"}, "number": number,
+                "reviews": {"nodes": [{"author": {"login": who}, "submittedAt": at} for who, at in reviews]}}
+    (tmp_path / "weekly.json").write_text(json.dumps({"data": {
+        "viewer": {"login": ME},
+        **{f"w{i}": {"issueCount": len(prs), **({"nodes": [{"additions": a, "deletions": d} for a, d in prs]} if i >= len(merged) - 2 else {})}
+           for i, prs in enumerate(merged)},
+        "reviewed": {"nodes": [pr(*r) for r in reviewed]}}}))
+
+
+def test_weekly_counts(settings, tmp_path):
+    fake_gh(tmp_path, settings)
+    weekly_json(tmp_path, [[(10, 1)] * 3, [], [(5, 5)], [], [], [(1, 0)] * 2, [(7, 2)] * 5, [(100, 20), (30, 5), (7, 0), (1, 1)]],
+                (5, (ME, "2026-11-10T15:00:00Z"), (ME, "2026-11-12T15:00:00Z"), ("ana", "2026-11-12T16:00:00Z")),
+                (6, (ME, "2026-11-03T15:00:00Z"), (ME, "2026-11-11T15:00:00Z")),
+                (7, ("raj", "2026-11-11T15:00:00Z")),
+                (8, (ME, "2026-11-09T03:30:00Z")))          # Sunday night in ET, so the week of Nov 2
+    read = pulls.weekly(settings, today=date(2026, 11, 12))
+    weeks = read["weeks"]
+    assert [w["week"] for w in weeks][0] == "2026-09-21" and weeks[-1]["week"] == "2026-11-09"
+    assert [w["merged"] for w in weeks] == [3, 0, 1, 0, 0, 2, 5, 4]
+    assert read["lines"] == {"additions": 138, "deletions": 26} and read["last_lines"] == {"additions": 35, "deletions": 10}
+    # #5 twice in one week counts once; #6 counts in both its weeks; raj's review of #7 is not yours
+    assert [w["reviewed"] for w in weeks] == [0, 0, 0, 0, 0, 0, 2, 2]
+
+
+def test_weekly_endpoint_caches_and_reports_errors(settings, tmp_path):
+    out, calls = fake_gh(tmp_path, settings)
+    weekly_json(tmp_path, [[(1, 1)] * n for n in range(1, 9)])
+    client = TestClient(create_app(settings, DB(settings.db_path)))
+    body = client.get("/api/pulls/weekly").json()
+    assert [w["merged"] for w in body["weeks"]] == [1, 2, 3, 4, 5, 6, 7, 8] and body["error"] is None
+    client.get("/api/pulls/weekly")
+    assert len(calls.read_text().split()) == 1                # read once, then from the cache
+    (tmp_path / "gh").write_text("#!/bin/sh\necho 'To get started with GitHub CLI, please run:  gh auth login' >&2\nexit 4\n")
+    body = client.get("/api/pulls/weekly?refresh=true").json()
+    assert body == {"weeks": [], "lines": None, "last_lines": None, "error": "gh is not signed in. Run gh auth login in a terminal."}

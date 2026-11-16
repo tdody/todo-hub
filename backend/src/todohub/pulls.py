@@ -2,6 +2,7 @@
 
 - mine: the open pull requests you opened.
 - review: the open pull requests that ask for your review.
+- weekly: for Insights, the pull requests you merged and reviewed each week, and the lines merged this week and last.
 
 Everything is GitHub data; nothing is written by Claude. Comments, reviews and review requests
 from bots are left out.
@@ -10,8 +11,9 @@ from bots are left out.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
+from . import stats
 from .config import Settings
 from .sources import gh_json
 
@@ -109,6 +111,48 @@ def updated(d: dict, repo: str, number: int, pr: dict | None) -> dict:
             out[f"{side}_total"] -= 1
         out[side] = _link_stacks(prs) if side == "mine" else prs
     return out
+
+
+def weekly(settings: Settings, env: dict | None = None, weeks: int = 8, today: date | None = None) -> dict:
+    """Per week, Monday to Sunday (ET): your pull requests that GitHub merged (into any branch), and the
+    pull requests of others you reviewed (each counts once a week). Also the lines added and removed by
+    the ones merged this week and last week. Raises sources.SourceError."""
+    starts = stats.week_starts(weeks, today)
+
+    def midnight(d: date) -> datetime:
+        return datetime(d.year, d.month, d.day, tzinfo=stats.TZ)
+
+    def merged(d: date) -> str:
+        end = midnight(d + timedelta(days=7)) - timedelta(seconds=1)
+        return f"is:pr author:@me is:merged merged:{midnight(d).isoformat()}..{end.isoformat()}"
+
+    def search(i: int, d: date) -> str:
+        # Lines only for the last two weeks: a query that reads them for all 8 passes GitHub's
+        # 10-second limit about half the time.
+        if i < len(starts) - 2:
+            return f'w{i}: search(query: "{merged(d)}", type: ISSUE, first: 0) {{ issueCount }}'
+        return f'w{i}: search(query: "{merged(d)}", type: ISSUE, first: 100) {{ issueCount nodes {{ ... on PullRequest {{ additions deletions }} }} }}'
+
+    counts = "\n".join(search(i, d) for i, d in enumerate(starts))
+    query = f"""{{
+      viewer {{ login }}
+      {counts}
+      reviewed: search(query: "is:pr reviewed-by:@me -author:@me updated:>={midnight(starts[0]).isoformat()}", type: ISSUE, first: 100) {{
+        nodes {{ ... on PullRequest {{ repository {{ nameWithOwner }} number reviews(last: 30) {{ nodes {{ author {{ login }} submittedAt }} }} }} }}
+      }}
+    }}"""
+    data = (gh_json(settings, ["api", "graphql", "-f", f"query={query}"], env) or {})["data"]
+    me = data["viewer"]["login"]
+    reviewed = {(stats.week_start(stats.local_date(r["submittedAt"])), pr["repository"]["nameWithOwner"], pr["number"])
+                for pr in data["reviewed"]["nodes"] if pr
+                for r in _nodes(pr, "reviews") if (r.get("author") or {}).get("login") == me and r.get("submittedAt")}
+    def lines(found: dict) -> dict:
+        prs = [pr for pr in found["nodes"] if pr]
+        return {"additions": sum(pr["additions"] for pr in prs), "deletions": sum(pr["deletions"] for pr in prs)}
+
+    return {"weeks": [{"week": d.isoformat(), "merged": data[f"w{i}"]["issueCount"], "reviewed": sum(w == d for w, _, _ in reviewed)}
+                      for i, d in enumerate(starts)],
+            "lines": lines(data[f"w{len(starts) - 1}"]), "last_lines": lines(data[f"w{len(starts) - 2}"])}
 
 
 def _link_stacks(mine: list[dict]) -> list[dict]:
