@@ -22,7 +22,7 @@ colors:
   s-pend-bg: "#efe9f7"
   s-pend-ink: "#5b3a8a"
   s-done-bg: "#e6f2ea"
-  s-done-ink: "#2f7d57"
+  s-done-ink: "#2b7451"
   p-urgent-bg: "#d1462f"
   p-urgent-ink: "#ffffff"
   p-high-bg: "#fde6d8"
@@ -337,7 +337,7 @@ A cool, low-contrast paper palette with one navy accent and one amber, plus smal
 
 - **Done Green** (`good`): success, a ticked item, the healthy-source dot, an approved card's ring.
 - **Alarm Red** (`bad`, `bad-bg`): late dates, errors, failing sources, a dropped card's ring, destructive menu items and buttons.
-- **Status pills** (`s-todo`, `s-prog`, `s-pend`, `s-done`, each a background and ink pair): Todo is grey, In Progress blue, Pending purple, Done green. Backlog is a dashed outline; Canceled and Duplicate are struck through.
+- **Status pills** (`s-todo`, `s-prog`, `s-pend`, `s-done`, each a background and ink pair): Todo is grey, In Progress blue, Pending purple, Done green. Each ink reaches 4.5:1 on its own background; the Done ink is a step darker than Done Green for this reason. Backlog is a dashed outline; Canceled and Duplicate are struck through.
 - **Priority pills** (`p-urgent`, `p-high`, `p-med`): Urgent is the one solid, saturated fill in the system; High is an orange wash, Medium a sand wash, Low an outline, none plain text. Urgent rows add `urgent-tint` behind the row and an `edge-urgent` stripe; High rows an `edge-high` stripe.
 
 ### Source and task-type colors
@@ -496,7 +496,7 @@ One row of plain segments. Each segment is a count over a label, and one segment
 - **Segment:** a 20px tabular count at 700 over a 12px Pencil label, 8px × 14px padding. The number keys 1 to N press the segments.
 - **Pressed:** a 7% accent tint and a 2px accent line along the bottom edge. The label turns Ink at 600.
 - **Hover:** a segment that is not pressed shows Shaded Paper.
-- **Filter note:** an optional 12px tabular note under the count, in its tone: Alarm Red at 600, Morning Amber ink or Done Green ("2 CI failing").
+- **Filter note:** an optional 12px tabular note under the count, in its tone: Alarm Red at 600, Morning Amber ink, or the Done pill ink (`s-done-ink`) for a green note ("2 CI failing"). Done Green is too light for small text on the pressed and hover fills.
 - **Note states:** a click presses the segment and filters the table to that part. Hover on a note that is not pressed underlines it. A pressed note gets a full-pill wash in its tone (`bad-bg`, `warn-bg`, `s-done-bg`) and a 10px × that clears it.
 - **Focus:** segments and notes use the 2px accent focus outline of all buttons. On a segment, the outline is inside the button, because the strip clips what is outside it.
 - **Narrow windows:** below 1000px the notes go away. A segment with no note keeps an empty line, so the counts stay aligned.
