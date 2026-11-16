@@ -548,6 +548,7 @@ export const api = {
   issues: () => call<Issue[]>("GET", "/api/issues"),
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
   pulls: (refresh = false) => call<Pulls>("GET", `/api/pulls${refresh ? "?refresh=true" : ""}`),
+  pull: (repo: string, number: number) => call<Pulls>("POST", `/api/pulls/${repo}/${number}`),
   editIssue: (id: string, edit: IssueEdit) => call<Issue>("PATCH", `/api/issues/${encodeURIComponent(id)}`, edit),
   /** Move an issue to Linear's trash (restorable there for 30 days); it also leaves Today. */
   deleteIssue: (id: string) =>

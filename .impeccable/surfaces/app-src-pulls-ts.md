@@ -35,12 +35,16 @@ Point at one pull request of a stack and the whole stack lights up; the stack's 
 - An open thread is every unresolved review thread that a person started; its step is "Resolve N threads". On 2026-11-15, 8 of his 21 open pull requests that are not drafts had one.
 - Comment counts and open threads leave out bots: 54 of 74 conversation comments came from bots.
 - A failing check's name opens its run log: GitHub gives no reason text for his runs (on 2026-11-14, 0 of 23 failed check runs had a title or summary), so the mock's "ruff, 3 errors" cannot be shown.
+- The tab reads GitHub about every 5 minutes after the last read; it need not be exact. Refresh all (beside the filter, or ⌘R) reads now and starts the 5 minutes again.
+- Refresh in an opened row reads that one pull request again; it does not change the 5 minutes of the list.
 
 ## Decided in the build (from real GitHub data, to confirm)
 
 - The Linear issue comes from the branch name or title, when its team key is one his issues use; its status and due date show when it is one of his open issues.
 - The stack summary row keeps two lines ("Stack of N" over "repo · merge order"), as in the approved mock's final version: one line broke "Stack of 2" in two.
-- GitHub is read at most every 5 minutes (a read costs about 40 of 5,000 points an hour); the newest 30 threads per pull request are read.
+- A read of the list costs about 40 of 5,000 points an hour, and a read of one pull request costs 1; the newest 30 threads per pull request are read.
+- A pull request read again alone leaves the list only when it is merged or closed. A review request that GitHub drops stays in To review until the next read of the list.
+- The error banner has no button of its own: Refresh all sits just above it.
 
 ## Unresolved
 
