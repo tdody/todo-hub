@@ -29,7 +29,7 @@ Out:
 
 - The ⋯ menu in both panes gets **Start in periscope** with its key, `p`, after **Open in Linear ↗** (Client and Dev) or first (Today).
 - **p** opens the popover for the selected issue in Today, Client and Dev, as **o** opens Linear. It does nothing when a text field has the focus or the balance popover is open.
-- While the popover is open, page keys do nothing, wherever the focus is (⌘1-⌘7, ⌘, and ⌘R still work).
+- While the popover is open, page shortcuts do nothing, wherever the focus is. Tab and Space on a focused page control still act natively. ⌘1-⌘7, ⌘, and ⌘R still work. So does ⌘Z: Edit → Undo still undoes your last change. A tab switch forgets the popover.
 
 ### The popover
 
@@ -49,7 +49,7 @@ It opens under the pane's ⋯ row, at its right edge. While todo-hub asks perisc
   3. the repo last picked for any issue;
   4. nothing, so you must pick one before **Start** is enabled.
 - The hint under Repo says which rule chose it: "Remembered for Pipelines.", "Remembered for Globex.", "The last repo you used." or nothing.
-- **Branch** is a text field with Linear's `branchName`. If the selected repo already has a worktree on Linear's branch (`branch_worktrees`), and you did not change the branch, the hint says "A worktree is already on this branch."
+- **Branch** is a text field with Linear's `branchName`. If the selected repo already has a worktree on Linear's branch (`branch_worktrees`), and you did not change the branch, the hint says "A worktree is already on this branch." If you changed the branch, it says "A new worktree, or the one already on this branch."
 - **Prompt** is a text area. It holds the template from Settings, filled in for this issue.
 - **↵** starts, except in the Prompt box, where **↵** adds a new line and **⌘↵** starts. **Esc**, a click outside, and **Cancel** close the popover.
 - **Start** is disabled until Repo, Branch and Prompt all have text.
@@ -64,14 +64,14 @@ It opens under the pane's ⋯ row, at its right edge. While todo-hub asks perisc
 
 ### Errors
 
-Each one is an error toast. The popover stays open, except for the first one.
+Each one is an error toast. The popover opens with "Asking periscope…". An error while it asks closes it. An error at **Start** leaves it open. An error at **Show** comes after the popover closed.
 
 | Cause | Message |
 |---|---|
-| Periscope does not answer at `periscope_url` | "Periscope is not running at 127.0.0.1:17374." The popover does not open. |
+| Periscope does not answer at `periscope_url` | "Periscope is not running at 127.0.0.1:17374." At the first ask, the popover closes. At **Start**, it stays open. |
 | Periscope answers 409 (a start for this branch is running, or a Claude started less than 60 s ago has not attached yet) | "Periscope is already starting ENG-9512." |
 | Periscope answers 400 or 502 | Periscope's own message, for example "spawn failed: …". |
-| Periscope does not answer in time (15 s; 120 s for a start) | "Periscope didn't answer in 15 s." (or 120 s) |
+| Periscope does not answer in time (15 s; 120 s for a start) | "Periscope didn't answer in 15 s." For a start: "Periscope didn't answer in 120 s. It may still start Claude." |
 | The branch is blank | "The branch is empty" (400). The popover's **Start** is already disabled then. |
 | `open -b com.tom.periscope.app` fails | "Could not bring Periscope to the front." |
 
@@ -98,7 +98,7 @@ todo-hub calls three periscope routes. Periscope has no auth and listens on 127.
 
 **New `backend/src/todohub/periscope.py`**
 
-- `Periscope(url, transport=None)`, shaped like `Linear`: `catalog()`, `start(...)` and `select(pid)`. `catalog()` and `select()` wait 15 s. `start()` waits 120 s, because a start runs `git fetch` and makes the worktree (up to about 90 s on a large repo), then waits about 10 s for Claude's screen. A timeout gives "Periscope didn't answer in 15 s." or "Periscope didn't answer in 120 s."
+- `Periscope(url, transport=None)`, shaped like `Linear`: `catalog()`, `start(...)` and `select(pid)`. `catalog()` and `select()` wait 15 s. `start()` waits 120 s. The worst case is about 130 s: fetch 30 s, worktree add 30 s, reset 60 s, then about 10 s for Claude's screen. Periscope keeps going after todo-hub stops waiting. A quick call times out with "Periscope didn't answer in 15 s." A start times out with "Periscope didn't answer in 120 s. It may still start Claude."
 - `fill_prompt(template, issue) -> str`: replaces only `{identifier}`, `{title}` and `{url}`. Other braces stay as typed.
 - `PeriscopeError(message, status)`: a connection error becomes the "not running" message. A 4xx or 5xx carries periscope's `detail`.
 - The remembered repos are in the `meta` table: `periscope_repos` holds `{"project:<name>": <repo path>, "client:<label>": <repo path>}`, and `periscope_last_repo` holds a repo path. `default_repo(db, issue, repos)` applies the order above and returns the repo and the hint. A remembered repo that is not in the catalog any more is skipped.
@@ -106,13 +106,13 @@ todo-hub calls three periscope routes. Periscope has no auth and listens on 127.
 **`backend/src/todohub/api.py`**
 
 - `GET /api/issues/{issue_id}/periscope` → `{repos: [{repo, label}], repo, hint, branch, branch_worktrees, prompt}`. It reads the issue with `Linear.get_issue` and the catalog from periscope.
-- `POST /api/issues/{issue_id}/periscope` with `{repo, branch, prompt}` → periscope's answer. It reads the issue for the ticket and title, calls `start`, then remembers the repo.
+- `POST /api/issues/{issue_id}/periscope` with `{repo, branch, prompt}` → periscope's answer. It strips the branch and answers 400 when it is blank. It reads the issue for the ticket and title, calls `start`, then remembers the repo.
 - `POST /api/periscope/show` with `{pid}` → calls `select`, then runs `open -b com.tom.periscope.app`, in one `periscope_call`, so a failure of either becomes one error toast.
-- A `PeriscopeError` becomes an HTTP error with its message. Periscope's 409 stays 409; the others become 502.
+- A `PeriscopeError` becomes an HTTP error with its message. Periscope's 409 becomes a 409 with "Periscope is already starting ENG-…"; the others become 502.
 
 **`app/src/api.ts`**: the three calls.
 
-**New `app/src/periscope.ts`**: the menu item, the popover, Start and Show, set up from `main.ts` like `pane.ts`. **`app/src/main.ts`**: the menu item in `issuePane` and `stageBody`, the setup, outside click, Esc and the shortcuts sheet. **`app/src/pane.ts`**: `p` in `PANE_KEYS`.
+**New `app/src/periscope.ts`**: the menu item, the popover, Start and Show, set up from `main.ts` like `pane.ts`. **`app/src/main.ts`**: the menu item in `issuePane` and `stageBody`, the setup, outside click, Esc and the shortcuts sheet. The keydown handler holds the page shortcuts while the popover is open. A tab switch forgets the popover. **p** does nothing while the balance popover is open. **`app/src/pane.ts`**: `p` in `PANE_KEYS`, and `data-tick` becomes `data-focus`, so a control keeps its focus across a re-render.
 
 **`app/src/settings.ts`**: a **Periscope** section with the Prompt text area, its placeholders listed in the hint, and **Reset to default**.
 
@@ -128,7 +128,7 @@ todo-hub calls three periscope routes. Periscope has no auth and listens on 127.
 - `default_repo`: project match, client match for an issue with no project, last repo, nothing; a remembered repo that left the catalog is skipped.
 - The GET route returns the catalog repos, the default repo and hint, Linear's branch, `branch_worktrees` and the filled prompt.
 - The POST route sends ticket and title, returns periscope's answer, and remembers the repo for both `spawned` and `existing`.
-- Errors: connection refused → "not running"; 409 stays 409 with its text; 502 carries periscope's `detail`. No repo is remembered after an error.
+- Errors: connection refused → "not running"; the route answers 409 with "Periscope is already starting ENG-…"; 502 carries periscope's `detail`. No repo is remembered after an error.
 - `show` calls `/api/select` with the pid and runs `open -b` (patched).
 
 `backend/tests/test_settings.py`: `periscope_prompt` from `settings.json` overrides the default; an empty text gives the default.
@@ -137,6 +137,8 @@ The app has no frontend test runner. Check the UI in the running app: both panes
 
 ## Assumptions
 
+- Periscope runs a version with `POST /api/linear/start` and `POST /api/select`. With an older one, **Start** and **Show** show "Not Found".
+- While the TodoHub window is hidden, WebKit can suspend the page. A start's toast can then appear only when the window comes back. A 100 s fetch succeeds in a visible WKWebView. In a hidden one it does not settle.
 - Linear's `branchName` is never empty. Linear's schema types it `String!`.
 - Periscope's catalog lists every repo that you start issues in. It scans `~/dev` one level deep and adds every project periscope has registered.
 - `open -b com.tom.periscope.app` finds the app. LaunchServices knows it from its build folder, `src-tauri/target/release/bundle/macos/Periscope.app`.
