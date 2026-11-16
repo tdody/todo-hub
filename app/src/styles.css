@@ -1573,6 +1573,7 @@ button.seg-n:not([aria-pressed="true"]):hover { text-decoration: underline; text
 .pr-table th:nth-child(1) { width: 18px; }
 .pr-table th:nth-child(2) { width: 20px; }
 .pr-table th.c-num { width: 64px; }
+.pr-table th.c-grp { width: 168px; }
 .pr-table th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 0; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .pr-table th button { border: 0; background: none; padding: 6px 10px; font-weight: 600; color: inherit; display: inline-flex; align-items: center; gap: 3px; border-radius: 6px; cursor: pointer; }
 .pr-table th button:hover { color: var(--ink); }
@@ -1587,6 +1588,15 @@ button.seg-n:not([aria-pressed="true"]):hover { text-decoration: underline; text
 .pr-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; vertical-align: top; }
 .pr-table td.st, .pr-table td.ci, .pr-table td.cm, .pr-table td.up, .pr-table td.num { padding-top: 8px; font-size: 13px; }
 .pr-table td.num .hash { color: var(--muted); }
+/* the Client / project cell: a logo or initial, then the name, which ends in an ellipsis */
+.pr-table td.grp { padding-top: 7px; font-size: 13px; overflow: hidden; }
+.pr-table td.grp .gi { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.pr-table td.grp .gi > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.pr-table td.grp .gi.none > span:last-child { color: var(--muted); }
+.pr-table td.grp .avatar.sm, .pr-table td.grp .ll-initial { width: 18px; height: 18px; border-radius: 5px; font-size: 10px; }
+.pr-table td.grp .avatar.sm .mark { border-radius: 5px; }
+/* sorted by Client / project: a darker line where the group changes */
+.pr-table tr.run > td:not(.rail) { border-top: 1px solid color-mix(in srgb, var(--muted) 40%, var(--border)); }
 .pr-table td.st { overflow: hidden; text-overflow: ellipsis; }
 .pr-table td.r { text-align: right; }
 .pr-table td.sz { font-size: 12px; color: var(--muted); padding-top: 9px; }
@@ -1634,7 +1644,7 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
 .prs .step.red { color: var(--bad); }
 /* a pull request shown only for its stack's sake, when the view or the filter leaves it out */
 .pr-table tr.ctx .tt, .pr-table tr.ctx td.st, .pr-table tr.ctx td.ci, .pr-table tr.ctx td.cm, .pr-table tr.ctx td.up,
-.pr-table tr.ctx td.num { color: var(--muted); }
+.pr-table tr.ctx td.num, .pr-table tr.ctx td.grp { color: var(--muted); }
 .pr-table tr.ctx .step, .pr-table tr.ctx .no, .pr-table tr.ctx .ok, .pr-table tr.ctx .amb, .pr-table tr.ctx .red, .pr-table tr.ctx .open-n { color: var(--muted); font-weight: 400; }
 .pr-table tr.ctx:not(.sel) .tt { font-weight: 400; }
 /* the stack: a rail of knots, a summary row that holds the sort value, then its pull requests in merge order */
@@ -1705,7 +1715,12 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
   .pr-table td.st, .pr-table td.ci, .pr-table td.cm, .pr-table td.up, .pr-table td.num { padding-left: 6px; padding-right: 6px; }
   .pr-table th button { padding: 6px; }
 }
-/* A narrow window collapses a column to zero width; its cells stay, so the open row's colspan still fits. */
+/* A narrow window collapses a column to zero width; its cells stay, so the open row's colspan still fits.
+   Client / project needs the most room: at the default 1120px window the titles would get none. */
+@media (max-width: 1400px) {
+  .pr-table th.c-grp { width: 0; visibility: hidden; overflow: hidden; }
+  .pr-table td.grp { padding: 0; visibility: hidden; overflow: hidden; }
+}
 @media (max-width: 1000px) {
   .pr-table th.c-size { width: 0; visibility: hidden; overflow: hidden; }
   .pr-table td.c-size { padding: 0; visibility: hidden; overflow: hidden; }
