@@ -1,4 +1,5 @@
-"""Open pull requests for the Pull requests tab, read from GitHub with one `gh api graphql` call.
+"""Open pull requests for the Pull requests tab, read from GitHub with `gh api graphql`: a search, then
+the details of 10 pull requests in each call, all at the same time.
 
 - mine: the open pull requests you opened.
 - review: the open pull requests that ask for your review.
@@ -11,6 +12,7 @@ from bots are left out.
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
 from . import stats
@@ -18,8 +20,10 @@ from .config import Settings
 from .sources import gh_json
 
 MAX_PRS = 50
+# GitHub stops a query after about 10 seconds. 10 pull requests with all their details take 2 to 5.
+PRS_PER_CALL = 10
 # The newest review threads read per pull request. Each one costs GitHub a lookup: 30 keep a read
-# near 40 of the 5,000 points an hour GitHub allows.
+# near 20 of the 5,000 points an hour GitHub allows.
 MAX_THREADS = 30
 SHOWN_THREADS = 3            # open threads sent with each pull request; the rest are only counted
 THREAD_TEXT = 280            # characters kept of a thread's first comment
@@ -56,16 +60,19 @@ fragment pr on PullRequest {
   } } } } } }
 }
 """
-QUERY = """
-query($n: Int!, $threads: Int!) {
+SEARCH = """
+query($n: Int!) {
   viewer { login }
   mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: $n) {
-    issueCount nodes { ...pr }
+    issueCount nodes { ... on PullRequest { id } }
   }
   review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: $n) {
-    issueCount nodes { ...pr }
+    issueCount nodes { ... on PullRequest { id } }
   }
 }
+"""
+DETAILS_QUERY = """
+query($ids: [ID!]!, $threads: Int!) { nodes(ids: $ids) { ...pr } }
 """ + FRAGMENTS
 ONE_QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $threads: Int!) {
@@ -77,11 +84,20 @@ query($owner: String!, $name: String!, $number: Int!, $threads: Int!) {
 
 def read(settings: Settings, env: dict | None = None) -> dict:
     """Your open pull requests and the ones that ask for your review. Raises sources.SourceError."""
-    data = (gh_json(settings, ["api", "graphql", "-f", f"query={QUERY}", "-F", f"n={MAX_PRS}",
-                                 "-F", f"threads={MAX_THREADS}"], env) or {})["data"]
+    data = (gh_json(settings, ["api", "graphql", "-f", f"query={SEARCH}", "-F", f"n={MAX_PRS}"], env) or {})["data"]
     me = data["viewer"]["login"]
-    mine = _link_stacks([shape(pr, me) for pr in data["mine"]["nodes"] if pr])
-    review = [shape(pr, me) for pr in data["review"]["nodes"] if pr]
+    ids = {side: [n["id"] for n in data[side]["nodes"] if n] for side in ("mine", "review")}
+    all_ids = ids["mine"] + ids["review"]
+
+    def details(batch: list[str]) -> list[dict]:
+        args = ["api", "graphql", "-f", f"query={DETAILS_QUERY}", "-F", f"threads={MAX_THREADS}"]
+        return gh_json(settings, args + [a for i in batch for a in ("-f", f"ids[]={i}")], env)["data"]["nodes"]
+
+    batches = [all_ids[i:i + PRS_PER_CALL] for i in range(0, len(all_ids), PRS_PER_CALL)]
+    with ThreadPoolExecutor() as pool:
+        found = dict(zip(all_ids, (pr for prs in pool.map(details, batches) for pr in prs)))
+    mine = _link_stacks([shape(found[i], me) for i in ids["mine"]])
+    review = [shape(found[i], me) for i in ids["review"]]
     return {"login": me, "mine": mine, "review": review,
             "mine_total": data["mine"]["issueCount"], "review_total": data["review"]["issueCount"]}
 

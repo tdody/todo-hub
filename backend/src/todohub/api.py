@@ -41,7 +41,7 @@ from .tools import ToolError
 
 TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420"]
 META_TTL_SECONDS = 600
-PULLS_TTL_SECONDS = 300       # a read takes GitHub about 40 points and 7 seconds
+PULLS_TTL_SECONDS = 300       # a read takes GitHub about 20 points and 5 to 8 seconds
 SOURCE_NAMES = {"slack": "Slack message", "gmail": "Email", "grain": "Grain meeting", "calendar": "Calendar event",
                 "hubspot": "HubSpot", "manual": "Link"}
 
