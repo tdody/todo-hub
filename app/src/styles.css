@@ -1730,7 +1730,7 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
   .pr-table th.c-grp { width: 0; visibility: hidden; overflow: hidden; }
   .pr-table td.grp { padding: 0; visibility: hidden; overflow: hidden; }
 }
-@media (max-width: 1000px) {
+@media (max-width: 1200px) {
   .pr-table th.c-size { width: 0; visibility: hidden; overflow: hidden; }
   .pr-table td.c-size { padding: 0; visibility: hidden; overflow: hidden; }
 }
