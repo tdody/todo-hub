@@ -228,6 +228,15 @@ export interface Slips {
   error: string | null;
 }
 
+/** Per week, Monday to Sunday (ET): your pull requests merged, and others' you reviewed. Lines added
+ *  and removed by the ones merged this week and last week. */
+export interface PullWeeks {
+  weeks: { week: string; merged: number; reviewed: number }[];
+  lines: { additions: number; deletions: number } | null;
+  last_lines: { additions: number; deletions: number } | null;
+  error: string | null;
+}
+
 export interface Meta {
   team_key: string;
   states: State[];
@@ -549,6 +558,7 @@ export const api = {
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
   pulls: (refresh = false) => call<Pulls>("GET", `/api/pulls${refresh ? "?refresh=true" : ""}`),
   pull: (repo: string, number: number) => call<Pulls>("POST", `/api/pulls/${repo}/${number}`),
+  pullWeeks: () => call<PullWeeks>("GET", "/api/pulls/weekly"),
   editIssue: (id: string, edit: IssueEdit) => call<Issue>("PATCH", `/api/issues/${encodeURIComponent(id)}`, edit),
   /** Move an issue to Linear's trash (restorable there for 30 days); it also leaves Today. */
   deleteIssue: (id: string) =>

@@ -1,7 +1,7 @@
-// Insights tab. Overview: stat tiles over the charts (client vs dev, approval rate, slipped due
-// dates, sweep history). Weekly digest: one week written out (backend digest.py).
+// Insights tab. Overview: stat tiles over the charts (client vs dev, pull requests this week, slipped
+// due dates, approval rate, sweep history). Weekly digest: one week written out (backend digest.py).
 import { api, ApiError } from "./api";
-import type { ApprovalStats, BalanceStats, Digest, Run, Slips } from "./api";
+import type { ApprovalStats, BalanceStats, Digest, PullWeeks, Run, Slips } from "./api";
 import { h, link, modal, pageHead, svg } from "./dom";
 
 type GoTab = (tab: "inbox" | "client" | "dev", highlight?: string[]) => void;
@@ -26,7 +26,8 @@ const SOURCES: Record<string, string> = {
   hubspot: "HubSpot", all: "All sources",
 };
 
-let cache: { at: number; balance?: BalanceStats; approval?: ApprovalStats; runs?: Run[]; slips?: Slips | null; error?: string } = { at: 0 };
+let cache: { at: number; balance?: BalanceStats; approval?: ApprovalStats; runs?: Run[]; slips?: Slips | null; pulls?: PullWeeks | null;
+  error?: string } = { at: 0 };
 
 function weekLabel(iso: string): string {
   return new Date(iso + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
@@ -69,6 +70,27 @@ function balanceChart(b: BalanceStats): Node {
   // target line drawn last so it sits on top of the bars
   g.append(svg("line", { x1: left, x2: W - right + 6, y1: y(b.target), y2: y(b.target), class: "target" }));
   g.append(svg("text", { x: W - right + 12, y: y(b.target) + 4, class: "axis" }, `target ${pct(b.target)}`));
+  return g;
+}
+
+function pullsChart(p: PullWeeks): Node {
+  const W = 860, H = 190, top = 22, bottom = 36, left = 38, right = 78;   // the balance chart's frame: the weeks line up
+  const plotH = H - top - bottom;
+  const band = (W - left - right) / p.weeks.length;
+  const barW = Math.min(46, band * 0.6);
+  const max = Math.max(1, ...p.weeks.map((w) => w.merged));
+  const g = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img",
+    "aria-label": "Pull requests you merged each week, with the number you reviewed for others under each week" });
+  g.append(svg("line", { x1: left, x2: W - right + 6, y1: top + plotH, y2: top + plotH, class: "grid" }));
+  p.weeks.forEach((w, i) => {
+    const x = left + band * i + (band - barW) / 2, barH = plotH * (w.merged / max);
+    const tip = `${weekLabel(w.week)}: ${w.merged} merged, ${w.reviewed} reviewed for others`;
+    if (w.merged) g.append(svg("rect", { x, y: top + plotH - barH, width: barW, height: barH, class: "bar-merged", rx: 3 }, svg("title", {}, tip)));
+    g.append(svg("text", { x: x + barW / 2, y: top + plotH - barH - 7, class: "value", "text-anchor": "middle" }, String(w.merged),
+      svg("title", {}, tip)));
+    g.append(svg("text", { x: x + barW / 2, y: H - bottom + 16, class: "axis", "text-anchor": "middle" }, weekLabel(w.week)));
+    g.append(svg("text", { x: x + barW / 2, y: H - bottom + 29, class: "axis faint", "text-anchor": "middle" }, `${w.reviewed} reviewed`));
+  });
   return g;
 }
 
@@ -217,12 +239,43 @@ function slipsPanel(s: Slips | null): Node | "" {
   );
 }
 
+const lines = (x: { additions: number; deletions: number }) => [`+${x.additions.toLocaleString("en-US")}`, `−${x.deletions.toLocaleString("en-US")}`];
+const prCount = (n: number) => `${n} pull request${n === 1 ? "" : "s"}`;
+
+/** Lines added and removed by the pull requests merged this week; deletions in a smaller, quieter type. */
+function linesTile(p: PullWeeks | null): HTMLElement {
+  const ok = p && !p.error && p.lines ? p : null;
+  const [add, del] = ok?.lines ? lines(ok.lines) : [];
+  const last = ok?.last_lines ? ` · last week ${lines(ok.last_lines).join("\u00a0")}` : "";
+  return tile("Lines merged this week", ok ? h("span", { class: "lines" }, add, h("span", { class: "del" }, del)) : "–",
+    ok ? `in ${prCount(ok.weeks.at(-1)?.merged ?? 0)}${last}` : "GitHub unavailable",
+    "Lines added and removed by your pull requests that GitHub merged this week, Monday to Sunday (ET), in any repo and into any branch.",
+    "panel-pulls");
+}
+
+function pullsPanel(p: PullWeeks | null): Node | "" {
+  if (!p) return "";
+  const plural = (n: number) => `${n} pull request${n === 1 ? "" : "s"}`;
+  const merged = p.weeks.reduce((n, w) => n + w.merged, 0), reviewed = p.weeks.reduce((n, w) => n + w.reviewed, 0);
+  const now = p.weeks.at(-1);
+  return h("section", { class: "panel", id: "panel-pulls" },
+    h("h2", {}, "Pull requests"),
+    p.error ? h("p", { class: "muted small" }, `Couldn't read pull requests from GitHub: ${p.error}`)
+      : h("p", { class: "lead" }, `You merged ${plural(merged)} in the last 8 weeks and reviewed ${reviewed} for others.`,
+        now ? ` This week so far: ${now.merged} merged, ${now.reviewed} reviewed.` : ""),
+    p.error ? "" : pullsChart(p),
+    h("p", { class: "muted small" },
+      "Merged = your pull requests that GitHub merged that week, Monday to Sunday (ET), into any branch. "
+      + "Reviewed = other people's pull requests you reviewed that week (approved, asked for changes or commented); each counts once a week."),
+  );
+}
+
 // ---- view ---------------------------------------------------------------------------------------
 async function load(rerender: () => void) {
   try {
-    const [balance, approval, runs, slips] = await Promise.all([api.balance(8), api.approval(8), api.runs(150),
-      api.slips().catch(() => null)]);       // slips are optional: Insights works without them
-    cache = { at: Date.now(), balance, approval, runs, slips };
+    const [balance, approval, runs, slips, pulls] = await Promise.all([api.balance(8), api.approval(8), api.runs(150),
+      api.slips().catch(() => null), api.pullWeeks().catch(() => null)]);   // slips and pulls are optional: Insights works without them
+    cache = { at: Date.now(), balance, approval, runs, slips, pulls };
   } catch (e) {
     cache = { ...cache, at: Date.now(), error: e instanceof ApiError ? e.message : String(e) };
   }
@@ -249,7 +302,6 @@ function overview(rerender: () => void): HTMLElement {
 
   const lastWeekDone = b.weeks.at(-2);
   const doneNow = thisWeek.client + thisWeek.dev;
-  const shareOff = doneNow >= 3 && thisWeek.client_share !== null && Math.abs(thisWeek.client_share - b.target) >= 0.15;
   const slipped = cache.slips && !cache.slips.error ? Object.values(cache.slips.slips) : null;
   const repeat = slipped?.filter((x) => x.count >= 2).length ?? null;
   const sweepsNow = lastWeek.filter((r) => r.trigger === "schedule" || r.trigger === "manual");
@@ -263,13 +315,7 @@ function overview(rerender: () => void): HTMLElement {
         lastWeekDone ? `${lastWeekDone.client + lastWeekDone.dev} last week` : "",
         "Your Linear issues moved to a completed status this week, Monday to Sunday (ET). Canceled issues don't count.",
         "panel-balance"),
-      tile("Client share", doneNow ? pct(thisWeek.client_share) : "–", `target ${pct(b.target)}`,
-        "Closed client-labeled issues ÷ all closed issues, this week. Flagged when it's 15+ points from the target, once you've closed at least 3.",
-        "panel-balance", shareOff ? "warn" : ""),
-      tile("Approval rate", allNow && allNow.rate !== null ? pct(allNow.rate) : "–",
-        allNow && allNow.approved + allNow.dropped ? `${allNow.approved} of ${allNow.approved + allNow.dropped} kept` : "no decisions yet",
-        "Inbox suggestions you approved ÷ (approved + dropped), decided this week. Captured notes aren't counted.",
-        "panel-approval"),
+      linesTile(cache.pulls ?? null),
       tile("Pushed 2+ times", repeat === null ? "–" : String(repeat),
         cache.slips && !cache.slips.error ? `of ${cache.slips.checked} open with a due date` : "history unavailable",
         "Open issues whose due date was moved later at least twice. Setting a first date, clearing it, or moving it earlier doesn't count.",
@@ -292,6 +338,8 @@ function overview(rerender: () => void): HTMLElement {
       balanceChart(b),
       h("p", { class: "muted small" }, "Share of your completed (not canceled) Linear issues each week, Monday to Sunday. Client = has a client label."),
     ),
+    pullsPanel(cache.pulls ?? null),
+    slipsPanel(cache.slips ?? null),
     h("section", { class: "panel", id: "panel-approval" },
       h("h2", {}, "Approval rate"),
       h("p", { class: "lead" }, allNow && allNow.rate !== null
@@ -305,12 +353,11 @@ function overview(rerender: () => void): HTMLElement {
         )),
       h("p", { class: "muted small" }, "Approved ÷ (approved + dropped), for candidates decided that week. Captured notes aren't counted."),
     ),
-    slipsPanel(cache.slips ?? null),
   );
 }
 
 /** A stat tile; clicking it scrolls to the panel with the detail. The tooltip says how it's counted. */
-function tile(label: string, value: string, sub: string, definition: string, target: string | (() => void), tone = ""): HTMLElement {
+function tile(label: string, value: string | Node, sub: string, definition: string, target: string | (() => void), tone = ""): HTMLElement {
   return h("button", {
     class: `tile ${tone}`, title: definition,
     onclick: typeof target === "function" ? target
