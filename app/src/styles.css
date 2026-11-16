@@ -1702,7 +1702,7 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
   .pr-table th.c-ci { width: 102px; }
   .pr-table th.c-cm { width: 104px; }
   .pr-table th.c-up { width: 80px; }
-  .pr-table td.st, .pr-table td.ci, .pr-table td.cm, .pr-table td.up { padding-left: 6px; padding-right: 6px; }
+  .pr-table td.st, .pr-table td.ci, .pr-table td.cm, .pr-table td.up, .pr-table td.num { padding-left: 6px; padding-right: 6px; }
   .pr-table th button { padding: 6px; }
 }
 /* A narrow window collapses a column to zero width; its cells stay, so the open row's colspan still fits. */

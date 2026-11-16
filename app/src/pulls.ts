@@ -255,7 +255,7 @@ function stepCell(p: PullRequest): Node {
   return h("span", { class: `step ${s.tone}`, title: s.label }, s.label);
 }
 
-/** "#2374": a Pencil "#", then the number. */
+/** "#2374": a muted "#", then the number. */
 const numCell = (n: number, cls = "num") => h("td", { class: cls }, h("span", { class: "hash" }, "#"), String(n));
 
 function stagePill(stage: PullRequest["stage"]): HTMLElement {
