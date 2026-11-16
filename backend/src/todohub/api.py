@@ -204,7 +204,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                block_fn: Callable[..., str | None] | None = None,
                draft_fn: Callable[[str, str], str | None] | None = None,
                periscope_factory: Callable[[], Periscope] | None = None,
-               front_fn: Callable[[], None] | None = None,
+               front_fn: Callable[[str], None] | None = None,
                scheduler=schedule) -> FastAPI:
     settings = settings or load_settings()
     db = db or DB(settings.db_path)
@@ -350,6 +350,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "sources": settings.enabled_sources(),
             "todo_state": (todo_status(m.states) or {}).get("name"),
             "done_state": (done_status(m.states) or {}).get("name"),
+            "periscope": settings.periscope_on,
         }
 
     @app.get("/api/daylight", dependencies=auth)
@@ -385,7 +386,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "schedule": schedule.describe(settings, scheduler.installed()) | {"supported": scheduler.supported()},
             "daylight": {"place": settings.daylight_place, "latitude": settings.daylight_latitude,
                          "longitude": settings.daylight_longitude},
-            "periscope": {"prompt": settings.periscope_prompt, "default_prompt": DEFAULT_PERISCOPE_PROMPT},
+            "periscope": {"enabled": settings.periscope_on, "prompt": settings.periscope_prompt,
+                          "default_prompt": DEFAULT_PERISCOPE_PROMPT},
         }
 
     @app.get("/api/settings", dependencies=auth)
@@ -927,7 +929,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     slip_cache: dict = {"at": 0.0, "data": None}
 
     # ---- Start in periscope -----------------------------------------------------------------
-    @app.get("/api/issues/{issue_id}/periscope", dependencies=auth)
+    def require_periscope() -> None:
+        if not settings.periscope_on:
+            raise HTTPException(404, "Start in periscope is off. Set app.periscope_url in config.toml.")
+
+    periscope_auth = [*auth, Depends(require_periscope)]
+
+    @app.get("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_options(issue_id: str) -> dict:
         """What the popover shows first: periscope's repos, the one to select and why, Linear's branch, the
         repos with a worktree already on it, and the Settings page's prompt filled in for the issue."""
@@ -943,7 +951,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "prompt": fill_prompt(settings.periscope_prompt, issue),
         }
 
-    @app.post("/api/issues/{issue_id}/periscope", dependencies=auth)
+    @app.post("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
         """Ask periscope to start Claude on the branch with the prompt, then remember the repo for the issue's
         project (or client). A Claude already on the branch is answered as mode "existing"."""
@@ -962,12 +970,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         remember_repo(db, issue, body.repo)
         return result
 
-    @app.post("/api/periscope/show", dependencies=auth)
+    @app.post("/api/periscope/show", dependencies=periscope_auth)
     def periscope_show(body: PeriscopeShowIn) -> dict:
-        """Select the pane in periscope, then bring periscope to the front."""
+        """Select the pane in periscope, then bring periscope to the front if periscope_app_id is set."""
         def select_then_front(p: Periscope) -> None:
             p.select(body.pid)
-            front()
+            if settings.periscope_app_id:
+                front(settings.periscope_app_id)
 
         periscope_call(select_then_front)
         return {"ok": True}

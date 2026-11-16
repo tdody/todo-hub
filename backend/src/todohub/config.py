@@ -106,8 +106,9 @@ port = 8765
 # daylight_place = "Shelburne, VT"
 # daylight_latitude = 44.39
 # daylight_longitude = -73.23
-# Periscope, for Start in periscope on an issue.
+# Periscope, for Start in periscope on an issue. Setting periscope_url turns Start in periscope on.
 # periscope_url = "http://127.0.0.1:17374"
+# periscope_app_id = "com.tom.periscope.app"  # lets Show bring the app to the front
 """
 
 
@@ -161,7 +162,8 @@ class Settings:
     daylight_place: str = ""
     daylight_latitude: float | None = None
     daylight_longitude: float | None = None
-    periscope_url: str = "http://127.0.0.1:17374"
+    periscope_url: str = ""
+    periscope_app_id: str = ""
     periscope_prompt: str = DEFAULT_PERISCOPE_PROMPT
     # Settings page: each source's state ("on", "paused", "removed"); a source not listed follows
     # config.toml. And when the sweep runs on its own.
@@ -212,6 +214,10 @@ class Settings:
             linear_mentions=self.linear_mentions and source == "linear",
             github_reviews=self.github_reviews and source == "github",
         )
+
+    @property
+    def periscope_on(self) -> bool:
+        return bool(self.periscope_url)
 
     def enabled_sources(self) -> list[str]:
         return [
@@ -281,6 +287,7 @@ def load_settings() -> Settings:
     s.daylight_latitude = _coord(app.get("daylight_latitude"), 90)
     s.daylight_longitude = _coord(app.get("daylight_longitude"), 180)
     s.periscope_url = str(app.get("periscope_url", s.periscope_url))
+    s.periscope_app_id = str(app.get("periscope_app_id", s.periscope_app_id))
     apply_overrides(s, read_overrides())
     return s
 

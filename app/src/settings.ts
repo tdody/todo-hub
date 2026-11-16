@@ -72,7 +72,7 @@ export function settingsView(ctx: SettingsCtx): HTMLElement {
     ["appearance", "Appearance", () => appearance(ctx)],
     ["sources", "Sources", () => sources(data!, ctx)],
     ["schedule", "Schedule", () => scheduleSection(data!.schedule, ctx)],
-    ["periscope", "Periscope", () => periscopeSection(ctx)],
+    ...(data.periscope.enabled ? [["periscope", "Periscope", () => periscopeSection(ctx)] as [string, string, () => HTMLElement]] : []),
   ];
   const toc = h("nav", { class: "set-toc", "aria-label": "Settings sections" },
     ...sections.map(([id, label]) => h("button", {
