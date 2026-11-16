@@ -53,7 +53,8 @@ def run(name, conclusion="SUCCESS", status="COMPLETED"):
 
 
 def fake_gh(tmp_path, settings, mine=(), review=()):
-    """A gh that prints the given pull requests and counts its runs in calls.txt."""
+    """A gh that prints the given pull requests and counts its runs in calls.txt. A read of one pull
+    request prints one.json instead."""
     out, calls = tmp_path / "gh.json", tmp_path / "calls.txt"
     out.write_text(json.dumps({"data": {
         "viewer": {"login": ME},
@@ -61,7 +62,7 @@ def fake_gh(tmp_path, settings, mine=(), review=()):
         "review": {"issueCount": len(review), "nodes": list(review)},
     }}))
     gh = tmp_path / "gh"
-    gh.write_text(f"#!/bin/sh\necho x >> {calls}\ncat {out}\n")
+    gh.write_text(f'#!/bin/sh\necho x >> {calls}\ncase "$*" in *owner=*) cat {tmp_path / "one.json"};; *) cat {out};; esac\n')
     gh.chmod(0o755)
     settings.gh_path = str(gh)
     return out, calls
@@ -127,3 +128,28 @@ def test_pulls_endpoint_caches_and_keeps_the_last_read(settings, tmp_path):
     body = client.get("/api/pulls?refresh=true").json()
     assert body["error"] == "gh is not signed in. Run gh auth login in a terminal." and body["error_at"]
     assert [p["number"] for p in body["mine"]] == [1]    # what was read before
+
+
+def test_refresh_one_pull_request(settings, tmp_path):
+    fake_gh(tmp_path, settings, mine=[pr(1, head="thib/a"), pr(2, head="thib/b", base="thib/a")], review=[pr(5)])
+    client = TestClient(create_app(settings, DB(settings.db_path)))
+    assert client.post("/api/pulls/initech/platform/2").status_code == 409      # no list read yet
+    read_at = client.get("/api/pulls").json()["read_at"]
+
+    def again(number, state="OPEN", **kw):
+        (tmp_path / "one.json").write_text(json.dumps({"data": {
+            "viewer": {"login": ME}, "repository": {"pullRequest": {**pr(number, **kw), "state": state}}}}))
+        return client.post(f"/api/pulls/initech/platform/{number}")
+
+    body = again(2, title="Paginate the list", head="thib/b", base="main").json()
+    assert [(p["number"], p["title"], p["stacked_on"]) for p in body["mine"]] == [
+        (1, "Report list page", None), (2, "Paginate the list", None)]   # no longer built on #1
+    assert body["read_at"] == read_at                                   # the list's 5 minutes go on
+    body = again(1, state="MERGED").json()
+    assert [p["number"] for p in body["mine"]] == [2] and body["mine_total"] == 1
+    assert again(5, title="Rename the export").json()["review"][0]["title"] == "Rename the export"
+
+    (tmp_path / "gh").write_text("#!/bin/sh\necho 'GraphQL: Could not resolve to a PullRequest with the number of 9.' >&2\nexit 1\n")
+    r = client.post("/api/pulls/initech/platform/9")
+    assert r.status_code == 502 and "Could not resolve" in r.json()["error"]
+    assert [p["number"] for p in client.get("/api/pulls").json()["mine"]] == [2]    # the last read stays

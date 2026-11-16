@@ -27,16 +27,7 @@ CI_STATE = {"SUCCESS": "passing", "FAILURE": "failing", "ERROR": "failing", "PEN
 # Linear's branch names hold the issue ("tdody/eng-646-add-report-url"), and titles often do.
 ISSUE_REF = re.compile(r"\b([A-Za-z][A-Za-z0-9]{1,9}-\d+)\b")
 
-QUERY = """
-query($n: Int!, $threads: Int!) {
-  viewer { login }
-  mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: $n) {
-    issueCount nodes { ...pr }
-  }
-  review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: $n) {
-    issueCount nodes { ...pr }
-  }
-}
+FRAGMENTS = """
 fragment reviewer on RequestedReviewer { __typename ... on User { login } ... on Team { name } ... on Bot { login } }
 fragment pr on PullRequest {
   number title url isDraft createdAt updatedAt additions deletions
@@ -63,6 +54,23 @@ fragment pr on PullRequest {
   } } } } } }
 }
 """
+QUERY = """
+query($n: Int!, $threads: Int!) {
+  viewer { login }
+  mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: $n) {
+    issueCount nodes { ...pr }
+  }
+  review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: $n) {
+    issueCount nodes { ...pr }
+  }
+}
+""" + FRAGMENTS
+ONE_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $threads: Int!) {
+  viewer { login }
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { state ...pr } }
+}
+""" + FRAGMENTS
 
 
 def read(settings: Settings, env: dict | None = None) -> dict:
@@ -70,13 +78,43 @@ def read(settings: Settings, env: dict | None = None) -> dict:
     data = (gh_json(settings, ["api", "graphql", "-f", f"query={QUERY}", "-F", f"n={MAX_PRS}",
                                  "-F", f"threads={MAX_THREADS}"], env) or {})["data"]
     me = data["viewer"]["login"]
-    mine = [shape(pr, me) for pr in data["mine"]["nodes"] if pr]
-    heads = {(p["repo"], p["head"]): p["number"] for p in mine}
-    for p in mine:
-        p["stacked_on"] = heads.get((p["repo"], p["base"]))
+    mine = _link_stacks([shape(pr, me) for pr in data["mine"]["nodes"] if pr])
     review = [shape(pr, me) for pr in data["review"]["nodes"] if pr]
     return {"login": me, "mine": mine, "review": review,
             "mine_total": data["mine"]["issueCount"], "review_total": data["review"]["issueCount"]}
+
+
+def read_one(settings: Settings, repo: str, number: int, env: dict | None = None) -> dict | None:
+    """One pull request read again, or None when it is closed or merged. Raises sources.SourceError."""
+    owner, name = repo.split("/")
+    data = (gh_json(settings, ["api", "graphql", "-f", f"query={ONE_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}",
+                                 "-F", f"number={number}", "-F", f"threads={MAX_THREADS}"], env) or {})["data"]
+    pr = data["repository"]["pullRequest"]
+    return shape(pr, data["viewer"]["login"]) if pr["state"] == "OPEN" else None
+
+
+def updated(d: dict, repo: str, number: int, pr: dict | None) -> dict:
+    """The read ``d`` with one pull request read again. A closed or merged one (None) leaves its list."""
+    def same(p: dict) -> bool:
+        return (p["repo"], p["number"]) == (repo, number)
+
+    out = dict(d)
+    for side in ("mine", "review"):
+        if not any(map(same, d[side])):
+            continue
+        if pr:
+            prs = [pr if same(p) else p for p in d[side]]
+        else:
+            prs = [p for p in d[side] if not same(p)]
+            out[f"{side}_total"] -= 1
+        out[side] = _link_stacks(prs) if side == "mine" else prs
+    return out
+
+
+def _link_stacks(mine: list[dict]) -> list[dict]:
+    """Set ``stacked_on``: the number of your open pull request whose head branch is this one's base."""
+    heads = {(p["repo"], p["head"]): p["number"] for p in mine}
+    return [{**p, "stacked_on": heads.get((p["repo"], p["base"]))} for p in mine]
 
 
 def shape(pr: dict, me: str) -> dict:
