@@ -411,7 +411,7 @@ The window is a fixed 224px sidebar beside the page. The page is centered with a
 
 **Today fits the window.** Today alone does not scroll as a page: the sky, Claude's note and the two columns fill the window height (480px minimum), and the list and the pane each scroll on their own. The list and the pane take the same columns as Client and Dev (1fr and 1.05fr, 16px apart).
 
-**Page header.** Title and count on one line (32px minimum height), then underline tabs 22px apart on a hairline, with the filter (220px) at the right end of the tab line. There is no refresh button.
+**Page header.** Title and count on one line (32px minimum height), then underline tabs 22px apart on a hairline, with the filter (220px) at the right end of the tab line. There is no refresh button, except **Refresh all** on Pull requests, which sits before the filter, after the Group control.
 
 **Rhythm.** 2px between list rows, 6–10px between controls and inside rows, 12px around groups of controls, 16px between page sections, 22px between groups. The spacing tokens in the frontmatter are these steps.
 
@@ -467,7 +467,7 @@ Soft and friendly, small and calm.
 
 - **Style:** full-pill, 12px at 600, 2px × 10px; status pills start with a 7px dot in their own ink color, and both show a faint caret when clickable.
 - **State:** clicking opens a menu listing every option with its number key; hover adds a 1px ring in the pill's own color at 25%. In a row's meta line they shrink to 11px.
-- **Pull request stages:** the stage pill starts a row's meta line, before the repo and number. It is not clickable and shows no caret. The Linear issue later in the line is an issue chip with the ID only, and a click opens the issue in Linear.
+- **Pull request stages:** the stage pill starts a row's meta line, before the repo name. It is not clickable and shows no caret. The Linear issue later in the line is an issue chip with the ID only, and a click opens the issue in Linear.
 - **Draft:** Shaded Paper fill, Pencil text and a hollow dot (a 1.5px ring). It never uses a dashed outline, because a dashed outline means Backlog.
 - **Changes requested:** Morning Amber (`warn-bg` fill, `warn-ink` text). In review reuses `s-prog`, and Approved reuses `s-done`.
 

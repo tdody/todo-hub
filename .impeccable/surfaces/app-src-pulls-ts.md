@@ -17,7 +17,7 @@ OWN-WORLD: TodoHub's quiet Operate UI: rows on the app background, Paper for the
 
 STORY: Thibault opens the tab, reads five counts, sees Needs you sorted by next step (Fix CI, Resolve conflicts, Resolve threads), opens a row in place to read the failing checks and open threads, and presses o to act in GitHub.
 
-FIRST VIEWPORT: "Pull requests" with "Read from GitHub N min ago"; Mine and To review tabs with counts, filter on the right; a five-segment strip with Needs you on, a filter note under each count; the table: Pull request (title over a meta line that starts with the stage pill), Next step, CI, Comments, Size, Updated; loose drafts folded below.
+FIRST VIEWPORT: "Pull requests" with "Read from GitHub N min ago"; Mine and To review tabs with counts, then on the right the Group control (Mine), Refresh all and the filter; a five-segment strip with Needs you on, a filter note under each count; the table: #, Pull request (title over a meta line that starts with the stage pill), Next step, CI, Comments, Size (windows wider than 1200px), Updated, with Client / project after the title in windows wider than 1400px; loose drafts folded below.
 
 FORM: review-pipeline table with in-place rows and stack summary rows, first on my list (the hybrid of review pipeline, full table open in place and stacks), seed:866a9e0ba9d556ec. The composition to match is .impeccable/mocks/pull-requests.html.
 
@@ -37,13 +37,12 @@ Point at one pull request of a stack and the whole stack lights up; the stack's 
 - A failing check's name opens its run log: GitHub gives no reason text for his runs (on 2026-11-14, 0 of 23 failed check runs had a title or summary), so the mock's "ruff, 3 errors" cannot be shown.
 - The tab reads GitHub about every 5 minutes after the last read; it need not be exact. Refresh all (beside the filter, or ⌘R) reads now and starts the 5 minutes again.
 - Refresh in an opened row reads that one pull request again; it does not change the 5 minutes of the list.
-
 - The pull request number has its own sortable column, **#**, in Mine and To review (2026-11-16). The meta line keeps only the repo name.
 - Mine groups by client or project: the client label of the Linear issue, else its project, else "No client or project". It combines prototype A (sections, from the Group control or g) and prototype B (a sortable Client / project column when the groups are off). The column hides in the sections.
 - Pull requests with no client or project share one group, not one group for each repo.
 - To review has no column and no groups: on 2026-11-16, none of its 7 pull requests named one of his open issues.
 - The Client / project column shows only in windows wider than 1400px. At the default 1120px, the titles would get no room. The groups work at every width.
-- Size folds below 1200px (it was 1000px): with **#**, the titles had about 135px at the default 1120px window.
+- Size folds below 1200px: with **#** and Size, the titles had about 135px at the default 1120px window.
 
 ## Decided in the build (from real GitHub data, to confirm)
 
