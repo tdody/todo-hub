@@ -47,10 +47,10 @@ Out:
 - The column comes after **Pull request**. It is 168 px wide.
 - A cell shows the client's logo (`clientLogo`, as in Client and Dev) or the project's initial (`ll-initial`), then the name. The name gets an ellipsis when it is too long. **No client or project** shows "–" as its initial, and its name is in Pencil.
 - Each pull request row shows its own group. A stack's summary row shows the stack's group.
-- Sorted by this column, the groups are in name order, and **No client or project** comes last. Inside a group, the rows sort by Next step. A stack sorts by the group of its base pull request.
+- Sorted by this column, the groups are in name order, and **No client or project** comes last. Inside a group, the rows sort by Next step: in every column, rows with the same value sort by Next step. A stack sorts by the group of its base pull request.
 - Sorted by this column, a cell shows the name only when it is different from the row above. The first row of each group gets a darker line above it (Pencil 40% into Hairline).
 - The first click sorts A to Z.
-- Below 1000 px, the column folds to zero width, as Size does now. Its cells stay, so the colspans still fit.
+- Below 1400 px, the column folds to zero width, as Size does below 1000 px. Its cells stay, so the colspans still fit. At the default window (1120 px) the table is 840 px wide, and the fixed columns with **#** take 690 px, so there is no room for this column. The groups work at every width.
 
 ### Groups (Mine only)
 
@@ -83,6 +83,7 @@ Out:
 **`app/src/pulls.ts`**
 
 - `COLS` gets `number` (first) and `group` (after `title`). The `group` column shows only in Mine when the groups are off. The table draws the visible columns, and the colspans of the detail row and the drafts fold count them. Today these are the fixed numbers 7 and 8.
+- `units()`: rows with the same value sort by Next step.
 - `groupOf(p)`: the client label, else the project, of the issue from `linearOf`, else `null` for **No client or project**. It is the one way to ask for the group of a pull request. The stack's group is `groupOf(u.all[0])`.
 - `metaLine` drops the number. It names the group of a stack member whose group is not the stack's, when the groups are on.
 - `stackRow` gets the **#** cell, and the Client / project cell when the column shows.
@@ -93,7 +94,7 @@ Out:
 
 **`app/src/styles.css`**
 
-- Widths for `th.c-num` (64 px) and `th.c-grp` (168 px). The Client / project column folds below 1000 px.
+- Widths for `th.c-num` (64 px) and `th.c-grp` (168 px). The Client / project column folds below 1400 px.
 - The section heading row reuses `.ll-name`, `.ll-sum`, `.ll-rule` and `.ll-initial`.
 - The darker line at the start of each group when the table sorts by Client / project.
 - The meta line's repo name: the `row-reverse` layout for "repo #n" goes away. The name only gets an ellipsis.
@@ -121,7 +122,7 @@ Out:
   - Fold and unfold a section with the selected row in it. **j** and **k** skip the folded section.
   - A stack with a member in another group: the member names its group in the meta line.
   - Open a row in every mode: the detail row spans the whole table.
-  - A window under 1000 px: the Client / project column folds away.
+  - A window under 1400 px: the Client / project column folds away. At 1120 px and at 760 px, the header line fits.
   - Light and dark themes.
 
 ## Assumptions
