@@ -26,21 +26,27 @@ class SourceError(RuntimeError):
     pass
 
 
-def github_review_requests(settings: Settings, env: dict | None = None) -> list[dict]:
-    cmd = [settings.gh_path, "search", "prs", "--review-requested=@me", "--state=open",
-           "--json", "number,title,url,repository,author,updatedAt", "--limit", "50"]
+def gh_json(settings: Settings, args: list[str], env: dict | None = None):
+    """Run gh with ``args`` and parse what it prints as JSON (None when it prints nothing)."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
+        proc = subprocess.run([settings.gh_path, *args], capture_output=True, text=True, timeout=60, env=env)
     except FileNotFoundError:
         raise SourceError(f"Can't find gh at {settings.gh_path!r}. Install it or set sweep.gh_path.")
     except subprocess.TimeoutExpired:
         raise SourceError("gh timed out.")
+    if proc.returncode == 4:            # gh's exit code for "authentication required"
+        raise SourceError("gh is not signed in. Run gh auth login in a terminal.")
     if proc.returncode != 0:
-        raise SourceError(f"gh failed: {proc.stderr.strip()[:300]} (run `gh auth login`?)")
+        raise SourceError(f"gh failed: {proc.stderr.strip()[:300]}")
     try:
-        return json.loads(proc.stdout or "[]")
+        return json.loads(proc.stdout) if proc.stdout.strip() else None
     except json.JSONDecodeError:
         raise SourceError("gh returned something that isn't JSON.")
+
+
+def github_review_requests(settings: Settings, env: dict | None = None) -> list[dict]:
+    return gh_json(settings, ["search", "prs", "--review-requested=@me", "--state=open",
+                              "--json", "number,title,url,repository,author,updatedAt", "--limit", "50"], env) or []
 
 
 def sync_github(settings: Settings, db: DB, run_id: int, env: dict | None = None) -> None:
