@@ -128,3 +128,18 @@ def test_install_keeps_the_program_of_an_existing_schedule(tmp_path, monkeypatch
     assert p["ProgramArguments"] == ["/checkout/.venv/bin/todohub", "sweep"] and p["EnvironmentVariables"] == {"PATH": "/x"}
     assert {t["Hour"] for t in p["StartCalendarInterval"]} == {8, 12, 16}
     assert any("bootstrap" in a[0] for a in calls)
+
+
+def test_periscope_prompt_from_the_settings_page():
+    assert load_settings().periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
+    config.write_overrides({"periscope": {"prompt": "Read {identifier}."}})
+    assert load_settings().periscope_prompt == "Read {identifier}."
+    config.write_overrides({"periscope": {"prompt": "   "}})
+    assert load_settings().periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
+
+
+def test_periscope_url_from_config_toml(tmp_home):
+    assert load_settings().periscope_url == "http://127.0.0.1:17374"
+    cfg = tmp_home / "config.toml"
+    cfg.write_text(cfg.read_text().replace("[app]\n", '[app]\nperiscope_url = "http://127.0.0.1:17375"\n'))
+    assert load_settings().periscope_url == "http://127.0.0.1:17375"

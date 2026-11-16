@@ -4,7 +4,8 @@ Everything lives in one folder, ``~/Library/Application Support/TodoHub`` on mac
 (override with the ``TODOHUB_HOME`` environment variable, which the tests use):
 
     config.toml      settings you can edit
-    settings.json    what the app's Settings page changed (sources, schedule, Daylight place);
+    settings.json    what the app's Settings page changed (sources, schedule, Daylight place,
+                     the periscope prompt);
                      it wins over config.toml for those keys
     todohub.db       SQLite: candidate queue, runs, source status
     sweep/           the folder Claude Code runs in (so no repo .mcp.json is picked up)
@@ -105,6 +106,8 @@ port = 8765
 # daylight_place = "Shelburne, VT"
 # daylight_latitude = 44.39
 # daylight_longitude = -73.23
+# Periscope, for Start in periscope on an issue.
+# periscope_url = "http://127.0.0.1:17374"
 """
 
 
@@ -115,6 +118,13 @@ def home() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "TodoHub"
     return Path.home() / ".todohub"
+
+
+# Start in periscope: what the new Claude is told. {identifier}, {title} and {url} become the issue's.
+DEFAULT_PERISCOPE_PROMPT = (
+    "Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. "
+    "Sum up the ask, then propose a plan. Do not change code until I agree."
+)
 
 
 @dataclass
@@ -151,6 +161,8 @@ class Settings:
     daylight_place: str = ""
     daylight_latitude: float | None = None
     daylight_longitude: float | None = None
+    periscope_url: str = "http://127.0.0.1:17374"
+    periscope_prompt: str = DEFAULT_PERISCOPE_PROMPT
     # Settings page: each source's state ("on", "paused", "removed"); a source not listed follows
     # config.toml. And when the sweep runs on its own.
     source_states: dict[str, str] = field(default_factory=dict)
@@ -268,6 +280,7 @@ def load_settings() -> Settings:
     s.daylight_place = str(app.get("daylight_place", s.daylight_place))
     s.daylight_latitude = _coord(app.get("daylight_latitude"), 90)
     s.daylight_longitude = _coord(app.get("daylight_longitude"), 180)
+    s.periscope_url = str(app.get("periscope_url", s.periscope_url))
     apply_overrides(s, read_overrides())
     return s
 
@@ -333,6 +346,9 @@ def apply_overrides(s: Settings, data: dict) -> None:
         s.daylight_place = str(day.get("place") or "")[:80]
         s.daylight_latitude = _coord(day.get("latitude"), 90)
         s.daylight_longitude = _coord(day.get("longitude"), 180)
+    peri = data.get("periscope")
+    if isinstance(peri, dict) and isinstance(peri.get("prompt"), str) and peri["prompt"].strip():
+        s.periscope_prompt = peri["prompt"]
 
 
 def source_state(s: Settings, key: str) -> str:
