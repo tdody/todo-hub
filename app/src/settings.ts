@@ -1,6 +1,7 @@
 // The Settings page: the style TodoHub opens with, the sources the sweep reads (add, pause,
-// remove, check now), and when the sweep runs on its own. Choices are saved by the backend in
-// settings.json in the TodoHub folder and apply at once; nothing here can send anything.
+// remove, check now), when the sweep runs on its own, and the prompt that Start in periscope sends.
+// Choices are saved by the backend in settings.json in the TodoHub folder and apply at once; nothing
+// here can send anything.
 import { api, ApiError } from "./api";
 import type { AppSettings, Schedule, SettingsSource, Source, SourceState } from "./api";
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";

@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-15-start-in-periscope-design.md`. Periscope's side (`POST /api/linear/start`, `POST /api/select`) is a separate plan in the periscope repo: `docs/superpowers/plans/2026-11-15-linear-start.md`.
 
+Code blocks in Tasks 3, 6 and 7 predate the review fixes. The code is the source of truth.
+
 **Worktree:** `/Users/thibaultdody/dev/worktrees/todo-hub/start-in-periscope`, branch `thibaultdody/start-in-periscope`. Run every command from there.
 
 ---
@@ -1319,7 +1321,7 @@ Ask the user before the next part: it edits their real `config.toml`. Add `peris
 6. Today: the same item is first in **⋯**, and **p** works. With the focus on **Start**, press **m**: the issue does not move. Then wait 60 s, or switch to another app and back: **Start** still has the focus, and **m** and **⌘↵** still do nothing to the issue.
 6b. At the default window size (1120 px wide), in Client and in Today: the popover is whole (its left border and the field labels show), and its right edge is under the ⋯.
 6c. Pick another repo in the select: the select keeps the focus. Clear the branch: **Start** is disabled and the hint changes as you type.
-6d. Press **j** (or **k**) with the focus outside the popover, during "Asking periscope…": the popover goes with the old issue, and **Esc** then works as usual.
+6d. Open the popover in Client, press ⌘4 (Dev), then press **j**: the selection moves, and the popover does not come back when you press ⌘3.
 7. Stop the stub, press **p**: the error toast says "Periscope is not running at 127.0.0.1:17376."
 8. Settings → Periscope: change the prompt, **Save**, reopen the popover: it uses the new text. **Reset to default** restores it.
 
