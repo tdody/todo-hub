@@ -76,7 +76,7 @@ Each one is an error toast. The popover stays open, except for the first one.
 todo-hub calls three periscope routes. Periscope has no auth and listens on 127.0.0.1.
 
 - `GET /api/open/catalog` (exists) → `{repos: [{repo, label, default_branch, branches}], worktrees: [{path, repo, branch, is_main}], roots}`.
-- `POST /api/linear/start` (new) with `{repo, branch, ticket, title, prompt}` → `{mode: "spawned", pid, path, reused}` or `{mode: "focused", pid}`. `repo` is a path from the catalog. Errors: 400, 409 and 502, each with `detail`.
+- `POST /api/linear/start` (new) with `{repo, branch, ticket, title, prompt}` → `{mode: "spawned", pid, path, reused}` or `{mode: "existing", pid}`. `repo` is a path from the catalog. Errors: 400, 409 and 502, each with `detail`.
 - `POST /api/select` (new) with `{pid}` → `{ok: true}`. The periscope UI selects that pane on its next state update.
 
 ## Changes
@@ -129,7 +129,7 @@ todo-hub calls three periscope routes. Periscope has no auth and listens on 127.
 - `fill_prompt` fills the three tokens and keeps other braces.
 - `default_repo`: project match, client match for an issue with no project, last repo, nothing; a remembered repo that left the catalog is skipped.
 - The GET route returns the catalog repos, the default repo and hint, Linear's branch, `worktree_exists` and the filled prompt.
-- The POST route sends ticket and title, returns periscope's answer, and remembers the repo for both `spawned` and `focused`.
+- The POST route sends ticket and title, returns periscope's answer, and remembers the repo for both `spawned` and `existing`.
 - Errors: connection refused → "not running"; 409 stays 409 with its text; 502 carries periscope's `detail`. No repo is remembered after an error.
 - `show` calls `/api/select` with the pid and runs `open -b` (patched).
 
