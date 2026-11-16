@@ -27,8 +27,9 @@ export function setupPeriscope(c: PeriscopeCtx) {
   ctx = c;
 }
 
+/** The popover is on the page. A refresh can take its issue off the page; the keys then go back to it. */
 export function isPeriscopeOpen(): boolean {
-  return popover !== null;
+  return popover !== null && document.querySelector(".pp-pop") !== null;
 }
 
 /** A tab switch takes the popover off the page; the switch renders, so this does not. */
