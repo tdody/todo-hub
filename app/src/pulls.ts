@@ -224,7 +224,7 @@ const COLS: Col[] = [
   { id: "title", label: "Pull request", key: (p) => p.title.toLowerCase(), first: 1, unit: "base" },
   // name order, No client or project last; a stack sorts by its base's group
   { id: "group", label: "Client / project", first: 1, cls: "c-grp", unit: "base",
-    key: (p) => { const g = groupOf(p); return `${g ? 0 : 1}${groupName(g).toLowerCase()}`; } },
+    key: (p) => { const g = groupOf(p); return `${g ? 0 : 1}${groupName(g).toLowerCase()}\u0000${groupKey(g)}`; } },
   STEP_COL,
   { id: "ci", label: "CI", key: (p) => CI_RANK[p.ci.state], first: 1, cls: "c-ci", unit: "min" },
   { id: "comments", label: "Comments", key: (p) => p.open_threads * 1000 + p.comments, first: -1, cls: "c-cm", unit: "sum",
@@ -235,6 +235,7 @@ const COLS: Col[] = [
 
 /** The table's columns: Client / project only in Mine. */
 const shownCols = () => COLS.filter((c) => c.id !== "group" || st.side === "mine");
+const showsGroup = () => shownCols().some((c) => c.id === "group");
 /** The column the table sorts by. */
 const sortCol = () => shownCols().find((c) => c.id === st.sorts[st.side].id) ?? STEP_COL;
 
@@ -254,9 +255,9 @@ function units(shown: PullRequest[]): Unit[] {
     return c.unit === "min" ? Math.min(...ns) : c.unit === "max" ? Math.max(...ns) : ns.reduce((a, b) => a + b, 0);
   };
   const cmp = (x: number | string, y: number | string) => (x < y ? -1 : x > y ? 1 : 0);
-  // rows with the same value sort by Next step
-  return [...seen.values()].sort((a, b) =>
-    cmp(value(a, col), value(b, col)) * sort.dir || cmp(value(a, STEP_COL), value(b, STEP_COL)));
+  // each unit's values once; rows with the same value sort by Next step
+  return [...seen.values()].map((u) => ({ u, v: value(u, col), step: value(u, STEP_COL) }))
+    .sort((a, b) => cmp(a.v, b.v) * sort.dir || cmp(a.step, b.step)).map((x) => x.u);
 }
 
 // ---- cells and rows -------------------------------------------------------------------------------
@@ -509,27 +510,26 @@ function strip(base: PullRequest[], have: boolean): HTMLElement {
   }));
 }
 
-/** The rows of the units. With the Client / project column, each pull request names its own group and
- *  a stack's summary row names the stack's. Sorted by that column, a name shows only where the group
- *  changes, and that row gets a darker line above it; a stack member then names its group only when it
- *  is not the stack's. */
+/** The rows of the units, each with its Client / project cell when the column shows. Sorted by that
+ *  column, a cell names its group only when the row above is in another one, and a darker line
+ *  starts each group. */
 function bodyRows(us: Unit[]): HTMLElement[] {
-  const withGroup = shownCols().some((c) => c.id === "group");
-  const runs = withGroup && st.sorts[st.side].id === "group";
+  const withGroup = showsGroup(), runs = sortCol().id === "group";
   const out: HTMLElement[] = [];
-  let above: string | null = null;
+  let rowAbove: string | null = null, unitAbove: string | null = null;
+  const cell = (g: Group) => {
+    if (!withGroup) return undefined;
+    const k = groupKey(g), named = !runs || k !== rowAbove;
+    rowAbove = k;
+    return groupCell(g, named);
+  };
   for (const u of us) {
-    const g = groupOf(u.all[0]), k = groupKey(g), starts = k !== above;
-    const cell = withGroup ? groupCell(g, !runs || starts) : undefined;
-    const first = u.all.length > 1 ? [stackRow(u, cell)] : prRow(u.all[0], u, cell);
-    if (runs && starts && above !== null) first[0].classList.add("run");
-    above = k;
+    const g = groupOf(u.all[0]), k = groupKey(g);
+    const first = u.all.length > 1 ? [stackRow(u, cell(g))] : prRow(u.all[0], u, cell(g));
+    if (runs && unitAbove !== null && k !== unitAbove) first[0].classList.add("run");
+    unitAbove = k;
     out.push(...first);
-    if (u.all.length < 2 || isFolded(u)) continue;
-    for (const p of u.all) {
-      const own = groupOf(p);
-      out.push(...prRow(p, u, withGroup ? groupCell(own, !runs || groupKey(own) !== k) : undefined));
-    }
+    if (u.all.length > 1 && !isFolded(u)) for (const p of u.all) out.push(...prRow(p, u, cell(groupOf(p))));
   }
   return out;
 }
@@ -537,7 +537,7 @@ function bodyRows(us: Unit[]): HTMLElement[] {
 function table(us: Unit[], folded: PullRequest[]): HTMLElement {
   const sort = st.sorts[st.side], v = viewOf(), col = sortCol(), cols = shownCols();
   const label = (c: Col) => (st.side === "review" && c.id === "step" ? "Waiting" : c.label);
-  const withGroup = cols.some((c) => c.id === "group");
+  const withGroup = showsGroup();
   return h("table", { class: "pr-table" },
     h("caption", { class: "vh" }, `${v.label}, sorted by ${label(col)}`),
     h("thead", {}, h("tr", {}, h("th", {}, h("span", { class: "vh" }, "Stack")), h("th", {}, h("span", { class: "vh" }, "Open")),

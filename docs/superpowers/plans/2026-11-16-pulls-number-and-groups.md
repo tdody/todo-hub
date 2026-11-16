@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-16-pulls-number-and-groups-design.md`.
 
+Review fixes changed Task 3's code after this plan was written (the darker line, the names under a stack member, the sort key, one sort value per unit). The code is the source of truth.
+
 **Worktree:** `/Users/thibaultdody/dev/worktrees/todo-hub/main`, branch `pulls-number-and-groups`. Run every command from there.
 
 ---
