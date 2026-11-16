@@ -89,6 +89,9 @@ timeout_minutes = 20
 first_run_lookback_hours = 72
 snitch_url = ""            # Dead Man's Snitch URL, e.g. "https://nosnch.in/abc123"
 restricted = true          # run Claude Code with --restricted (ignores ~/.claude settings); keep on
+# Your name comes from your Linear account. about_me follows it in the prompts, e.g.
+# "Ada Lovelace, a staff engineer (about half client work, half development)".
+about_me = ""
 
 # Read-only tool allowlists (slack_tools, gmail_tools, grain_tools, calendar_tools, hubspot_tools) default
 # to the built-in lists. Set one to [] to switch that source off, e.g.:
@@ -146,6 +149,7 @@ class Settings:
     first_run_lookback_hours: int = 72
     snitch_url: str = ""
     restricted: bool = True
+    about_me: str = ""
     slack_tools: list[str] = field(default_factory=lambda: list(DEFAULT_SLACK_TOOLS))
     grain_tools: list[str] = field(default_factory=lambda: list(DEFAULT_GRAIN_TOOLS))
     gmail_tools: list[str] = field(default_factory=lambda: list(DEFAULT_GMAIL_TOOLS))
@@ -270,6 +274,7 @@ def load_settings() -> Settings:
     s.first_run_lookback_hours = int(sweep.get("first_run_lookback_hours", s.first_run_lookback_hours))
     s.snitch_url = sweep.get("snitch_url", s.snitch_url)
     s.restricted = bool(sweep.get("restricted", s.restricted))
+    s.about_me = str(sweep.get("about_me", s.about_me)).strip()
     s.slack_tools = list(sweep.get("slack_tools", s.slack_tools))
     s.grain_tools = list(sweep.get("grain_tools", s.grain_tools))
     s.gmail_tools = list(sweep.get("gmail_tools", s.gmail_tools))

@@ -87,7 +87,7 @@ def cmd_check(_: argparse.Namespace) -> int:
         finally:
             client.close()
         statuses = {s["name"]: s["type"] for s in meta.states}
-        print(f"Linear: OK. {len(issues)} open issues, {len(meta.client_labels)} client labels.")
+        print(f"Linear: OK, as {meta.viewer_name}. {len(issues)} open issues, {len(meta.client_labels)} client labels.")
         for setting in ("todo_state", "waiting_state", "done_state"):
             name = getattr(settings, setting)
             if name not in statuses:

@@ -249,7 +249,7 @@ def add_candidate(
     if rule:
         db.bump_mute(rule["id"])
         db.mark_seen(src, sid)
-        return {"status": "muted", "notes": [f"Thibault muted {rule['label']}; not added. Skip anything else from it."]}
+        return {"status": "muted", "notes": [f"The user muted {rule['label']}; not added. Skip anything else from it."]}
 
     dup = (possible_duplicate or "").strip().upper() or None
     if dup and dup not in set(db.get_meta("open_issue_identifiers", [])):
@@ -289,7 +289,7 @@ def _target(db: DB, target_issue: str) -> dict:
     ident = (target_issue or "").strip().upper()
     issue = next((i for i in db.get_meta("open_issues", []) if i["identifier"] == ident), None)
     if not issue:
-        raise ToolError(f"{ident or 'target_issue'} is not one of Thibault's open issues listed in the prompt")
+        raise ToolError(f"{ident or 'target_issue'} is not one of the user's open issues listed in the prompt")
     return issue
 
 
@@ -386,7 +386,7 @@ def report_plan(db: DB, run_id: int | None, *, day: str, headline: str, recap: s
                 set_aside: list | None = None) -> dict:
     """Save Claude's plan for a day: a recap of the last working day, picks with a reason and a
     time estimate, and a next step for each late issue left out. Only suggestions: the app shows
-    them and Thibault decides."""
+    them and the user decides."""
     if run_id is None:
         raise ToolError("no active run")
     try:
@@ -475,7 +475,7 @@ def report_wrapup(db: DB, run_id: int | None, *, day: str, summary: str, items: 
                   start_with: dict | None = None, notes: list | None = None, checkin: dict | None = None) -> dict:
     """Save Claude's wrap-up for a day: a short summary, a next step for each open item, what to
     start the next working day with, notes kept for the week, and the week's mission check-in
-    draft. Only suggestions: the app shows them and Thibault decides."""
+    draft. Only suggestions: the app shows them and the user decides."""
     if run_id is None:
         raise ToolError("no active run")
     try:

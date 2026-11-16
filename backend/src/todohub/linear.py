@@ -52,6 +52,7 @@ class TeamMeta:
     states: list[dict]          # [{id, name, type, position}]
     client_labels: list[dict]   # [{id, name}], children of the client label group
     viewer_id: str
+    viewer_name: str
     projects: list[dict] = field(default_factory=list)   # [{id, name}], not completed or canceled
 
 
@@ -130,7 +131,7 @@ class Linear:
         data = self.gql(
             """
             query($key: String!) {
-              viewer { id }
+              viewer { id name }
               teams(filter: { key: { eq: $key } }) {
                 nodes { id states { nodes { id name type position } } }
               }
@@ -160,6 +161,7 @@ class Linear:
             states=in_linear_order(team["states"]["nodes"]),
             client_labels=sorted(labels, key=lambda l: l["name"].lower()),
             viewer_id=data["viewer"]["id"],
+            viewer_name=data["viewer"]["name"],
             projects=sorted(projects, key=lambda p: p["name"].lower()),
         )
 
