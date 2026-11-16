@@ -3349,6 +3349,7 @@ const SHORTCUTS: [string, string][] = [
   ["x · ↵", "Today, in the morning: check a suggestion · start the day"],
   ["v", "Client / Dev: group by client or project ↔ by status"],
   ["1 – 5 · Space · o · l", "Pull requests: pick a view · open or close the row · open it in GitHub · open its Linear issue. ⌘R refreshes all"],
+  ["g", "Pull requests (Mine): group by client or project"],
   ["t", "Theme: follow the Mac → light → dark → daylight (follows the time of day)"],
   ["r", "Sources: each one's status, ↻ to check one, Run all"],
   ["?", "This list"],
