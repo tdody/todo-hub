@@ -56,6 +56,7 @@ Out:
 
 - The **Group** control is in the header line, before **Refresh all**. It shows only in Mine. It is the `.segmented` control: **None** and **Client or project**, each a button with `aria-pressed`.
 - **g** turns the groups on and off in Mine. In To review, **g** does nothing.
+- Below 1000 px, the "Group" label hides, **Refresh all** shows only its icon, and the filter shrinks to 120 px, so the header line fits from 760 px.
 - The app remembers the choice on this Mac, in `todohub.pullsGroups`. The default is off.
 - When the groups are on:
   - The Client / project column hides, because each section heading names the group. The title gets the width back.
@@ -87,7 +88,7 @@ Out:
 - `groupOf(p)`: the client label, else the project, of the issue from `linearOf`, else `null` for **No client or project**. It is the one way to ask for the group of a pull request. The stack's group is `groupOf(u.all[0])`.
 - `metaLine` drops the number. It names the group of a stack member whose group is not the stack's, when the groups are on.
 - `stackRow` gets the **#** cell, and the Client / project cell when the column shows.
-- `st` gets `grouped` (from `loadPref`) and `foldedGroups` (a `Set`, like `foldedStacks`).
+- `st` gets `grouped` (from `loadPref`) and `foldedSections` (a `Set`, like `foldedStacks`).
 - `table()` draws one `tbody` for each section when the groups are on. `panel()` builds the selection order from the sections as they show.
 - `head()` adds the **Group** control in Mine. `pullsKey` handles **g**.
 - `onClick` handles the **Group** buttons and the section headings.
