@@ -228,9 +228,12 @@ export interface Slips {
   error: string | null;
 }
 
-/** Per week, Monday to Sunday (ET): your pull requests merged, and others' you reviewed. */
+/** Per week, Monday to Sunday (ET): your pull requests merged, and others' you reviewed. Lines added
+ *  and removed by the ones merged this week and last week. */
 export interface PullWeeks {
   weeks: { week: string; merged: number; reviewed: number }[];
+  lines: { additions: number; deletions: number } | null;
+  last_lines: { additions: number; deletions: number } | null;
   error: string | null;
 }
 
