@@ -34,7 +34,7 @@ interface Col {
 }
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const READ_EVERY = 5 * MIN;          // the backend reads GitHub at most this often, unless asked
+const READ_EVERY = 5 * MIN;          // the tab asks for a new read this long after the last one
 const STAGE: Record<PullRequest["stage"], [string, string]> = {
   draft: ["Draft", "pr-draft"], in_review: ["In review", "s-prog"],
   changes_requested: ["Changes requested", "pr-chg"], approved: ["Approved", "s-done"],
@@ -46,6 +46,7 @@ const st = {
   loading: false,
   unreachable: null as string | null,  // the backend did not answer (gh's own errors come in data.error)
   askedAt: 0,
+  refreshing: new Set<string>(),        // pull requests being read again one by one
   side: "mine" as Side,
   view: { mine: "needs", review: "all" } as Record<Side, string>,
   note: false,                          // the view's note filters the table
@@ -77,6 +78,7 @@ const PATHS: Record<string, string> = {
   dn: "M4 6l4 4 4-4",
   up: "M4 10l4-4 4 4",
   ud: "M4.7 6.7 8 3.3l3.3 3.4M4.7 9.3 8 12.7l3.3-3.4",
+  redo: "M14.6 3.2v3.6H11M13.1 9.8a5.4 5.4 0 1 1-1.27-5.62L14.6 6.8",
 };
 function icon(name: string, cls = "i"): SVGElement {
   const g = svg("svg", { class: cls, viewBox: "0 0 16 16", "aria-hidden": "true" });
@@ -391,7 +393,15 @@ function detailRow(p: PullRequest, u: Unit): HTMLElement {
       h("div", { class: "acts" },
         h("button", { class: "secondary pr-main", "data-act": "gh" }, "Open in GitHub", h("kbd", {}, "o")),
         lin?.url && h("button", { class: "secondary", "data-act": "lin" }, `Open ${lin.ident}`, h("kbd", {}, "l")),
-        h("button", { class: "secondary", "data-act": "copy" }, "Copy branch name"))));
+        h("button", { class: "secondary", "data-act": "copy" }, "Copy branch name"),
+        refreshButton(p))));
+}
+
+function refreshButton(p: PullRequest): HTMLElement {
+  const busy = st.refreshing.has(keyOf(p));
+  return h("button", { class: "secondary", "data-act": "refresh", "aria-disabled": String(busy || st.loading),
+    title: `Read #${p.number} from GitHub again` },
+    busy ? h("span", { class: "spinner" }) : icon("redo"), busy ? "Refreshing…" : "Refresh");
 }
 
 // ---- the page -------------------------------------------------------------------------------------
@@ -419,8 +429,12 @@ function head(): HTMLElement {
   const d = st.data?.read_at ? st.data : null;
   const team = ctx.issues()[0]?.identifier.split("-")[0];
   filterInput.placeholder = `Filter by title, repo or ${team ? `${team}-` : "issue"}`;
+  const right = document.createDocumentFragment();
+  right.append(h("button", { class: "ghost pr-refresh", "data-act": "reread", "aria-disabled": String(st.loading),
+    title: "Read all your pull requests from GitHub again (⌘R)" },
+    st.loading ? h("span", { class: "spinner" }) : icon("redo"), h("span", {}, st.loading ? "Refreshing…" : "Refresh all")), filterInput);
   return pageHead("Pull requests", {
-    sub: subtitle(), label: "Pull requests", right: filterInput,
+    sub: subtitle(), label: "Pull requests", right,
     tabs: [
       { id: "mine", label: "Mine", count: d?.mine.length, controls: "pr-panel", on: st.side === "mine", select: () => switchSide("mine") },
       { id: "review", label: "To review", count: d?.review.length, controls: "pr-panel", on: st.side === "review", select: () => switchSide("review") },
@@ -433,8 +447,7 @@ function banner(): Node | string {
   if (!err) return "";
   const when = !st.unreachable && d?.error_at ? ` at ${clock(d.error_at)}` : "";
   return h("div", { class: "banner error pr-banner", role: "alert" }, icon("alert"),
-    h("span", {}, `Could not read GitHub${when}: ${err}`, d?.read_at ? ` This page shows what was read at ${clock(d.read_at)}.` : ""),
-    h("button", { class: "secondary", "data-act": "reread", disabled: st.loading }, st.loading ? "Reading…" : "Read again"));
+    h("span", {}, `Could not read GitHub${when}: ${err}`, d?.read_at ? ` This page shows what was read at ${clock(d.read_at)}.` : ""));
 }
 
 function strip(base: PullRequest[], have: boolean): HTMLElement {
@@ -501,10 +514,14 @@ function panel(): HTMLElement {
       kbd("l"), " Linear · ", kbd("1"), "–", kbd(String(VIEWS[side].length)), " pick a view · ", kbd("?"), " all keys"));
 }
 
-type Focus = { on: "filter"; from: number | null; to: number | null } | { on: "table" } | { on: "tab" } | null;
+type Focus = { on: "filter"; from: number | null; to: number | null } | { on: "act"; act: string; key: string | null }
+  | { on: "table" } | { on: "tab" } | null;
 function focusNow(): Focus {
   const a = document.activeElement;
   if (a === filterInput) return { on: "filter", from: filterInput.selectionStart, to: filterInput.selectionEnd };
+  if (a instanceof HTMLElement && a.dataset.act && root?.contains(a)) {
+    return { on: "act", act: a.dataset.act, key: a.closest<HTMLElement>("tr")?.dataset.key ?? null };
+  }
   if (a?.closest(".pr-table")) return { on: "table" };
   if (a?.closest(".prs [role=tab]")) return { on: "tab" };
   return null;
@@ -513,13 +530,23 @@ function refocus(f: Focus) {
   if (f?.on === "filter") {
     filterInput.focus();
     if (f.from !== null) filterInput.setSelectionRange(f.from, f.to);
+  } else if (f?.on === "act") {
+    const row = f.key ? `tr[data-key="${CSS.escape(f.key)}"] ` : "";
+    root?.querySelector<HTMLElement>(`${row}[data-act="${f.act}"]`)?.focus();
   } else if (f?.on === "table") focusSel(false);
   else if (f?.on === "tab") document.getElementById(`tab-${st.side}`)?.focus();
 }
 
-/** The tab's page. It asks the backend again once the last answer is 5 minutes old. */
+/** When the backend last read the whole list from GitHub, or tried to. */
+function lastRead(): number {
+  const d = st.data;
+  return Math.max(d?.read_at ? Date.parse(d.read_at) : 0, d?.error_at ? Date.parse(d.error_at) : 0);
+}
+
+/** The tab's page. It asks for a new read 5 minutes after the last one, so Refresh all restarts the
+ *  5 minutes; it asks at most once a minute, for when the backend does not answer. */
 export function pullsView(): HTMLElement {
-  if (!st.loading && Date.now() - st.askedAt > READ_EVERY) void loadPulls();
+  if (!st.loading && Date.now() - lastRead() > READ_EVERY && Date.now() - st.askedAt > MIN) void loadPulls();
   const f = focusNow();
   root = h("div", { class: "prs", onclick: onClick, onmouseover: onHover, onmouseleave: onHover, onfocusin: onFocusIn }, head(), panel());
   queueMicrotask(() => refocus(f));           // once the page is in the window
@@ -553,6 +580,25 @@ export async function loadPulls(force = false): Promise<void> {
   } finally {
     st.loading = false;
     paint();                 // in place, so a filter being typed keeps its focus
+    ctx.rerender();
+  }
+}
+
+/** Read one pull request again. A merged or closed one leaves the list. */
+async function refreshOne(p: PullRequest): Promise<void> {
+  const key = keyOf(p);
+  if (st.loading || st.refreshing.has(key)) return;
+  st.refreshing.add(key);
+  paint();
+  try {
+    const d = (st.data = await api.pull(p.repo, p.number));
+    const listed = [...d.mine, ...d.review].some((x) => keyOf(x) === key);
+    ctx.toast(listed ? `Refreshed #${p.number}` : `#${p.number} is merged or closed, so it left the list.`);
+  } catch (e) {
+    ctx.toast(`Could not refresh #${p.number}: ${e instanceof ApiError ? e.message : String(e)}`);
+  } finally {
+    st.refreshing.delete(key);
+    paint();
     ctx.rerender();
   }
 }
@@ -593,7 +639,8 @@ function act(kind: string, p: PullRequest | undefined) {
     const lin = linearOf(p);
     if (lin?.url) void openUrl(lin.url);
     else ctx.toast("No Linear issue in the branch name or title.");
-  } else if (kind === "copy") {
+  } else if (kind === "refresh") void refreshOne(p);
+  else if (kind === "copy") {
     navigator.clipboard.writeText(p.head).then(() => ctx.toast(`Copied ${p.head}`), () => ctx.toast("Could not copy the branch name."));
   }
 }
