@@ -23,7 +23,7 @@
   --s-todo-bg: #eef1f5; --s-todo-ink: #3d4756;
   --s-prog-bg: #e5edf8; --s-prog-ink: #1f4f8f;
   --s-pend-bg: #efe9f7; --s-pend-ink: #5b3a8a;
-  --s-done-bg: #e6f2ea; --s-done-ink: #2f7d57;
+  --s-done-bg: #e6f2ea; --s-done-ink: #2b7451;   /* 4.9:1 on its pill; --good gives 4.35:1 */
   --p-urgent-bg: #d1462f; --p-urgent-ink: #ffffff;
   --p-high-bg: #fde6d8; --p-high-ink: #a8420f;
   --p-med-bg: #f1ecdc; --p-med-ink: #6b5a1d;
@@ -1563,7 +1563,7 @@ button.seg-n:not([aria-pressed="true"]):hover { text-decoration: underline; text
 .seg-n.red[aria-pressed="true"] { background: var(--bad-bg); }
 .seg-n.amb { color: var(--warn-ink); }
 .seg-n.amb[aria-pressed="true"] { background: var(--warn-bg); font-weight: 600; }
-.seg-n.ok { color: var(--good); }
+.seg-n.ok { color: var(--s-done-ink); }   /* --good falls under 4.5:1 on the pressed and hover fills */
 .seg-n.ok[aria-pressed="true"] { background: var(--s-done-bg); font-weight: 600; }
 /* the table: whole-pixel widths, because fractional columns leave seams between tinted cells */
 .pr-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }

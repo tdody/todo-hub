@@ -45,7 +45,4 @@ Point at one pull request of a stack and the whole stack lights up; the stack's 
 - A read of the list costs about 40 of 5,000 points an hour, and a read of one pull request costs 1; the newest 30 threads per pull request are read.
 - A pull request read again alone leaves the list only when it is merged or closed. A review request that GitHub drops stays in To review until the next read of the list.
 - The error banner has no button of its own: Refresh all sits just above it.
-
-## Unresolved
-
-- The Approved pill contrast (4.36:1) comes from the s-done tokens used by every Done pill; a Linear ticket covers it.
+- The Done pill ink (`s-done-ink`) is #2b7451 in light mode: 4.9:1 on its pill, where Done Green gave 4.35:1. Every Done pill and the Approved pill use it, and so does a green filter note, because Done Green falls under 4.5:1 on the pressed and hover fills.
