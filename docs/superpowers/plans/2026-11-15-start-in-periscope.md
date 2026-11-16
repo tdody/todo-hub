@@ -309,7 +309,7 @@ def test_client_when_periscope_is_down_or_slow():
 
     with pytest.raises(PeriscopeError, match=r"Periscope is not running at 127\.0\.0\.1:17374\."):
         Periscope(URL, transport=httpx.MockTransport(refuse)).catalog()
-    with pytest.raises(PeriscopeError, match="Periscope didn't answer in 30 s."):
+    with pytest.raises(PeriscopeError, match="Periscope didn't answer in 120 s."):
         Periscope(URL, transport=httpx.MockTransport(slow)).catalog()
 
 
@@ -381,7 +381,7 @@ from .db import DB
 BUNDLE_ID = "com.tom.periscope.app"
 REPOS_KEY = "periscope_repos"            # meta: {"project:<name>" or "client:<label>": repo path}
 LAST_REPO_KEY = "periscope_last_repo"    # meta: the repo last picked for any issue
-TIMEOUT_SECONDS = 30                     # a start waits for Claude's screen before it answers (~10 s)
+TIMEOUT_SECONDS = 120                    # a start fetches, makes the worktree, then waits for Claude's screen
 _TOKEN = re.compile(r"\{(identifier|title|url)\}")
 
 
@@ -1254,11 +1254,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 In the `settings.json` row, change "sources added, paused or removed; the schedule; the Daylight place." to "sources added, paused or removed; the schedule; the Daylight place; the periscope prompt."
 
 - [ ] **Step 3: Spec.** Make the spec match the code:
-  - In "Changes" → `periscope.py`, replace the three bullets `catalog(settings, transport=None)…`, `start(settings, …)…` and `select(settings, pid, transport=None)…` with one bullet: "`Periscope(url, transport=None)`, shaped like `Linear`: `catalog()`, `start(...)` and `select(pid)`. The timeout is 30 s, because a start waits about 10 s for Claude's screen. A timeout gives "Periscope didn't answer in 30 s.""
+  - In "Changes" → `periscope.py`, replace the three bullets `catalog(settings, transport=None)…`, `start(settings, …)…` and `select(settings, pid, transport=None)…` with one bullet: "`Periscope(url, transport=None)`, shaped like `Linear`: `catalog()`, `start(...)` and `select(pid)`. The timeout is 120 s, because a start runs `git fetch` and makes the worktree (up to about 90 s on a large repo), then waits about 10 s for Claude's screen. A timeout gives "Periscope didn't answer in 120 s.""
   - In "Changes" → `api.py`, change `worktree_exists` to `branch_worktrees` (the repos with a worktree already on the branch; the popover shows the hint when the selected repo is one of them).
   - In "Tests", change "`worktree_exists`" to "`branch_worktrees`".
   - In "Changes", replace the `app/src/main.ts` bullet list with: "**New `app/src/periscope.ts`**: the menu item, the popover, Start and Show, set up from `main.ts` like `pane.ts`. **`app/src/main.ts`**: the menu item in `issuePane` and `stageBody`, the setup, outside click, Esc and the shortcuts sheet. **`app/src/pane.ts`**: `p` in `PANE_KEYS`."
-  - In the Errors table, add a row: "Periscope does not answer within 30 s | "Periscope didn't answer in 30 s.""
+  - In the Errors table, add a row: "Periscope does not answer within 120 s | "Periscope didn't answer in 120 s.""
 
 - [ ] **Step 4: Commit**
 
