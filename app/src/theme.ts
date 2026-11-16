@@ -1,6 +1,7 @@
 // Light / dark / follow-the-Mac / follow-the-day theme, remembered on this Mac.
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { daylightLabel, daylightShort, startDaylight, stopDaylight } from "./daylight";
+import { loadPref, savePref } from "./dom";
 
 export type ThemeChoice = "system" | "light" | "dark" | "daylight";
 const KEY = "todohub.theme";
@@ -9,14 +10,10 @@ const LABEL: Record<ThemeChoice, string> = {
   system: "Theme: follow the Mac", light: "Theme: light", dark: "Theme: dark", daylight: "Theme: daylight",
 };
 
+/** The remembered theme; follow the Mac when there is none (or storage is unavailable). */
 export function currentTheme(): ThemeChoice {
-  try {
-    const v = localStorage.getItem(KEY);
-    if (v === "light" || v === "dark" || v === "system" || v === "daylight") return v;
-  } catch {
-    /* storage unavailable: follow the Mac */
-  }
-  return "system";
+  const v = loadPref(KEY);
+  return v === "light" || v === "dark" || v === "system" || v === "daylight" ? v : "system";
 }
 
 function titleBar(theme: "light" | "dark" | null) {
@@ -52,13 +49,9 @@ export function applyTheme(choice: ThemeChoice = currentTheme()) {
   titleBar(choice === "system" ? null : choice);
 }
 
-/** Pick a theme and remember it. */
+/** Pick a theme and remember it (without storage, it applies for this session only). */
 export function setTheme(choice: ThemeChoice) {
-  try {
-    localStorage.setItem(KEY, choice);
-  } catch {
-    /* still applies for this session */
-  }
+  savePref(KEY, choice);
   applyTheme(choice);
 }
 

@@ -4,7 +4,9 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, ApiError } from "./api";
 import type { Issue, PullRequest, Pulls } from "./api";
-import { h, pageHead, svg } from "./dom";
+import { groupMark } from "./avatars";
+import type { Group } from "./avatars";
+import { h, loadPref, pageHead, savePref, svg } from "./dom";
 
 export interface PullsCtx {
   /** Render the page again when this tab shows, else only the sidebar (for its count). */
@@ -34,6 +36,7 @@ interface Col {
 }
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
+const GROUPS_PREF = "todohub.pullsGroups";   // "on": Mine shows one section for each client or project
 const READ_EVERY = 5 * MIN;          // the tab asks for a new read this long after the last one
 const STAGE: Record<PullRequest["stage"], [string, string]> = {
   draft: ["Draft", "pr-draft"], in_review: ["In review", "s-prog"],
@@ -53,6 +56,8 @@ const st = {
   sorts: { mine: { id: "step", dir: 1 }, review: { id: "step", dir: 1 } } as Record<Side, { id: string; dir: number }>,
   open: new Set<string>(),
   foldedStacks: new Set<string>(),      // stacks that show only their summary row
+  grouped: loadPref(GROUPS_PREF) === "on",  // Mine: one section for each client or project
+  foldedSections: new Set<string>(),    // sections that show only their heading, by groupKey
   sel: null as string | null,
   filter: "",
   fold: false,                          // drafts in no stack
@@ -163,6 +168,21 @@ function linearOf(p: PullRequest): { ident: string; issue?: Issue; url: string |
 const linearRef = (ident: string) =>
   h("button", { class: "ref", "data-act": "lin", tabindex: "-1", title: `Open ${ident} in Linear` }, h("span", { class: "k" }, ident));
 
+// ---- groups: the client label, else the project, of the pull request's Linear issue ------------
+/** The one way to ask which client or project a pull request belongs to: null ("No client or
+ *  project") when it names no Linear issue, or one that is not one of your open issues. A stack's
+ *  is its base's. */
+function groupOf(p: PullRequest): Group {
+  const issue = linearOf(p)?.issue;
+  if (issue?.client) return { kind: "client", name: issue.client };
+  return issue?.project ? { kind: "project", name: issue.project } : null;
+}
+const groupKey = (g: Group) => (g ? `${g.kind}:${g.name}` : "none");
+const groupName = (g: Group) => g?.name ?? "No client or project";
+/** The Client / project cell. ``named`` false leaves it empty, under a row in the same group. */
+const groupCell = (g: Group, named = true) => h("td", { class: "grp" },
+  named && h("span", { class: `gi${g ? "" : " none"}`, title: groupName(g) }, groupMark(g), h("span", {}, groupName(g))));
+
 // ---- views and columns --------------------------------------------------------------------------
 const mine = () => st.data?.mine ?? [];
 const VIEWS: Record<Side, View[]> = {
@@ -198,10 +218,16 @@ const VIEWS: Record<Side, View[]> = {
 const viewOf = () => VIEWS[st.side].find((v) => v.id === st.view[st.side]) ?? VIEWS[st.side][0];
 
 // A header's first click sorts the way you most often want.
+const STEP_COL: Col = { id: "step", label: "Next step", first: 1, cls: "c-st", unit: "min",
+  key: (p) => (st.side === "mine" ? stepOf(p).rank * 1e13 + Date.parse(p.updated_at) : Date.parse(p.asked_at)) };
 const COLS: Col[] = [
+  { id: "number", label: "#", key: (p) => p.number, first: -1, cls: "c-num", unit: "min", tip: "Pull request number" },
   { id: "title", label: "Pull request", key: (p) => p.title.toLowerCase(), first: 1, unit: "base" },
-  { id: "step", label: "Next step", first: 1, cls: "c-st", unit: "min",
-    key: (p) => (st.side === "mine" ? stepOf(p).rank * 1e13 + Date.parse(p.updated_at) : Date.parse(p.asked_at)) },
+  // name order (No client or project last from A to Z); a stack sorts by its base's group. The exact key after
+  // the name keeps a client and a project with the same name apart.
+  { id: "group", label: "Client / project", first: 1, cls: "c-grp", unit: "base",
+    key: (p) => { const g = groupOf(p); return `${g ? 0 : 1}${groupName(g).toLowerCase()}\u0000${groupKey(g)}`; } },
+  STEP_COL,
   { id: "ci", label: "CI", key: (p) => CI_RANK[p.ci.state], first: 1, cls: "c-ci", unit: "min" },
   { id: "comments", label: "Comments", key: (p) => p.open_threads * 1000 + p.comments, first: -1, cls: "c-cm", unit: "sum",
     tip: "Sorts by open threads, then by comments" },
@@ -209,9 +235,15 @@ const COLS: Col[] = [
   { id: "updated", label: "Updated", key: (p) => Date.parse(p.updated_at), first: -1, cls: "c-up r", unit: "max" },
 ];
 
+/** The table's columns: Client / project only in Mine with the groups off (each heading names it). */
+const shownCols = () => COLS.filter((c) => c.id !== "group" || (st.side === "mine" && !st.grouped));
+const isGrouped = () => st.side === "mine" && st.grouped;
+const showsGroup = () => shownCols().some((c) => c.id === "group");
+/** The column the table sorts by. */
+const sortCol = () => shownCols().find((c) => c.id === st.sorts[st.side].id) ?? STEP_COL;
+
 function units(shown: PullRequest[]): Unit[] {
-  const sort = st.sorts[st.side];
-  const col = COLS.find((c) => c.id === sort.id) ?? COLS[1];
+  const sort = st.sorts[st.side], col = sortCol();
   const seen = new Map<string, Unit>();
   for (const p of shown) {
     const root = st.side === "mine" ? rootOf(p) : p;
@@ -219,13 +251,15 @@ function units(shown: PullRequest[]): Unit[] {
     if (!seen.has(id)) seen.set(id, { id, all: st.side === "mine" ? membersOf(root) : [p], shown: new Set() });
     seen.get(id)!.shown.add(p);
   }
-  const value = (u: Unit) => {
-    const ks = u.all.map(col.key);
-    if (col.unit === "base" || typeof ks[0] === "string") return ks[0];
-    const ns = ks as number[];
-    return col.unit === "min" ? Math.min(...ns) : col.unit === "max" ? Math.max(...ns) : ns.reduce((a, b) => a + b, 0);
+  const value = (u: Unit, c: Col) => {
+    if (c.unit === "base") return c.key(u.all[0]);
+    const ns = u.all.map(c.key) as number[];
+    return c.unit === "min" ? Math.min(...ns) : c.unit === "max" ? Math.max(...ns) : ns.reduce((a, b) => a + b, 0);
   };
-  return [...seen.values()].sort((a, b) => { const x = value(a), y = value(b); return (x < y ? -1 : x > y ? 1 : 0) * sort.dir; });
+  const cmp = (x: number | string, y: number | string) => (x < y ? -1 : x > y ? 1 : 0);
+  // each unit's values once; rows with the same value sort by Next step
+  return [...seen.values()].map((u) => ({ u, v: value(u, col), step: value(u, STEP_COL) }))
+    .sort((a, b) => cmp(a.v, b.v) * sort.dir || cmp(a.step, b.step)).map((x) => x.u);
 }
 
 // ---- cells and rows -------------------------------------------------------------------------------
@@ -251,18 +285,21 @@ function stepCell(p: PullRequest): Node {
   return h("span", { class: `step ${s.tone}`, title: s.label }, s.label);
 }
 
+/** "#2374": a muted "#", then the number. */
+const numCell = (n: number, extra?: string) =>
+  h("td", { class: extra ? `num ${extra}` : "num" }, h("span", { class: "hash" }, "#"), String(n));
+
 function stagePill(stage: PullRequest["stage"]): HTMLElement {
   return h("span", { class: `pill ${STAGE[stage][1]}` }, h("span", { class: "pdot" }), STAGE[stage][0]);
 }
 
-/** The line under a title. The stage, "Conflicts" and the repo and number always show (the repo name
- *  shortens); when the line is full, the rest drops out whole, from the end: "N of M" first, as the rail
- *  shows the place in the stack. */
+/** The line under a title. The stage, "Conflicts" and the repo name always show (the repo name ends in
+ *  an ellipsis when it does not fit); when the line is full, the rest drops out whole, from the end:
+ *  "N of M" first, as the rail shows the place in the stack. */
 function metaLine(p: PullRequest, u: Unit): HTMLElement {
   const keep = h("span", { class: "keep" }, st.side === "mine" && stagePill(p.stage),
     p.conflicts && h("span", { class: "b red" }, "Conflicts"),
-    // the number first: drawn right to left, so a repo name that does not fit drops out whole
-    h("span", { class: "b id", title: p.repo }, h("span", {}, `#${p.number}`), h("span", {}, p.repo.split("/")[1])));
+    h("span", { class: "b id", title: p.repo }, p.repo.split("/")[1]));
   const rest: (Node | string)[] = [];
   if (st.side === "review") {
     rest.push(`by ${p.author}`);
@@ -270,6 +307,9 @@ function metaLine(p: PullRequest, u: Unit): HTMLElement {
   }
   const lin = linearOf(p);
   if (lin) rest.push(linearRef(lin.ident));
+  // a stack sits in its base's section, so a member in another client or project names it
+  const own = groupOf(p);
+  if (isGrouped() && u.all.length > 1 && groupKey(own) !== groupKey(groupOf(u.all[0]))) rest.push(groupName(own));
   if (u.all.length > 1) rest.push(`${u.all.indexOf(p) + 1} of ${u.all.length}`);
   return h("span", { class: "m" }, keep, ...rest.map((b) => h("span", { class: "b" }, b)));
 }
@@ -288,9 +328,9 @@ function rail(u: Unit, p: PullRequest, detail = false): HTMLElement {
 }
 
 /** A stack's first row: it shows the value the table sorts the stack by. A click folds or unfolds the stack. */
-function stackRow(u: Unit): HTMLElement {
-  const ms = u.all, step = COLS[1], folded = isFolded(u);
-  const top = ms.reduce((a, b) => (step.key(b) < step.key(a) ? b : a));
+function stackRow(u: Unit, grp?: HTMLElement): HTMLElement {
+  const ms = u.all, folded = isFolded(u);
+  const top = ms.reduce((a, b) => (STEP_COL.key(b) < STEP_COL.key(a) ? b : a));
   const s = stepOf(top);
   const fail = ms.filter((p) => p.ci.state === "failing").length, run = ms.filter((p) => p.ci.state === "running").length;
   const ci = fail ? h("span", { class: "no" }, icon("no"), `${plural(fail, "PR")} failing`)
@@ -302,9 +342,11 @@ function stackRow(u: Unit): HTMLElement {
     h("td", { class: "rail", "aria-hidden": "true", title: folded ? "Unfold the stack" : "Fold the stack" },
       h("span", { class: "knot head" }, folded && String(ms.length)), !folded && h("span", { class: "ln dn" })),
     h("td", { class: "x" }, icon("rt")),
+    numCell(Math.min(...ms.map((p) => p.number)), "mute"),
     h("td", { class: "t" }, h("button", { class: "sk", "aria-expanded": String(!folded) }, `Stack of ${ms.length}`),
       h("span", { class: "m" }, h("span", { class: "b" }, ms[0].repo.split("/")[1]),
         h("span", { class: "b" }, `merge order ${ms.map((p) => `#${p.number}`).join(" → ")}`))),
+    grp,
     h("td", { class: "st" }, h("span", { class: `step ${s.tone}`, title: s.label }, s.label), " ", h("span", { class: "mute" }, `#${top.number}`)),
     h("td", { class: "ci" }, ci),
     h("td", { class: "cm" }, commentsCell(sum((p) => p.comments), sum((p) => p.open_threads))),
@@ -312,17 +354,19 @@ function stackRow(u: Unit): HTMLElement {
     h("td", { class: "up r" }, ago(Math.min(...ms.map((p) => since(p.updated_at))))));
 }
 
-function prRow(p: PullRequest, u: Unit): HTMLElement[] {
+function prRow(p: PullRequest, u: Unit, grp?: HTMLElement): HTMLElement[] {
   const key = keyOf(p), stacked = u.all.length > 1, open = st.open.has(key);
   const cls = ["pr-row", stacked && "stk", stacked && u.all.indexOf(p) === u.all.length - 1 && "last", open && "open",
     st.sel === key && "sel", !u.shown.has(p) && "ctx"].filter(Boolean).join(" ");
   const row = h("tr", { class: cls, "data-key": key, "data-stack": stacked ? u.id : undefined },
     rail(u, p),
     h("td", { class: "x" }, icon("rt")),
+    numCell(p.number),
     h("td", { class: "t" },
       h("button", { class: "tt", id: domId(key), tabindex: st.sel === key ? "0" : "-1", "aria-expanded": String(open),
         "aria-controls": open ? `${domId(key)}-d` : undefined }, p.title),
       metaLine(p, u)),
+    grp,
     h("td", { class: "st" }, stepCell(p)),
     h("td", { class: "ci" }, ciCell(p)),
     h("td", { class: "cm" }, commentsCell(p.comments, p.open_threads)),
@@ -390,7 +434,7 @@ function detailRow(p: PullRequest, u: Unit): HTMLElement {
   const key = keyOf(p), lin = st.side === "mine" ? linearOf(p) : null;
   return h("tr", { class: `detail${st.sel === key ? " sel" : ""}`, "data-key": key, "data-stack": u.all.length > 1 ? u.id : undefined },
     rail(u, p, true),
-    h("td", { colspan: "7", id: `${domId(key)}-d` },
+    h("td", { colspan: String(shownCols().length + 1), id: `${domId(key)}-d` },
       h("h2", { class: "vh" }, `#${p.number} ${p.title}`),
       h("div", { class: "dgrid" },
         h("section", { class: "box" }, ...checksBox(p),
@@ -432,11 +476,20 @@ function subtitle(): string {
   return total > shown ? `${read} · the ${shown} updated last of ${total}` : read;
 }
 
+/** "Group: None | Client or project", before Refresh all in Mine; g does the same. */
+function groupControl(): HTMLElement {
+  const seg = (on: boolean, label: string) => h("button", { class: `seg${st.grouped === on ? " on" : ""}`,
+    "data-act": on ? "group-on" : "group-off", "aria-pressed": String(st.grouped === on), "aria-keyshortcuts": "g" }, label);
+  return h("span", { class: "pr-group" }, h("span", { class: "pr-group-l", "aria-hidden": "true" }, "Group"),
+    h("span", { class: "segmented", role: "group", "aria-label": "Group by" }, seg(false, "None"), seg(true, "Client or project")));
+}
+
 function head(): HTMLElement {
   const d = st.data?.read_at ? st.data : null;
   const team = ctx.issues()[0]?.identifier.split("-")[0];
   filterInput.placeholder = `Filter by title, repo or ${team ? `${team}-` : "issue"}`;
   const right = document.createDocumentFragment();
+  if (st.side === "mine") right.append(groupControl());
   right.append(h("button", { class: "ghost pr-refresh", "data-act": "reread", "aria-disabled": String(st.loading),
     title: "Read all your pull requests from GitHub again (⌘R)" },
     st.loading ? h("span", { class: "spinner" }) : icon("redo"), h("span", {}, st.loading ? "Refreshing…" : "Refresh all")), filterInput);
@@ -472,25 +525,80 @@ function strip(base: PullRequest[], have: boolean): HTMLElement {
   }));
 }
 
-function table(us: Unit[], folded: PullRequest[]): HTMLElement {
-  const sort = st.sorts[st.side], v = viewOf();
-  const col = COLS.find((c) => c.id === sort.id) ?? COLS[1];
+/** The rows of the units, each with its Client / project cell when the column shows. Sorted by that
+ *  column, a darker line starts each group, and a cell names its group on the group's first row and
+ *  where the row above is in another one. */
+function bodyRows(us: Unit[]): HTMLElement[] {
+  const withGroup = showsGroup(), sortedByGroup = sortCol().id === "group";
+  const out: HTMLElement[] = [];
+  let rowGroupAbove: string | null = null, unitGroupAbove: string | null = null;
+  const cell = (g: Group) => {
+    if (!withGroup) return undefined;
+    const k = groupKey(g), named = !sortedByGroup || k !== rowGroupAbove;
+    rowGroupAbove = k;
+    return groupCell(g, named);
+  };
+  for (const u of us) {
+    const g = groupOf(u.all[0]), k = groupKey(g);
+    if (k !== unitGroupAbove) rowGroupAbove = null;
+    const first = u.all.length > 1 ? [stackRow(u, cell(g))] : prRow(u.all[0], u, cell(g));
+    if (sortedByGroup && unitGroupAbove !== null && k !== unitGroupAbove) first[0].classList.add("grp-start");
+    unitGroupAbove = k;
+    out.push(...first);
+    if (u.all.length > 1 && !isFolded(u)) for (const p of u.all) out.push(...prRow(p, u, cell(groupOf(p))));
+  }
+  return out;
+}
+
+interface Section { key: string; group: Group; units: Unit[] }
+/** The units by group, in the order of each group's first unit; No client or project comes last. */
+function sections(us: Unit[]): Section[] {
+  const byKey = new Map<string, Section>();
+  for (const u of us) {
+    const group = groupOf(u.all[0]), key = groupKey(group);
+    if (!byKey.has(key)) byKey.set(key, { key, group, units: [] });
+    byKey.get(key)!.units.push(u);
+  }
+  return [...byKey.values()].sort((a, b) => Number(!a.group) - Number(!b.group));
+}
+
+/** A section's heading, as in Client and Dev: the logo or initial, the name, what the section shows
+ *  (not the grey rows that are there only for their stack), and a rule. A click folds the section. */
+function sectionHead(s: Section, span: number): HTMLElement {
+  const ps = s.units.flatMap((u) => u.all.filter((p) => u.shown.has(p)));
+  const needs = ps.filter(needsYou).length, fail = ps.filter((p) => p.ci.state === "failing").length;
+  const folded = st.foldedSections.has(s.key);
+  return h("tr", { class: `sec-h${folded ? " folded" : ""}` },
+    h("th", { colspan: String(span), scope: "rowgroup" },
+      h("button", { class: "sec-b", "aria-expanded": String(!folded) }, icon("rt"), groupMark(s.group),
+        h("span", { class: "ll-name" }, groupName(s.group)),
+        h("span", { class: "ll-sum" }, `${ps.length} open`, needs > 0 && ` · ${needs} ${needs === 1 ? "needs" : "need"} you`,
+          fail > 0 && " · ", fail > 0 && h("span", { class: "red" }, `${fail} CI failing`)),
+        h("span", { class: "ll-rule", "aria-hidden": "true" }))));
+}
+
+function table(us: Unit[], folded: PullRequest[], secs: Section[] | null): HTMLElement {
+  const sort = st.sorts[st.side], v = viewOf(), col = sortCol(), cols = shownCols();
   const label = (c: Col) => (st.side === "review" && c.id === "step" ? "Waiting" : c.label);
+  const withGroup = showsGroup();
   return h("table", { class: "pr-table" },
     h("caption", { class: "vh" }, `${v.label}, sorted by ${label(col)}`),
     h("thead", {}, h("tr", {}, h("th", {}, h("span", { class: "vh" }, "Stack")), h("th", {}, h("span", { class: "vh" }, "Open")),
-      ...COLS.map((c) => {
+      ...cols.map((c) => {
         const on = sort.id === c.id;
         return h("th", { class: c.cls, "aria-sort": on ? (sort.dir > 0 ? "ascending" : "descending") : undefined },
           h("button", { "data-sort": c.id, title: c.tip }, label(c), icon(on ? (sort.dir > 0 ? "up" : "dn") : "ud")));
       }))),
-    h("tbody", {}, ...us.flatMap((u) => [...(u.all.length > 1 ? [stackRow(u)] : []),
-      ...(isFolded(u) ? [] : u.all.flatMap((p) => prRow(p, u)))])),
+    ...(secs
+      ? secs.map((s) => h("tbody", { "data-section": s.key }, sectionHead(s, cols.length + 2),
+          ...(st.foldedSections.has(s.key) ? [] : bodyRows(s.units))))
+      : [h("tbody", {}, ...bodyRows(us))]),
     h("tbody", {}, ...(folded.length ? [
-      h("tr", { class: "fold-h" }, h("td", { colspan: "8" },
+      h("tr", { class: "fold-h" }, h("td", { colspan: String(cols.length + 2) },
         h("button", { class: "fold-b", "data-fold": "", "aria-expanded": String(st.fold) },
           h("span", {}, plural(folded.length, "draft")), icon("rt")))),
-      ...(st.fold ? folded.flatMap((p) => prRow(p, { id: keyOf(p), all: [p], shown: new Set([p]) })) : []),
+      ...(st.fold ? folded.flatMap((p) => prRow(p, { id: keyOf(p), all: [p], shown: new Set([p]) },
+        withGroup ? groupCell(groupOf(p)) : undefined)) : []),
     ] : [])));
 }
 
@@ -505,7 +613,9 @@ function panel(): HTMLElement {
   const loose = (p: PullRequest) => side === "mine" && p.stage === "draft" && membersOf(rootOf(p)).length < 2;
   const us = units(shown.filter((p) => !loose(p)));
   const folded = side === "mine" && !st.note && (v.id === "needs" || v.id === "all") ? base.filter(loose) : [];
-  const order = [...us.flatMap((u) => (isFolded(u) ? [] : u.all)), ...(st.fold ? folded : [])].map(keyOf);
+  const secs = isGrouped() ? sections(us) : null;
+  const listed = secs ? secs.filter((s) => !st.foldedSections.has(s.key)).flatMap((s) => s.units) : us;
+  const order = [...listed.flatMap((u) => (isFolded(u) ? [] : u.all)), ...(st.fold ? folded : [])].map(keyOf);
   if (!st.sel || !order.includes(st.sel)) st.sel = order[0] ?? null;
 
   const rows = us.length > 0 || folded.length > 0;
@@ -517,13 +627,14 @@ function panel(): HTMLElement {
   return h("div", { id: "pr-panel", role: "tabpanel", "aria-labelledby": `tab-${side}` },
     banner(),
     strip(base, !!d),
-    rows ? table(us, folded) : h("div", { class: "empty pr-empty" }, ...empty),
+    rows ? table(us, folded, secs) : h("div", { class: "empty pr-empty" }, ...empty),
     rows && h("p", { class: "pr-hint" }, kbd("j"), kbd("k"), " move · ", kbd("Space"), " opens or closes · ", kbd("o"), " GitHub · ",
-      kbd("l"), " Linear · ", kbd("1"), "–", kbd(String(VIEWS[side].length)), " pick a view · ", kbd("?"), " all keys"));
+      kbd("l"), " Linear · ", side === "mine" && kbd("g"), side === "mine" && " groups · ",
+      kbd("1"), "–", kbd(String(VIEWS[side].length)), " pick a view · ", kbd("?"), " all keys"));
 }
 
 type Focus = { on: "filter"; from: number | null; to: number | null } | { on: "act"; act: string; key: string | null }
-  | { on: "stack"; id: string } | { on: "table" } | { on: "tab" } | null;
+  | { on: "stack"; id: string } | { on: "section"; key: string } | { on: "table" } | { on: "tab" } | null;
 function focusNow(): Focus {
   const a = document.activeElement;
   if (a === filterInput) return { on: "filter", from: filterInput.selectionStart, to: filterInput.selectionEnd };
@@ -532,6 +643,8 @@ function focusNow(): Focus {
   }
   const stack = a?.matches(".sk") && a.closest<HTMLElement>("tr")?.dataset.stack;
   if (stack) return { on: "stack", id: stack };
+  const section = a?.matches(".sec-b") && a.closest<HTMLElement>("tbody")?.dataset.section;
+  if (section) return { on: "section", key: section };
   if (a?.closest(".pr-table")) return { on: "table" };
   if (a?.closest(".prs [role=tab]")) return { on: "tab" };
   return null;
@@ -544,6 +657,10 @@ function refocus(f: Focus) {
     const row = f.key ? `tr[data-key="${CSS.escape(f.key)}"] ` : "";
     root?.querySelector<HTMLElement>(`${row}[data-act="${f.act}"]`)?.focus();
   } else if (f?.on === "stack") root?.querySelector<HTMLElement>(`tr.sum[data-stack="${CSS.escape(f.id)}"] .sk`)?.focus();
+  else if (f?.on === "section") {
+    const head = root?.querySelector<HTMLElement>(`tbody[data-section="${CSS.escape(f.key)}"] .sec-b`);
+    if (head) head.focus(); else focusSel(false);
+  }
   else if (f?.on === "table") focusSel(false);
   else if (f?.on === "tab") document.getElementById(`tab-${st.side}`)?.focus();
 }
@@ -633,17 +750,37 @@ function toggle(key: string) {
   st.sel = key;
   paint();
 }
-/** Fold a stack to its summary row, or unfold it. A selection in the stack moves to the next row, else the one before. */
+/** When the selected row is one that ``inside`` picks, select the next row after them, else the one before. */
+function moveSelOut(inside: (row: HTMLElement) => boolean) {
+  const rows = [...(root?.querySelectorAll<HTMLElement>("tr.pr-row") ?? [])];
+  const at = rows.findIndex((r) => r.dataset.key === st.sel);
+  if (at < 0 || !inside(rows[at])) return;
+  const outside = (r: HTMLElement) => !inside(r);
+  st.sel = (rows.slice(at).find(outside) ?? rows.slice(0, at).reverse().find(outside))?.dataset.key ?? null;
+}
+/** Fold a stack to its summary row, or unfold it. */
 function foldStack(id: string) {
   if (!st.foldedStacks.delete(id)) {
     st.foldedStacks.add(id);
-    const rows = [...(root?.querySelectorAll<HTMLElement>("tr.pr-row") ?? [])];
-    const at = rows.findIndex((r) => r.dataset.key === st.sel);
-    if (at >= 0 && rows[at].dataset.stack === id) {
-      const outside = (r: HTMLElement) => r.dataset.stack !== id;
-      st.sel = (rows.slice(at).find(outside) ?? rows.slice(0, at).reverse().find(outside))?.dataset.key ?? null;
-    }
+    moveSelOut((r) => r.dataset.stack === id);
   }
+  paint();
+}
+/** Fold a section to its heading, or unfold it. It stays folded until the app restarts. */
+function foldSection(key: string) {
+  if (!st.foldedSections.delete(key)) {
+    st.foldedSections.add(key);
+    moveSelOut((r) => r.closest<HTMLElement>("tbody")?.dataset.section === key);
+  }
+  paint();
+}
+/** Turn Mine's groups on or off. The column hides in the sections, so a sort by it becomes a sort by
+ *  Next step. */
+function setGrouped(on: boolean) {
+  if (st.grouped === on) return;
+  st.grouped = on;
+  savePref(GROUPS_PREF, on ? "on" : "off");
+  if (on && st.sorts.mine.id === "group") st.sorts.mine = { id: STEP_COL.id, dir: STEP_COL.first };
   paint();
 }
 function pickView(id: string) { st.view[st.side] = id; st.note = false; paint(); }
@@ -673,7 +810,7 @@ function onClick(e: MouseEvent) {
   // a stack's rail, or its summary row, folds the stack
   const stack = (e.target as Element).closest("td.rail, tr.sum")?.closest<HTMLElement>("tr[data-stack]")?.dataset.stack;
   if (stack) return foldStack(stack);
-  const t = (e.target as Element).closest<HTMLElement>("[data-view],[data-note],[data-sort],[data-fold],[data-act],[data-clear],tr.pr-row");
+  const t = (e.target as Element).closest<HTMLElement>("[data-view],[data-note],[data-sort],[data-fold],[data-act],[data-clear],tr.sec-h,tr.pr-row");
   if (!t) return;
   const d = t.dataset;
   if (d.view) return pickView(d.view);
@@ -690,6 +827,8 @@ function onClick(e: MouseEvent) {
   }
   if (d.fold !== undefined) { st.fold = !st.fold; return paint(); }
   if (d.clear !== undefined) { filterInput.value = ""; st.filter = ""; return paint(); }
+  if (t.matches("tr.sec-h")) return foldSection(t.closest<HTMLElement>("tbody")!.dataset.section!);
+  if (d.act === "group-on" || d.act === "group-off") return setGrouped(d.act === "group-on");
   if (d.act === "reread") return void loadPulls(true);
   if (d.act === "run" && d.url) return void openUrl(d.url);
   if (d.act) return act(d.act, prOf(t.closest<HTMLElement>("tr")?.dataset.key));
@@ -723,6 +862,7 @@ export function pullsKey(e: KeyboardEvent): boolean {
     if (v) pickView(v.id);
     return true;
   }
+  if (e.key === "g" && st.side === "mine") { setGrouped(!st.grouped); return true; }
   const keys = rowKeys();
   if (!keys.length) return false;
   const at = st.sel ? keys.indexOf(st.sel) : -1;
