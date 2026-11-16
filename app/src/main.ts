@@ -13,6 +13,7 @@ import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskA
 import type { Category } from "./avatars";
 import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues";
 import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
+import { closePeriscope, dismissPeriscope, isPeriscopeOpen, periscopeItem, periscopePopover, setupPeriscope } from "./periscope";
 
 applyTheme();
 import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
@@ -2447,13 +2448,15 @@ function stageBody(i: Issue, onToday: boolean): Node[] {
   const more = h("details", { class: "drop-menu pane-menu" },
     h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
     h("div", { class: "menu" },
+      periscopeItem(i),
       onToday ? h("button", { type: "button", onclick: () => void toggleToday(i.id) }, "Remove from Today") : "",
       h("button", { type: "button", class: "menu-danger", onclick: (e: Event) => {
         (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
         confirmDelete(i);
       } }, "Delete…")));
   return [
-    h("div", { class: "tl-fields" }, ...issueFields(i), h("span", { class: "tl-actions" }, more)),
+    h("div", { class: "tl-fields" }, ...issueFields(i),
+      h("span", { class: "tl-actions" }, h("span", { class: "pp-anchor" }, more, periscopePopover(i)))),
     detailBody(i.id),
   ];
 }
@@ -2728,6 +2731,7 @@ function issuePane(i: Issue): HTMLElement {
     h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
     h("div", { class: "menu" },
       link("Open in Linear ↗", i.url, "menu-link"),
+      periscopeItem(i),
       t ? h("button", { type: "button", onclick: () => void toggleToday(i.id) }, "Remove from Today") : "",
       h("button", { type: "button", class: "menu-danger", onclick: (e: Event) => {
         (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
@@ -2742,7 +2746,7 @@ function issuePane(i: Issue): HTMLElement {
       h("span", { class: "tl-actions" },
         t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
           onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
-        more)),
+        h("span", { class: "pp-anchor" }, more, periscopePopover(i)))),
     detailBody(i.id),
   );
 }
@@ -3203,6 +3207,7 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
 }
 
 setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, doneStatus, todoStatus, state });
+setupPeriscope({ render, toast: (m, a) => void toast(m, a), fail });
 setupPulls({
   rerender: () => { if (state.tab === "pulls" && !editing()) render(); else renderHeader(); },
   toast: (m) => void toast(m),
@@ -3338,6 +3343,7 @@ const SHORTCUTS: [string, string][] = [
   ["⇧⌘R", "Reload: restart the backend and the window after a code change"],
   ["e", "Edit the title (an Inbox card, or the issue in Today, Client and Dev)"],
   ["⇧E · ⇧S · ⇧C", "Today, Client, Dev: edit the description · add a sub-issue · comment (⌘↵ posts)"],
+  ["p", "Today, Client, Dev: start the issue in periscope (a worktree, Claude and a prompt)"],
   ["c", "Capture a task"],
   ["/", "Filter"],
   ["⌘1 – ⌘7", "Inbox, Today, Client, Dev, Pull requests, Insights, Settings (also ⌘,)"],
@@ -3403,6 +3409,7 @@ function afterPointer(fn: () => void) {
 // Same for the balance popover.
 document.addEventListener("pointerdown", (e) => {
   pointerIsDown = true;
+  dismissPeriscope(e.target as Element);
   // (Removed in place, not re-rendered, so the click that closed it still lands on its target.)
   if (state.balanceOpen && !(e.target as Element).closest?.(".bal-anchor")) {
     state.balanceOpen = false;
@@ -3466,6 +3473,7 @@ document.addEventListener("keydown", (e) => {
     }
   }
   if (e.key === "Escape" && state.balanceOpen) { state.balanceOpen = false; render(); return; }
+  if (e.key === "Escape" && isPeriscopeOpen()) { closePeriscope(); return; }
   if (typing) {
     if (e.key === "Escape") target.blur();
     return;
