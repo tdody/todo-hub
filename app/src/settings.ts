@@ -1,6 +1,7 @@
 // The Settings page: the style TodoHub opens with, the sources the sweep reads (add, pause,
-// remove, check now), and when the sweep runs on its own. Choices are saved by the backend in
-// settings.json in the TodoHub folder and apply at once; nothing here can send anything.
+// remove, check now), when the sweep runs on its own, and the prompt that Start in periscope sends.
+// Choices are saved by the backend in settings.json in the TodoHub folder and apply at once; nothing
+// here can send anything.
 import { api, ApiError } from "./api";
 import type { AppSettings, Schedule, SettingsSource, Source, SourceState } from "./api";
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
@@ -71,6 +72,7 @@ export function settingsView(ctx: SettingsCtx): HTMLElement {
     ["appearance", "Appearance", () => appearance(ctx)],
     ["sources", "Sources", () => sources(data!, ctx)],
     ["schedule", "Schedule", () => scheduleSection(data!.schedule, ctx)],
+    ...(data.periscope.enabled ? [["periscope", "Periscope", () => periscopeSection(ctx)] as [string, string, () => HTMLElement]] : []),
   ];
   const toc = h("nav", { class: "set-toc", "aria-label": "Settings sections" },
     ...sections.map(([id, label]) => h("button", {
@@ -88,7 +90,7 @@ export function settingsView(ctx: SettingsCtx): HTMLElement {
 
 function sectionIcon(id: string): Node {
   if (id === "appearance") return themeIcon("system");     // not the sun: that's Today
-  return h("span", { class: "set-ico", "aria-hidden": "true" }, id === "sources" ? "⇄" : "◷");
+  return h("span", { class: "set-ico", "aria-hidden": "true" }, id === "sources" ? "⇄" : id === "periscope" ? "↗" : "◷");
 }
 
 function card(id: string, title: string, hint: string, right: Node | "", ...body: (Node | string)[]): HTMLElement {
@@ -289,4 +291,21 @@ function scheduleSection(s: Schedule, ctx: SettingsCtx): HTMLElement {
           h("span", {}, h("i", { class: "set-cell on" }), "sweep"),
           s.wrapup_hour !== null ? h("span", {}, h("i", { class: "set-cell wrap" }), "with wrap-up") : ""))),
     ...notes.map((n) => h("p", { class: "set-sub set-note" }, n)));
+}
+
+// ---- periscope ----------------------------------------------------------------------------------
+function periscopeSection(ctx: SettingsCtx): HTMLElement {
+  const p = data!.periscope;
+  const box = h("textarea", { class: "set-input set-prompt", rows: 4, value: p.prompt, "aria-label": "Prompt" });
+  const saveBtn = h("button", {
+    type: "button", class: "ghost small-btn", disabled: busy === "periscope",
+    onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompt(box.value), "Prompt saved"),
+  }, busy === "periscope" ? "Saving…" : "Save");
+  const reset = p.prompt !== p.default_prompt ? h("button", {
+    type: "button", class: "link-btn small",
+    onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompt(""), "Prompt back to the default"),
+  }, "Reset to default") : "";
+  return card("periscope", "Periscope",
+    "Start in periscope (⋯ or p on an issue) sends this prompt to the new Claude. {identifier}, {title} and {url} become the issue's.",
+    "", box, h("div", { class: "set-row-inline" }, saveBtn, reset));
 }

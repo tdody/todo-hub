@@ -161,3 +161,9 @@ def test_client_labels_of_returns_the_ones_in_the_client_group():
     issue = make_issue("ENG-1", "Rebin Globex grades", client="Globex")
     assert [l["id"] for l in client_labels_of(issue, "client")] == ["l-Globex"]
     assert client_labels_of(make_issue("ENG-2", "Fix the copy"), "client") == []
+
+
+def test_issues_carry_linears_branch_name():
+    from todohub.linear import ISSUE_FIELDS
+
+    assert "branchName" in ISSUE_FIELDS.split()

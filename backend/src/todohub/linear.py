@@ -13,7 +13,7 @@ from .config import Settings
 API_URL = "https://api.linear.app/graphql"
 
 ISSUE_FIELDS = """
-    id identifier title url priority dueDate createdAt updatedAt completedAt canceledAt
+    id identifier title url branchName priority dueDate createdAt updatedAt completedAt canceledAt
     state { id name type }
     project { id name }
     parent { id identifier title }
