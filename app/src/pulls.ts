@@ -178,7 +178,7 @@ const groupName = (g: Group) => g?.name ?? "No client or project";
 /** The client's logo, the project's initial, or "–", as in Client and Dev. */
 const groupMark = (g: Group) => (g?.kind === "client" ? clientLogo(g.name)
   : h("span", { class: "ll-initial", "aria-hidden": "true" }, g ? g.name.slice(0, 1).toUpperCase() : "–"));
-/** The Client / project cell. ``named`` false leaves it empty, under a row that names the same group. */
+/** The Client / project cell. ``named`` false leaves it empty, under a row in the same group. */
 const groupCell = (g: Group, named = true) => h("td", { class: "grp" },
   named && h("span", { class: `gi${g ? "" : " none"}`, title: groupName(g) }, groupMark(g), h("span", {}, groupName(g))));
 
@@ -222,7 +222,8 @@ const STEP_COL: Col = { id: "step", label: "Next step", first: 1, cls: "c-st", u
 const COLS: Col[] = [
   { id: "number", label: "#", key: (p) => p.number, first: -1, cls: "c-num", unit: "min", tip: "Pull request number" },
   { id: "title", label: "Pull request", key: (p) => p.title.toLowerCase(), first: 1, unit: "base" },
-  // name order, No client or project last; a stack sorts by its base's group
+  // name order, No client or project last; a stack sorts by its base's group. The exact key after
+  // the name keeps a client and a project with the same name apart.
   { id: "group", label: "Client / project", first: 1, cls: "c-grp", unit: "base",
     key: (p) => { const g = groupOf(p); return `${g ? 0 : 1}${groupName(g).toLowerCase()}\u0000${groupKey(g)}`; } },
   STEP_COL,
@@ -249,9 +250,8 @@ function units(shown: PullRequest[]): Unit[] {
     seen.get(id)!.shown.add(p);
   }
   const value = (u: Unit, c: Col) => {
-    const ks = u.all.map(c.key);
-    if (c.unit === "base" || typeof ks[0] === "string") return ks[0];
-    const ns = ks as number[];
+    if (c.unit === "base") return c.key(u.all[0]);
+    const ns = u.all.map(c.key) as number[];
     return c.unit === "min" ? Math.min(...ns) : c.unit === "max" ? Math.max(...ns) : ns.reduce((a, b) => a + b, 0);
   };
   const cmp = (x: number | string, y: number | string) => (x < y ? -1 : x > y ? 1 : 0);
@@ -511,22 +511,23 @@ function strip(base: PullRequest[], have: boolean): HTMLElement {
 }
 
 /** The rows of the units, each with its Client / project cell when the column shows. Sorted by that
- *  column, a cell names its group only when the row above is in another one, and a darker line
- *  starts each group. */
+ *  column, a darker line starts each group, and a cell names its group on the group's first row and
+ *  where the row above is in another one. */
 function bodyRows(us: Unit[]): HTMLElement[] {
-  const withGroup = showsGroup(), runs = sortCol().id === "group";
+  const withGroup = showsGroup(), sortedByGroup = sortCol().id === "group";
   const out: HTMLElement[] = [];
   let rowAbove: string | null = null, unitAbove: string | null = null;
   const cell = (g: Group) => {
     if (!withGroup) return undefined;
-    const k = groupKey(g), named = !runs || k !== rowAbove;
+    const k = groupKey(g), named = !sortedByGroup || k !== rowAbove;
     rowAbove = k;
     return groupCell(g, named);
   };
   for (const u of us) {
     const g = groupOf(u.all[0]), k = groupKey(g);
+    if (k !== unitAbove) rowAbove = null;
     const first = u.all.length > 1 ? [stackRow(u, cell(g))] : prRow(u.all[0], u, cell(g));
-    if (runs && unitAbove !== null && k !== unitAbove) first[0].classList.add("run");
+    if (sortedByGroup && unitAbove !== null && k !== unitAbove) first[0].classList.add("grp-start");
     unitAbove = k;
     out.push(...first);
     if (u.all.length > 1 && !isFolded(u)) for (const p of u.all) out.push(...prRow(p, u, cell(groupOf(p))));
