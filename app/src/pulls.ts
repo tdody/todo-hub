@@ -56,7 +56,7 @@ const st = {
   open: new Set<string>(),
   foldedStacks: new Set<string>(),      // stacks that show only their summary row
   grouped: loadPref(GROUPS_PREF) === "on",  // Mine: one section for each client or project
-  foldedSections: new Set<string>(),      // sections that show only their heading, by groupKey
+  foldedSections: new Set<string>(),    // sections that show only their heading, by groupKey
   sel: null as string | null,
   filter: "",
   fold: false,                          // drafts in no stack
