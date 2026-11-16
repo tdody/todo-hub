@@ -767,7 +767,7 @@ export interface PeriscopeOptions {
 
 export interface PeriscopeStart {
   mode: "spawned" | "existing";                 // existing: a Claude was already on the branch
-  pid: string | null;
+  pid: string;                                  // periscope always gives the pane's id
 }
 ```
 
@@ -897,9 +897,8 @@ async function start(i: Issue) {
   try {
     const r = await api.startInPeriscope(i.id, { repo: p.repo, branch: p.branch.trim(), prompt: p.prompt });
     if (open === p) closePeriscope();
-    const pid = r.pid;
     ctx.toast(r.mode === "existing" ? `${i.identifier} is already open in periscope` : `Started ${i.identifier} in periscope`,
-      pid ? { label: "Show", run: () => void showPane(pid) } : undefined);
+      { label: "Show", run: () => void showPane(r.pid) });
   } catch (e) {
     p.starting = false;
     if (open === p) ctx.render();
@@ -1254,11 +1253,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 In the `settings.json` row, change "sources added, paused or removed; the schedule; the Daylight place." to "sources added, paused or removed; the schedule; the Daylight place; the periscope prompt."
 
 - [ ] **Step 3: Spec.** Make the spec match the code:
-  - In "Changes" → `periscope.py`, replace the three bullets `catalog(settings, transport=None)…`, `start(settings, …)…` and `select(settings, pid, transport=None)…` with one bullet: "`Periscope(url, transport=None)`, shaped like `Linear`: `catalog()`, `start(...)` and `select(pid)`. The timeout is 120 s, because a start runs `git fetch` and makes the worktree (up to about 90 s on a large repo), then waits about 10 s for Claude's screen. A timeout gives "Periscope didn't answer in 120 s.""
+  - In "Changes" → `periscope.py`, replace the three bullets `catalog(settings, transport=None)…`, `start(settings, …)…` and `select(settings, pid, transport=None)…` with one bullet: "`Periscope(url, transport=None)`, shaped like `Linear`: `catalog()`, `start(...)` and `select(pid)`. `catalog()` and `select()` wait 15 s. `start()` waits 120 s, because a start runs `git fetch` and makes the worktree (up to about 90 s on a large repo), then waits about 10 s for Claude's screen. A timeout gives "Periscope didn't answer in 15 s." or "… in 120 s.""
   - In "Changes" → `api.py`, change `worktree_exists` to `branch_worktrees` (the repos with a worktree already on the branch; the popover shows the hint when the selected repo is one of them).
   - In "Tests", change "`worktree_exists`" to "`branch_worktrees`".
   - In "Changes", replace the `app/src/main.ts` bullet list with: "**New `app/src/periscope.ts`**: the menu item, the popover, Start and Show, set up from `main.ts` like `pane.ts`. **`app/src/main.ts`**: the menu item in `issuePane` and `stageBody`, the setup, outside click, Esc and the shortcuts sheet. **`app/src/pane.ts`**: `p` in `PANE_KEYS`."
-  - In the Errors table, add a row: "Periscope does not answer within 120 s | "Periscope didn't answer in 120 s.""
+  - In the Errors table, add a row: "Periscope does not answer in time (15 s; 120 s for a start) | "Periscope didn't answer in 15 s." (or 120 s)". Add a row: "The branch is blank | "The branch is empty" (400). The popover's **Start** is already disabled then."
+  - In "Changes" → `config.py`, the Settings page writes the prompt to `settings.json` as `{"periscope": {"prompt": …}}`, like `daylight`, not as a key `periscope_prompt`.
+  - In "Changes" → `api.py`, **Show** runs the select and `open -b` in one `periscope_call`, so a failure of either becomes one error toast.
 
 - [ ] **Step 4: Commit**
 
@@ -1283,7 +1284,7 @@ Expected: all tests pass; the build has no errors.
 
 ```bash
 python3 - <<'EOF'
-import json, time
+import json, os, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 CAT = {"repos": [{"repo": "/dev/api", "label": "api", "default_branch": "main", "branches": []}], "worktrees": [], "roots": []}
 class H(BaseHTTPRequestHandler):
@@ -1296,7 +1297,7 @@ class H(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         print(self.path, body, flush=True)
         if self.path == "/api/linear/start":
-            time.sleep(2)
+            time.sleep(float(os.environ.get("STUB_START_S", "2")))
             return self._send(200, {"mode": "spawned", "pid": "stub", "path": "/tmp/x", "reused": False})
         self._send(200, {"ok": True})
 HTTPServer(("127.0.0.1", 17376), H).serve_forever()
@@ -1310,6 +1311,7 @@ Ask the user before the next part: it edits their real `config.toml`. Add `peris
 3. Press **Esc**: the popover closes. Press **p**, then click outside: it closes.
 4. Press **p**, then **↵**: **Start** shows "Starting…" for about 2 s; then the toast "Started ENG-… in periscope" with **Show**. The stub prints the `/api/linear/start` body with the issue's ticket and title.
 5. Click **Show**: the stub prints `/api/select {'pid': 'stub'}`. (`open -b` brings the real Periscope app forward if it runs.)
+5b. A slow start: stop the stub, start it again with `STUB_START_S=100` in front of `python3`, press **p**, then **↵**. **Start** shows "Starting…" for about 100 s, then the success toast appears. This checks that the webview's `fetch` waits as long as the backend's 120 s. If an error toast appears near 60 s instead, stop and report it: the webview gives up first.
 6. Today: the same item is first in **⋯**, and **p** works. With the focus on **Start**, press **m**: the issue does not move.
 7. Stop the stub, press **p**: the error toast says "Periscope is not running at 127.0.0.1:17376."
 8. Settings → Periscope: change the prompt, **Save**, reopen the popover: it uses the new text. **Reset to default** restores it.
