@@ -69,35 +69,36 @@ function openEdit(key: string, text: string) {
 }
 
 interface PaneSnapshot {
-  edit: string | null; start: number | null; end: number | null; tick: string | null; ident: string | null; scroll: number;
+  edit: string | null; start: number | null; end: number | null; focus: string | null; ident: string | null; scroll: number;
 }
 
-// The sub-issue tick box that had the focus when a re-render rebuilt it disabled (its save in
-// flight): the first re-render that shows it enabled gives it the focus back, unless you moved on.
-let tickToRefocus: string | null = null;
+// A control with data-focus (a sub-issue tick box, the periscope popover's select and buttons) keeps
+// the focus across a re-render. One rebuilt disabled (its save or start in flight) gets it back from
+// the first re-render that shows it enabled, unless you moved on.
+let focusToRestore: string | null = null;
 
-/** Before a re-render: the pane field holding the cursor or the tick box with the focus, and how far
- *  the reading pane is scrolled. */
+/** Before a re-render: the pane field holding the cursor or the data-focus control with the focus,
+ *  and how far the reading pane is scrolled. */
 function snapshotPane(): PaneSnapshot {
   const a = document.activeElement as HTMLInputElement | null;
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
   const edit = a?.dataset?.edit ?? null;
-  const tick = a?.dataset?.tick ?? (!a || a === document.body ? tickToRefocus : null);
-  return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null, tick,
+  const focus = a?.dataset?.focus ?? (!a || a === document.body ? focusToRestore : null);
+  return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null, focus,
     ident: pane?.getAttribute("aria-label") ?? null, scroll: pane?.scrollTop ?? 0 };
 }
 
-/** After a re-render: the same field gets the cursor back, the same tick box the focus, and the same
- *  issue's pane its scroll. */
+/** After a re-render: the same field gets the cursor back, the same data-focus control the focus,
+ *  and the same issue's pane its scroll. */
 function restorePane(k: PaneSnapshot) {
   document.querySelectorAll<HTMLTextAreaElement>(".desc-input, .pane-title-input").forEach(fitHeight);
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
   if (pane && k.ident && pane.getAttribute("aria-label") === k.ident) pane.scrollTop = k.scroll;
-  tickToRefocus = null;
-  if (k.tick) {
-    const box = document.querySelector<HTMLInputElement>(`[data-tick="${CSS.escape(k.tick)}"]`);
-    if (box?.disabled) tickToRefocus = k.tick;
-    else box?.focus({ preventScroll: true });
+  focusToRestore = null;
+  if (k.focus) {
+    const control = document.querySelector<HTMLElement>(`[data-focus="${CSS.escape(k.focus)}"]`);
+    if (control?.matches(":disabled")) focusToRestore = k.focus;
+    else control?.focus({ preventScroll: true });
   }
   if (!k.edit) return;
   const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-edit="${CSS.escape(k.edit)}"]`);
@@ -324,7 +325,7 @@ function subIssuesSection(i: IssuePreview): HTMLElement {
       return h("li", { class: open ? "" : "closed" },
         s.own_team && (open || done)
           ? h("input", { type: "checkbox", checked: done, disabled: ctx.state.busy.has(`${s.id}:tick`), title: done ? "Reopen" : "Mark done",
-              "aria-label": `${done ? "Reopen" : "Mark done"}: ${s.identifier}`, "data-tick": s.id,
+              "aria-label": `${done ? "Reopen" : "Mark done"}: ${s.identifier}`, "data-focus": s.id,
               onchange: () => void tickSubIssue(i, s) })
           : h("span", { class: "sub-gap", "aria-hidden": "true" }),
         link(s.identifier, s.url, "ident"),
