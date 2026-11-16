@@ -937,13 +937,14 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.get("/api/pulls/weekly", dependencies=auth)
     def pull_weeks(refresh: bool = False) -> dict:
-        """Pull requests merged and reviewed per week (see pulls.weekly), for Insights. Cached for 15 minutes."""
+        """Pull requests merged (with their lines) and reviewed per week (see pulls.weekly), for Insights.
+        Cached for 15 minutes."""
         if refresh or not pull_week_cache["data"] or time.time() - pull_week_cache["at"] > 15 * 60:
             try:
-                weeks = pulls.weekly(settings, _env())
+                weekly = pulls.weekly(settings, _env())
             except SourceError as exc:
-                return {"weeks": [], "error": str(exc)}
-            pull_week_cache.update(at=time.time(), data={"weeks": weeks, "error": None})
+                return {"weeks": [], "lines": None, "last_lines": None, "error": str(exc)}
+            pull_week_cache.update(at=time.time(), data={**weekly, "error": None})
         return pull_week_cache["data"]
 
     def pulls_payload() -> dict:

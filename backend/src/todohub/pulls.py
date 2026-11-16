@@ -2,7 +2,7 @@
 
 - mine: the open pull requests you opened.
 - review: the open pull requests that ask for your review.
-- weekly: for Insights, how many pull requests you merged and reviewed each week.
+- weekly: for Insights, the pull requests you merged and reviewed each week, and the lines merged this week and last.
 
 Everything is GitHub data; nothing is written by Claude. Comments, reviews and review requests
 from bots are left out.
@@ -113,9 +113,10 @@ def updated(d: dict, repo: str, number: int, pr: dict | None) -> dict:
     return out
 
 
-def weekly(settings: Settings, env: dict | None = None, weeks: int = 8, today: date | None = None) -> list[dict]:
+def weekly(settings: Settings, env: dict | None = None, weeks: int = 8, today: date | None = None) -> dict:
     """Per week, Monday to Sunday (ET): your pull requests that GitHub merged (into any branch), and the
-    pull requests of others you reviewed (each counts once a week). Raises sources.SourceError."""
+    pull requests of others you reviewed (each counts once a week). Also the lines added and removed by
+    the ones merged this week and last week. Raises sources.SourceError."""
     starts = stats.week_starts(weeks, today)
 
     def midnight(d: date) -> datetime:
@@ -125,7 +126,14 @@ def weekly(settings: Settings, env: dict | None = None, weeks: int = 8, today: d
         end = midnight(d + timedelta(days=7)) - timedelta(seconds=1)
         return f"is:pr author:@me is:merged merged:{midnight(d).isoformat()}..{end.isoformat()}"
 
-    counts = "\n".join(f'w{i}: search(query: "{merged(d)}", type: ISSUE, first: 0) {{ issueCount }}' for i, d in enumerate(starts))
+    def search(i: int, d: date) -> str:
+        # Lines only for the last two weeks: a query that reads them for all 8 passes GitHub's
+        # 10-second limit about half the time.
+        if i < len(starts) - 2:
+            return f'w{i}: search(query: "{merged(d)}", type: ISSUE, first: 0) {{ issueCount }}'
+        return f'w{i}: search(query: "{merged(d)}", type: ISSUE, first: 100) {{ issueCount nodes {{ ... on PullRequest {{ additions deletions }} }} }}'
+
+    counts = "\n".join(search(i, d) for i, d in enumerate(starts))
     query = f"""{{
       viewer {{ login }}
       {counts}
@@ -138,8 +146,13 @@ def weekly(settings: Settings, env: dict | None = None, weeks: int = 8, today: d
     reviewed = {(stats.week_start(stats.local_date(r["submittedAt"])), pr["repository"]["nameWithOwner"], pr["number"])
                 for pr in data["reviewed"]["nodes"] if pr
                 for r in _nodes(pr, "reviews") if (r.get("author") or {}).get("login") == me and r.get("submittedAt")}
-    return [{"week": d.isoformat(), "merged": data[f"w{i}"]["issueCount"], "reviewed": sum(w == d for w, _, _ in reviewed)}
-            for i, d in enumerate(starts)]
+    def lines(found: dict) -> dict:
+        prs = [pr for pr in found["nodes"] if pr]
+        return {"additions": sum(pr["additions"] for pr in prs), "deletions": sum(pr["deletions"] for pr in prs)}
+
+    return {"weeks": [{"week": d.isoformat(), "merged": data[f"w{i}"]["issueCount"], "reviewed": sum(w == d for w, _, _ in reviewed)}
+                      for i, d in enumerate(starts)],
+            "lines": lines(data[f"w{len(starts) - 1}"]), "last_lines": lines(data[f"w{len(starts) - 2}"])}
 
 
 def _link_stacks(mine: list[dict]) -> list[dict]:
