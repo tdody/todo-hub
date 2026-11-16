@@ -475,8 +475,9 @@ async function postComment(i: IssuePreview) {
   }
 }
 
-/** e, ⇧E, ⇧S and ⇧C in Today, Client and Dev: rename, edit the description, add a sub-issue, comment. */
-const PANE_KEYS: Record<string, string> = { e: "title", E: "description", S: "sub", C: "comment" };
+/** e, ⇧E, ⇧S, ⇧C and p in Today, Client and Dev: rename, edit the description, add a sub-issue,
+ *  comment, start in periscope. */
+const PANE_KEYS: Record<string, string> = { e: "title", E: "description", S: "sub", C: "comment", p: "periscope" };
 
 export function paneKey(key: string): boolean {
   const target = PANE_KEYS[key];
