@@ -138,16 +138,24 @@ def test_periscope_prompt_from_the_settings_page():
     assert load_settings().periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
 
 
-def test_periscope_url_from_config_toml(tmp_home):
-    assert load_settings().periscope_url == "http://127.0.0.1:17374"
+def test_periscope_is_off_by_default():
+    s = load_settings()
+    assert s.periscope_url == "" and s.periscope_app_id == "" and not s.periscope_on
+
+
+def test_periscope_url_and_app_id_from_config_toml(tmp_home):
+    load_settings()   # writes the default config.toml
     cfg = tmp_home / "config.toml"
-    cfg.write_text(cfg.read_text().replace("[app]\n", '[app]\nperiscope_url = "http://127.0.0.1:17375"\n'))
-    assert load_settings().periscope_url == "http://127.0.0.1:17375"
+    cfg.write_text(cfg.read_text().replace(
+        "[app]\n", '[app]\nperiscope_url = "http://127.0.0.1:17375"\nperiscope_app_id = "com.example.periscope"\n'))
+    s = load_settings()
+    assert s.periscope_url == "http://127.0.0.1:17375" and s.periscope_on
+    assert s.periscope_app_id == "com.example.periscope"
 
 
 def test_settings_api_periscope_prompt():
     client, _, _ = client_for()
-    default = {"prompt": config.DEFAULT_PERISCOPE_PROMPT, "default_prompt": config.DEFAULT_PERISCOPE_PROMPT}
+    default = {"enabled": False, "prompt": config.DEFAULT_PERISCOPE_PROMPT, "default_prompt": config.DEFAULT_PERISCOPE_PROMPT}
     assert client.get("/api/settings").json()["periscope"] == default
     r = client.put("/api/settings/periscope", json={"prompt": "Read {identifier}."})
     assert r.status_code == 200 and r.json()["periscope"]["prompt"] == "Read {identifier}."

@@ -10,7 +10,6 @@ import httpx
 
 from .db import DB
 
-BUNDLE_ID = "com.tom.periscope.app"
 REPOS_KEY = "periscope_repos"            # meta: {"project:<name>" or "client:<label>": repo path}
 LAST_REPO_KEY = "periscope_last_repo"    # meta: the repo last picked for any issue
 QUICK_SECONDS = 15
@@ -64,9 +63,9 @@ class Periscope:
         self._call("POST", "/api/select", {"pid": pid})
 
 
-def bring_to_front() -> None:
+def bring_to_front(app_id: str) -> None:
     try:
-        subprocess.run(["open", "-b", BUNDLE_ID], check=True, capture_output=True, timeout=10)
+        subprocess.run(["open", "-b", app_id], check=True, capture_output=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         raise PeriscopeError("Could not bring Periscope to the front.") from None
 

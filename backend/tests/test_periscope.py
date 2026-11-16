@@ -15,6 +15,7 @@ from todohub.periscope import (LAST_REPO_KEY, REPOS_KEY, Periscope, PeriscopeErr
 from conftest import FakeLinear
 
 URL = "http://127.0.0.1:17374"
+APP_ID = "com.example.periscope"
 CATALOG = {
     "repos": [{"repo": "/dev/api", "label": "api", "default_branch": "main", "branches": []},
               {"repo": "/dev/web", "label": "web", "default_branch": "main", "branches": []}],
@@ -118,11 +119,11 @@ def test_default_repo_skips_a_repo_periscope_no_longer_lists():
     assert default_repo(db, {"project": "Pipelines", "client": None}, ["/dev/api"]) == (None, "")
 
 
-def test_bring_to_front_opens_the_app_by_bundle_id(monkeypatch):
+def test_bring_to_front_opens_the_app_by_its_id(monkeypatch):
     ran = []
     monkeypatch.setattr(periscope.subprocess, "run", lambda args, **kw: ran.append(args))
-    periscope.bring_to_front()
-    assert ran == [["open", "-b", "com.tom.periscope.app"]]
+    periscope.bring_to_front(APP_ID)
+    assert ran == [["open", "-b", APP_ID]]
 
 
 def test_bring_to_front_failure(monkeypatch):
@@ -131,20 +132,27 @@ def test_bring_to_front_failure(monkeypatch):
 
     monkeypatch.setattr(periscope.subprocess, "run", fail)
     with pytest.raises(PeriscopeError, match="Could not bring Periscope to the front."):
-        periscope.bring_to_front()
+        periscope.bring_to_front(APP_ID)
 
 
 START = {"repo": "/dev/api", "branch": " me/eng-1 ", "prompt": "Read ENG-1."}
 
 
+def settings_on(app_id=APP_ID):
+    settings = load_settings()
+    settings.periscope_url = URL
+    settings.periscope_app_id = app_id
+    return settings
+
+
 @pytest.fixture
 def env(peri):
-    settings = load_settings()
+    settings = settings_on()
     db = DB(settings.db_path)
     fronted = []
     app = create_app(settings, db, linear_factory=FakeLinear,
                      periscope_factory=lambda: Periscope(URL, transport=peri.transport),
-                     front_fn=lambda: fronted.append(True))
+                     front_fn=fronted.append)
     return TestClient(app), db, fronted
 
 
@@ -203,7 +211,7 @@ def test_options_when_periscope_is_not_running():
     def refuse(request):
         raise httpx.ConnectError("refused")
 
-    settings = load_settings()
+    settings = settings_on()
     app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
                      periscope_factory=lambda: Periscope(URL, transport=httpx.MockTransport(refuse)))
     r = TestClient(app).get("/api/issues/id-ENG-1/periscope")
@@ -213,7 +221,45 @@ def test_options_when_periscope_is_not_running():
 def test_show_selects_the_pane_then_brings_periscope_forward(env, peri):
     client, _, fronted = env
     assert client.post("/api/periscope/show", json={"pid": "k"}).json() == {"ok": True}
-    assert peri.calls[-1] == ("POST", "/api/select", {"pid": "k"}) and fronted == [True]
+    assert peri.calls[-1] == ("POST", "/api/select", {"pid": "k"}) and fronted == [APP_ID]
+
+
+def test_show_without_an_app_id_only_selects_the_pane(peri):
+    settings = settings_on(app_id="")
+    fronted = []
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=peri.transport), front_fn=fronted.append)
+    assert TestClient(app).post("/api/periscope/show", json={"pid": "k"}).json() == {"ok": True}
+    assert peri.calls[-1] == ("POST", "/api/select", {"pid": "k"}) and fronted == []
+
+
+def test_show_with_an_app_id_opens_the_app(peri, monkeypatch):
+    ran = []
+    monkeypatch.setattr(periscope.subprocess, "run", lambda args, **kw: ran.append(args))
+    settings = settings_on()
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=peri.transport))
+    assert TestClient(app).post("/api/periscope/show", json={"pid": "k"}).json() == {"ok": True}
+    assert ran == [["open", "-b", APP_ID]]
+
+
+def test_the_routes_answer_404_when_periscope_is_off(peri):
+    settings = load_settings()
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=peri.transport), front_fn=pytest.fail)
+    client = TestClient(app)
+    off = {"error": "Start in periscope is off. Set app.periscope_url in config.toml."}
+    for r in (client.get("/api/issues/id-ENG-1/periscope"),
+              client.post("/api/issues/id-ENG-1/periscope", json=START),
+              client.post("/api/periscope/show", json={"pid": "k"})):
+        assert r.status_code == 404 and r.json() == off
+    assert peri.calls == []
+
+
+def test_meta_says_whether_periscope_is_on(peri):
+    for settings, expected in ((load_settings(), False), (settings_on(), True)):
+        app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear)
+        assert TestClient(app).get("/api/meta").json()["periscope"] is expected
 
 
 def test_a_blank_branch_is_a_400_and_periscope_is_not_asked(env, peri):
@@ -224,10 +270,10 @@ def test_a_blank_branch_is_a_400_and_periscope_is_not_asked(env, peri):
 
 
 def test_show_when_periscope_cannot_be_brought_forward(peri):
-    def fail():
+    def fail(app_id):
         raise PeriscopeError("Could not bring Periscope to the front.")
 
-    settings = load_settings()
+    settings = settings_on()
     app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
                      periscope_factory=lambda: Periscope(URL, transport=peri.transport), front_fn=fail)
     r = TestClient(app).post("/api/periscope/show", json={"pid": "k"})
@@ -239,10 +285,10 @@ def test_show_when_periscope_is_not_running_does_not_bring_it_forward():
         raise httpx.ConnectError("refused")
 
     fronted = []
-    settings = load_settings()
+    settings = settings_on()
     app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
                      periscope_factory=lambda: Periscope(URL, transport=httpx.MockTransport(refuse)),
-                     front_fn=lambda: fronted.append(True))
+                     front_fn=fronted.append)
     r = TestClient(app).post("/api/periscope/show", json={"pid": "k"})
     assert r.status_code == 502 and r.json() == {"error": "Periscope is not running at 127.0.0.1:17374."}
     assert fronted == []

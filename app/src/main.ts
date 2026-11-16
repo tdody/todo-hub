@@ -2448,7 +2448,7 @@ function stageBody(i: Issue, onToday: boolean): Node[] {
   const more = h("details", { class: "drop-menu pane-menu" },
     h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
     h("div", { class: "menu" },
-      periscopeItem(i),
+      state.meta?.periscope ? periscopeItem(i) : "",
       onToday ? h("button", { type: "button", onclick: () => void toggleToday(i.id) }, "Remove from Today") : "",
       h("button", { type: "button", class: "menu-danger", onclick: (e: Event) => {
         (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
@@ -2731,7 +2731,7 @@ function issuePane(i: Issue): HTMLElement {
     h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
     h("div", { class: "menu" },
       link("Open in Linear ↗", i.url, "menu-link"),
-      periscopeItem(i),
+      state.meta?.periscope ? periscopeItem(i) : "",
       t ? h("button", { type: "button", onclick: () => void toggleToday(i.id) }, "Remove from Today") : "",
       h("button", { type: "button", class: "menu-danger", onclick: (e: Event) => {
         (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
@@ -3392,7 +3392,7 @@ function focusedCard(): HTMLElement | null {
 
 function showShortcuts() {
   modal("Keyboard shortcuts", h("table", { class: "stats" },
-    h("tbody", {}, ...SHORTCUTS.map(([k, v]) => h("tr", {}, h("td", {}, h("kbd", {}, k)), h("td", {}, v))))));
+    h("tbody", {}, ...SHORTCUTS.filter(([k]) => k !== "p" || state.meta?.periscope).map(([k, v]) => h("tr", {}, h("td", {}, h("kbd", {}, k)), h("td", {}, v))))));
 }
 
 // Swapping what's under the pointer before it's released would lose the click.

@@ -246,6 +246,7 @@ export interface Meta {
   sources: Source[];
   todo_state: string | null;      // the status a new or reopened sub-issue gets; null if the team has none
   done_state: string | null;      // the completed status Mark done and a ticked sub-issue get; null if the team has none
+  periscope: boolean;             // app.periscope_url is set: Start in periscope is on
 }
 
 export interface SourceStatus {
@@ -309,7 +310,7 @@ export interface AppSettings {
   sources: SettingsSource[];
   schedule: Schedule;
   daylight: { place: string; latitude: number | null; longitude: number | null };
-  periscope: { prompt: string; default_prompt: string };
+  periscope: { enabled: boolean; prompt: string; default_prompt: string };
 }
 
 /** Start in periscope: what the popover shows first. */
