@@ -19,7 +19,7 @@ In:
 
 Out:
 
-- The periscope side. It has its own spec in the periscope repo: `docs/superpowers/specs/2026-11-15-linear-start-design.md`. This spec gives only the contract that todo-hub uses (see "Periscope contract").
+- How periscope works inside. This spec gives only the HTTP contract that todo-hub uses (see "Periscope contract").
 - A menu label that changes to "Show in periscope" when a Claude is already on the branch. todo-hub would have to ask periscope each time a pane opens. The start already finds that Claude and offers **Show**.
 - The Inbox. Its cards are candidates, not Linear issues, and have no branch.
 - A browser fallback for **Show**. You use the Periscope app.
