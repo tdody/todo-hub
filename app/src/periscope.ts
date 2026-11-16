@@ -27,10 +27,13 @@ export function setupPeriscope(c: PeriscopeCtx) {
   ctx = c;
 }
 
-/** The popover is on the page. One the page no longer shows (another issue or tab) is forgotten. */
 export function isPeriscopeOpen(): boolean {
-  if (!document.querySelector(".pp-pop")) popover = null;
   return popover !== null;
+}
+
+/** A tab switch takes the popover off the page; the switch renders, so this does not. */
+export function forgetPeriscope() {
+  popover = null;
 }
 
 export function closePeriscope() {
@@ -87,7 +90,7 @@ async function start(i: Issue) {
   p.starting = true;
   ctx.render();
   try {
-    const r = await api.startInPeriscope(i.id, { repo: p.repo, branch: p.branch.trim(), prompt: p.prompt });
+    const r = await api.startInPeriscope(i.id, { repo: p.repo, branch: p.branch, prompt: p.prompt });
     if (popover === p) closePeriscope();
     ctx.toast(r.mode === "existing" ? `${i.identifier} is already open in periscope` : `Started ${i.identifier} in periscope`,
       { label: "Show", run: () => void api.showInPeriscope(r.pid).catch(ctx.fail) });
@@ -121,9 +124,10 @@ export function periscopePopover(i: Issue): HTMLElement | "" {
   // Typing does not re-render: Start and the branch's hint follow the fields here.
   const update = () => {
     startButton.disabled = !canStart(p);
-    branchHint.textContent = o.branch_worktrees.includes(p.repo) && p.branch.trim() === o.branch
+    const fromLinear = p.branch.trim() === o.branch;
+    branchHint.textContent = fromLinear && o.branch_worktrees.includes(p.repo)
       ? "A worktree is already on this branch."
-      : "From Linear. A new worktree, or the one already on this branch.";
+      : `${fromLinear ? "From Linear. " : ""}A new worktree, or the one already on this branch.`;
   };
   update();
   // Read-only, not disabled, while starting: the field keeps the focus and the cursor.
