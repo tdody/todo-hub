@@ -1597,8 +1597,8 @@ button.seg-n:not([aria-pressed="true"]):hover { text-decoration: underline; text
 .pr-table td.grp .avatar.sm .mark { border-radius: 5px; }
 /* sorted by Client / project: a darker line where the group changes. With collapsed borders the row
    above owns that line; the column must show (it folds below 1400px). */
-@media (min-width: 1401px) {
-  .pr-table tr:has(+ tr.run) > td:not(.rail) { border-bottom-color: color-mix(in srgb, var(--muted) 40%, var(--border)); }
+@media (width > 1400px) {
+  .pr-table tr:has(+ tr.grp-start) > td:not(.rail) { border-bottom-color: color-mix(in srgb, var(--muted) 40%, var(--border)); }
 }
 .pr-table td.st { overflow: hidden; text-overflow: ellipsis; }
 .pr-table td.r { text-align: right; }
