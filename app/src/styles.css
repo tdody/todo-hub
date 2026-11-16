@@ -1723,6 +1723,14 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
   .pr-table th.c-up { width: 80px; }
   .pr-table td.st, .pr-table td.ci, .pr-table td.cm, .pr-table td.up, .pr-table td.num { padding-left: 6px; padding-right: 6px; }
   .pr-table th button { padding: 6px; }
+  /* the header line: the "Group" label hides, Refresh all shows only its icon (its tooltip names it),
+     and the filter shrinks */
+  .pr-group-l, .page-right .pr-refresh > span:last-child { display: none; }
+  .prs .page-tabs { flex: none; }
+  .prs .page-right { min-width: 0; }
+  .prs .page-right .filter { flex: 0 1 220px; width: auto; min-width: 120px; }
+  .page-right .pr-refresh { align-self: stretch; }
+  .page-right .pr-refresh > .i { margin: 0; }
 }
 /* A narrow window collapses a column to zero width; its cells stay, so the open row's colspan still fits.
    Client / project folds first, below 1400px: at the default 1120px window the titles would get no room. */
@@ -1739,16 +1747,6 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
   .pr-table td.cm { padding: 0; visibility: hidden; overflow: hidden; }
 }
 @media (max-width: 860px) { .prs .dgrid { grid-template-columns: 1fr; } }
-/* below 1000px the header line has no room for everything: the "Group" label hides, Refresh all
-   shows only its icon (its tooltip names it), and the filter shrinks */
-@media (max-width: 1000px) {
-  .pr-group-l, .page-right .pr-refresh > span:last-child { display: none; }
-  .prs .page-tabs { flex: none; }
-  .prs .page-right { min-width: 0; }
-  .prs .page-right .filter { flex: 0 1 220px; width: auto; min-width: 120px; }
-  .page-right .pr-refresh { align-self: stretch; }
-  .page-right .pr-refresh > .i { margin: 0; }
-}
 @media (prefers-reduced-motion: reduce) { .pr-table td.x .i, .fold-b .i, .pr-table tr.sec-h .sec-b > .i { transition: none; } }
 
 /* Start in periscope: the popover under the reading pane's ⋯ row (Popover shadow, 12px corners). The
