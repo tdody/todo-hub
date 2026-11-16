@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-16-pulls-number-and-groups-design.md`.
 
-Review fixes changed Task 3's code after this plan was written (the darker line, the names under a stack member, the sort key, one sort value per unit). The code is the source of truth.
+Review fixes changed the code of Tasks 3 and 4 after this plan was written. Task 3: the darker line, the names under a stack member, the sort key, one sort value per unit. Task 4: the header line below 1000 px, the section class names (`sec-h`, `sec-b`), `foldedSections`, one sections list per paint. The code is the source of truth.
 
 **Worktree:** `/Users/thibaultdody/dev/worktrees/todo-hub/main`, branch `pulls-number-and-groups`. Run every command from there.
 
