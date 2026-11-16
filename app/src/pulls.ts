@@ -4,7 +4,8 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, ApiError } from "./api";
 import type { Issue, PullRequest, Pulls } from "./api";
-import { clientLogo } from "./avatars";
+import { groupMark } from "./avatars";
+import type { Group } from "./avatars";
 import { h, loadPref, pageHead, savePref, svg } from "./dom";
 
 export interface PullsCtx {
@@ -168,9 +169,9 @@ const linearRef = (ident: string) =>
   h("button", { class: "ref", "data-act": "lin", tabindex: "-1", title: `Open ${ident} in Linear` }, h("span", { class: "k" }, ident));
 
 // ---- groups: the client label, else the project, of the pull request's Linear issue ------------
-/** null is "No client or project": no Linear issue, or one that is not one of your open issues. */
-type Group = { kind: "client" | "project"; name: string } | null;
-/** The one way to ask which client or project a pull request belongs to. A stack's is its base's. */
+/** The one way to ask which client or project a pull request belongs to: null ("No client or
+ *  project") when it names no Linear issue, or one that is not one of your open issues. A stack's
+ *  is its base's. */
 function groupOf(p: PullRequest): Group {
   const issue = linearOf(p)?.issue;
   if (issue?.client) return { kind: "client", name: issue.client };
@@ -178,9 +179,6 @@ function groupOf(p: PullRequest): Group {
 }
 const groupKey = (g: Group) => (g ? `${g.kind}:${g.name}` : "none");
 const groupName = (g: Group) => g?.name ?? "No client or project";
-/** The client's logo, the project's initial, or "–", as in Client and Dev. */
-const groupMark = (g: Group) => (g?.kind === "client" ? clientLogo(g.name)
-  : h("span", { class: "ll-initial", "aria-hidden": "true" }, g ? g.name.slice(0, 1).toUpperCase() : "–"));
 /** The Client / project cell. ``named`` false leaves it empty, under a row in the same group. */
 const groupCell = (g: Group, named = true) => h("td", { class: "grp" },
   named && h("span", { class: `gi${g ? "" : " none"}`, title: groupName(g) }, groupMark(g), h("span", {}, groupName(g))));
@@ -225,7 +223,7 @@ const STEP_COL: Col = { id: "step", label: "Next step", first: 1, cls: "c-st", u
 const COLS: Col[] = [
   { id: "number", label: "#", key: (p) => p.number, first: -1, cls: "c-num", unit: "min", tip: "Pull request number" },
   { id: "title", label: "Pull request", key: (p) => p.title.toLowerCase(), first: 1, unit: "base" },
-  // name order, No client or project last; a stack sorts by its base's group. The exact key after
+  // name order (No client or project last from A to Z); a stack sorts by its base's group. The exact key after
   // the name keeps a client and a project with the same name apart.
   { id: "group", label: "Client / project", first: 1, cls: "c-grp", unit: "base",
     key: (p) => { const g = groupOf(p); return `${g ? 0 : 1}${groupName(g).toLowerCase()}\u0000${groupKey(g)}`; } },
@@ -288,7 +286,8 @@ function stepCell(p: PullRequest): Node {
 }
 
 /** "#2374": a muted "#", then the number. */
-const numCell = (n: number, cls = "num") => h("td", { class: cls }, h("span", { class: "hash" }, "#"), String(n));
+const numCell = (n: number, extra?: string) =>
+  h("td", { class: extra ? `num ${extra}` : "num" }, h("span", { class: "hash" }, "#"), String(n));
 
 function stagePill(stage: PullRequest["stage"]): HTMLElement {
   return h("span", { class: `pill ${STAGE[stage][1]}` }, h("span", { class: "pdot" }), STAGE[stage][0]);
@@ -309,7 +308,8 @@ function metaLine(p: PullRequest, u: Unit): HTMLElement {
   const lin = linearOf(p);
   if (lin) rest.push(linearRef(lin.ident));
   // a stack sits in its base's section, so a member in another client or project names it
-  if (isGrouped() && u.all.length > 1 && groupKey(groupOf(p)) !== groupKey(groupOf(u.all[0]))) rest.push(groupName(groupOf(p)));
+  const own = groupOf(p);
+  if (isGrouped() && u.all.length > 1 && groupKey(own) !== groupKey(groupOf(u.all[0]))) rest.push(groupName(own));
   if (u.all.length > 1) rest.push(`${u.all.indexOf(p) + 1} of ${u.all.length}`);
   return h("span", { class: "m" }, keep, ...rest.map((b) => h("span", { class: "b" }, b)));
 }
@@ -329,8 +329,8 @@ function rail(u: Unit, p: PullRequest, detail = false): HTMLElement {
 
 /** A stack's first row: it shows the value the table sorts the stack by. A click folds or unfolds the stack. */
 function stackRow(u: Unit, grp?: HTMLElement): HTMLElement {
-  const ms = u.all, step = STEP_COL, folded = isFolded(u);
-  const top = ms.reduce((a, b) => (step.key(b) < step.key(a) ? b : a));
+  const ms = u.all, folded = isFolded(u);
+  const top = ms.reduce((a, b) => (STEP_COL.key(b) < STEP_COL.key(a) ? b : a));
   const s = stepOf(top);
   const fail = ms.filter((p) => p.ci.state === "failing").length, run = ms.filter((p) => p.ci.state === "running").length;
   const ci = fail ? h("span", { class: "no" }, icon("no"), `${plural(fail, "PR")} failing`)
@@ -342,7 +342,7 @@ function stackRow(u: Unit, grp?: HTMLElement): HTMLElement {
     h("td", { class: "rail", "aria-hidden": "true", title: folded ? "Unfold the stack" : "Fold the stack" },
       h("span", { class: "knot head" }, folded && String(ms.length)), !folded && h("span", { class: "ln dn" })),
     h("td", { class: "x" }, icon("rt")),
-    numCell(Math.min(...ms.map((p) => p.number)), "num mute"),
+    numCell(Math.min(...ms.map((p) => p.number)), "mute"),
     h("td", { class: "t" }, h("button", { class: "sk", "aria-expanded": String(!folded) }, `Stack of ${ms.length}`),
       h("span", { class: "m" }, h("span", { class: "b" }, ms[0].repo.split("/")[1]),
         h("span", { class: "b" }, `merge order ${ms.map((p) => `#${p.number}`).join(" → ")}`))),
@@ -531,19 +531,19 @@ function strip(base: PullRequest[], have: boolean): HTMLElement {
 function bodyRows(us: Unit[]): HTMLElement[] {
   const withGroup = showsGroup(), sortedByGroup = sortCol().id === "group";
   const out: HTMLElement[] = [];
-  let rowAbove: string | null = null, unitAbove: string | null = null;
+  let rowGroupAbove: string | null = null, unitGroupAbove: string | null = null;
   const cell = (g: Group) => {
     if (!withGroup) return undefined;
-    const k = groupKey(g), named = !sortedByGroup || k !== rowAbove;
-    rowAbove = k;
+    const k = groupKey(g), named = !sortedByGroup || k !== rowGroupAbove;
+    rowGroupAbove = k;
     return groupCell(g, named);
   };
   for (const u of us) {
     const g = groupOf(u.all[0]), k = groupKey(g);
-    if (k !== unitAbove) rowAbove = null;
+    if (k !== unitGroupAbove) rowGroupAbove = null;
     const first = u.all.length > 1 ? [stackRow(u, cell(g))] : prRow(u.all[0], u, cell(g));
-    if (sortedByGroup && unitAbove !== null && k !== unitAbove) first[0].classList.add("grp-start");
-    unitAbove = k;
+    if (sortedByGroup && unitGroupAbove !== null && k !== unitGroupAbove) first[0].classList.add("grp-start");
+    unitGroupAbove = k;
     out.push(...first);
     if (u.all.length > 1 && !isFolded(u)) for (const p of u.all) out.push(...prRow(p, u, cell(groupOf(p))));
   }

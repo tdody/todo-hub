@@ -108,6 +108,14 @@ export function clientLogo(client: string): HTMLElement {
   return h("span", { class: "avatar sm", title: client }, clientMark(client, "sm"));
 }
 
+/** A client or a project; null is none ("No project", "No client or project"). */
+export type Group = { kind: "client" | "project"; name: string } | null;
+/** A group's mark in group headings and lists: the client's logo, the project's initial, or "–". */
+export function groupMark(g: Group): HTMLElement {
+  return g?.kind === "client" ? clientLogo(g.name)
+    : h("span", { class: "ll-initial", "aria-hidden": "true" }, g ? g.name.slice(0, 1).toUpperCase() : "–");
+}
+
 /** The icon for a task: client logo + type badge, or the type icon alone. */
 export function taskAvatar(client: string | null | undefined, category: string | null | undefined,
                            size: "lg" | "sm" = "lg"): HTMLElement {

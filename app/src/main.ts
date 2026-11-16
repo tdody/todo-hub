@@ -9,7 +9,7 @@ import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIc
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
 import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";
-import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, taskAvatar } from "./avatars";
+import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, groupMark, taskAvatar } from "./avatars";
 import type { Category } from "./avatars";
 import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues";
 import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
@@ -2804,8 +2804,7 @@ function listView(kind: "client" | "dev"): HTMLElement {
   const sections = names.map((name) => {
     const list = groups.get(name)!.sort(sortIssues);
     const all = list.flatMap((i) => [i, ...(children.get(i.id) ?? [])]);
-    const lead = kind === "client" && name !== "No project" ? clientLogo(name)
-      : h("span", { class: "ll-initial", "aria-hidden": "true" }, name === "No project" ? "–" : name.slice(0, 1).toUpperCase());
+    const lead = groupMark(name === "No project" ? null : { kind: kind === "client" ? "client" : "project", name });
     return h("section", { class: "ll-group" },
       groupHead(name, lead, all,
         kind === "client" && name !== "No project"
