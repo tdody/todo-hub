@@ -2456,7 +2456,7 @@ function stageBody(i: Issue, onToday: boolean): Node[] {
       } }, "Delete…")));
   return [
     h("div", { class: "tl-fields" }, ...issueFields(i),
-      h("span", { class: "tl-actions" }, h("span", { class: "pp-anchor" }, more, periscopePopover(i)))),
+      h("span", { class: "tl-actions" }, more, periscopePopover(i))),
     detailBody(i.id),
   ];
 }
@@ -2746,7 +2746,7 @@ function issuePane(i: Issue): HTMLElement {
       h("span", { class: "tl-actions" },
         t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
           onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
-        h("span", { class: "pp-anchor" }, more, periscopePopover(i)))),
+        more, periscopePopover(i))),
     detailBody(i.id),
   );
 }

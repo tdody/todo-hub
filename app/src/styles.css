@@ -1715,10 +1715,11 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
 @media (max-width: 860px) { .prs .dgrid { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .pr-table td.x .i, .fold-b .i { transition: none; } }
 
-/* Start in periscope: the popover under the reading pane's ⋯ (Popover shadow, 12px corners). */
-.pp-anchor { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+/* Start in periscope: the popover under the reading pane's ⋯ row (Popover shadow, 12px corners). The
+   row places it: right edge at the ⋯, and no wider than the row, so the pane never clips it. */
+.tl-fields { position: relative; }
 .pp-pop {
-  position: absolute; top: calc(100% + 8px); right: 0; z-index: 6; width: 440px; max-width: calc(100vw - 48px);
+  position: absolute; top: 100%; right: 0; z-index: 6; width: min(440px, 100%);
   box-sizing: border-box; background: var(--surface); color: var(--ink); border: 1px solid var(--border);
   border-radius: 12px; box-shadow: 0 14px 34px rgba(0, 0, 0, .18); padding: 14px 16px;
   display: flex; flex-direction: column; gap: 8px; font-size: 13px; text-align: left; cursor: default;
