@@ -2,6 +2,7 @@
 
 - mine: the open pull requests you opened.
 - review: the open pull requests that ask for your review.
+- weekly: for Insights, how many pull requests you merged and reviewed each week.
 
 Everything is GitHub data; nothing is written by Claude. Comments, reviews and review requests
 from bots are left out.
@@ -10,8 +11,9 @@ from bots are left out.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
+from . import stats
 from .config import Settings
 from .sources import gh_json
 
@@ -109,6 +111,35 @@ def updated(d: dict, repo: str, number: int, pr: dict | None) -> dict:
             out[f"{side}_total"] -= 1
         out[side] = _link_stacks(prs) if side == "mine" else prs
     return out
+
+
+def weekly(settings: Settings, env: dict | None = None, weeks: int = 8, today: date | None = None) -> list[dict]:
+    """Per week, Monday to Sunday (ET): your pull requests that GitHub merged (into any branch), and the
+    pull requests of others you reviewed (each counts once a week). Raises sources.SourceError."""
+    starts = stats.week_starts(weeks, today)
+
+    def midnight(d: date) -> datetime:
+        return datetime(d.year, d.month, d.day, tzinfo=stats.TZ)
+
+    def merged(d: date) -> str:
+        end = midnight(d + timedelta(days=7)) - timedelta(seconds=1)
+        return f"is:pr author:@me is:merged merged:{midnight(d).isoformat()}..{end.isoformat()}"
+
+    counts = "\n".join(f'w{i}: search(query: "{merged(d)}", type: ISSUE, first: 0) {{ issueCount }}' for i, d in enumerate(starts))
+    query = f"""{{
+      viewer {{ login }}
+      {counts}
+      reviewed: search(query: "is:pr reviewed-by:@me -author:@me updated:>={midnight(starts[0]).isoformat()}", type: ISSUE, first: 100) {{
+        nodes {{ ... on PullRequest {{ repository {{ nameWithOwner }} number reviews(last: 30) {{ nodes {{ author {{ login }} submittedAt }} }} }} }}
+      }}
+    }}"""
+    data = (gh_json(settings, ["api", "graphql", "-f", f"query={query}"], env) or {})["data"]
+    me = data["viewer"]["login"]
+    reviewed = {(stats.week_start(stats.local_date(r["submittedAt"])), pr["repository"]["nameWithOwner"], pr["number"])
+                for pr in data["reviewed"]["nodes"] if pr
+                for r in _nodes(pr, "reviews") if (r.get("author") or {}).get("login") == me and r.get("submittedAt")}
+    return [{"week": d.isoformat(), "merged": data[f"w{i}"]["issueCount"], "reviewed": sum(w == d for w, _, _ in reviewed)}
+            for i, d in enumerate(starts)]
 
 
 def _link_stacks(mine: list[dict]) -> list[dict]:
