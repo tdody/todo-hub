@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import date
 
 import pytest
@@ -53,20 +54,37 @@ def run(name, conclusion="SUCCESS", status="COMPLETED"):
             "detailsUrl": f"https://github.com/initech/platform/actions/runs/7/{name}"}
 
 
+FAKE_GH = """
+import json, pathlib, sys
+tmp, args = pathlib.Path(__file__).parent, sys.argv[1:]
+ids = [a.removeprefix("ids[]=") for a in args if a.startswith("ids[]=")]
+call = (f"nodes={len(ids)}" if ids else "one" if any(a.startswith("owner=") for a in args)
+        else "weekly" if any("reviewed-by" in a for a in args) else "search")
+with open(tmp / "calls.txt", "a") as f:
+    print(call, file=f)
+if ids:
+    prs = json.loads((tmp / "prs.json").read_text())
+    print(json.dumps({"data": {"nodes": [prs[i] for i in ids]}}))
+else:
+    print((tmp / f"{call}.json").read_text())
+"""
+
+
 def fake_gh(tmp_path, settings, mine=(), review=()):
-    """A gh that prints the given pull requests and counts its runs in calls.txt. A read of one pull
-    request prints one.json instead, and the weekly read prints weekly.json."""
-    out, calls = tmp_path / "gh.json", tmp_path / "calls.txt"
-    out.write_text(json.dumps({"data": {
+    """A gh that answers the search and the reads by id for the given pull requests, and logs each call in
+    calls.txt ("search", "nodes=<ids>", "one" or "weekly"). A read of one pull request prints one.json,
+    and the weekly read prints weekly.json."""
+    (tmp_path / "search.json").write_text(json.dumps({"data": {
         "viewer": {"login": ME},
-        "mine": {"issueCount": len(mine), "nodes": list(mine)},
-        "review": {"issueCount": len(review), "nodes": list(review)},
+        **{side: {"issueCount": len(prs), "nodes": [{"id": f"PR_{p['number']}"} for p in prs]}
+           for side, prs in (("mine", mine), ("review", review))},
     }}))
+    (tmp_path / "prs.json").write_text(json.dumps({f"PR_{p['number']}": p for p in [*mine, *review]}))
     gh = tmp_path / "gh"
-    gh.write_text(f'#!/bin/sh\necho x >> {calls}\ncase "$*" in *owner=*) cat {tmp_path / "one.json"};; *reviewed-by*) cat {tmp_path / "weekly.json"};; *) cat {out};; esac\n')
+    gh.write_text(f"#!{sys.executable} -S\n{FAKE_GH}")
     gh.chmod(0o755)
     settings.gh_path = str(gh)
-    return out, calls
+    return tmp_path / "calls.txt"
 
 
 def test_read_shapes_mine(settings, tmp_path):
@@ -117,13 +135,23 @@ def test_read_review_requests(settings, tmp_path):
     assert seven["asked_at"] == "2026-11-01T10:00:00Z"       # no request event: when it was opened
 
 
+def test_read_asks_github_for_10_pull_requests_at_a_time(settings, tmp_path):
+    # GitHub stops a query after about 10 seconds; 47 pull requests in one query took 11.
+    calls = fake_gh(tmp_path, settings, mine=[pr(n) for n in range(1, 24)], review=[pr(n) for n in range(30, 33)])
+    d = pulls.read(settings)
+    assert [p["number"] for p in d["mine"]] == list(range(1, 24))     # in the search's order
+    assert [p["number"] for p in d["review"]] == [30, 31, 32]
+    assert d["mine_total"] == 23 and d["review_total"] == 3
+    assert sorted(calls.read_text().split()) == ["nodes=10", "nodes=10", "nodes=6", "search"]
+
+
 def test_pulls_endpoint_caches_and_keeps_the_last_read(settings, tmp_path):
-    out, calls = fake_gh(tmp_path, settings, mine=[pr(1)])
+    calls = fake_gh(tmp_path, settings, mine=[pr(1)])
     client = TestClient(create_app(settings, DB(settings.db_path)))
     body = client.get("/api/pulls").json()
     assert [p["number"] for p in body["mine"]] == [1] and body["read_at"] and body["error"] is None
     client.get("/api/pulls")
-    assert len(calls.read_text().split()) == 1           # read once, then from the cache
+    assert calls.read_text().split() == ["search", "nodes=1"]    # read once, then from the cache
 
     (tmp_path / "gh").write_text("#!/bin/sh\necho 'To get started with GitHub CLI, please run:  gh auth login' >&2\nexit 4\n")
     body = client.get("/api/pulls?refresh=true").json()
@@ -186,13 +214,13 @@ def test_weekly_counts(settings, tmp_path):
 
 
 def test_weekly_endpoint_caches_and_reports_errors(settings, tmp_path):
-    out, calls = fake_gh(tmp_path, settings)
+    calls = fake_gh(tmp_path, settings)
     weekly_json(tmp_path, [[(1, 1)] * n for n in range(1, 9)])
     client = TestClient(create_app(settings, DB(settings.db_path)))
     body = client.get("/api/pulls/weekly").json()
     assert [w["merged"] for w in body["weeks"]] == [1, 2, 3, 4, 5, 6, 7, 8] and body["error"] is None
     client.get("/api/pulls/weekly")
-    assert len(calls.read_text().split()) == 1                # read once, then from the cache
+    assert calls.read_text().split() == ["weekly"]            # read once, then from the cache
     (tmp_path / "gh").write_text("#!/bin/sh\necho 'To get started with GitHub CLI, please run:  gh auth login' >&2\nexit 4\n")
     body = client.get("/api/pulls/weekly?refresh=true").json()
     assert body == {"weeks": [], "lines": None, "last_lines": None, "error": "gh is not signed in. Run gh auth login in a terminal."}
