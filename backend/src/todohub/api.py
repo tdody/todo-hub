@@ -514,7 +514,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 if not done:
                     raise LinearError(f"{c['target_issue']}'s team has no completed status")
                 closed = l.update_issue(target["id"], {"stateId": done["id"]})
-                undo["state_id"] = target["state"]["id"]
+                undo["restore"] = {"stateId": target["state"]["id"]}
                 quote = "\n".join("> " + line for line in (c.get("excerpt") or "").splitlines())
                 try:
                     undo["comments"].append(l.create_comment(target["id"], "\n\n".join(
@@ -804,7 +804,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.post("/api/candidates/{cid}/undo", dependencies=auth)
     def undo(cid: int) -> dict:
         """Put an approved or dropped candidate back in the Inbox, reversing what it did in Linear:
-        created issues go to Linear's trash, a closed issue gets its old status back, and posted
+        created issues go to Linear's trash, a closed or merged-into issue gets its old fields back, and posted
         comments are deleted. If Linear fails part-way, what's left is kept for a retry."""
         c = candidate_or_404(cid)
         if c["status"] == "pending":
@@ -820,9 +820,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             except RuntimeError as exc:      # missing API key
                 raise HTTPException(503, str(exc))
             try:
-                if record.get("state_id"):
-                    client.update_issue(record["issue"], {"stateId": record["state_id"]})
-                    record.pop("state_id")
+                if record.get("restore"):            # the issue's fields as they were
+                    client.update_issue(record["issue"], record["restore"])
+                    record.pop("restore")
                     db.set_undo(cid, record)
                 for attachment_id in list(record.get("attachments", [])):
                     try:
