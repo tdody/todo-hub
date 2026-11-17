@@ -789,9 +789,14 @@ function toggleSelect(id: number) {
   render();
 }
 
+/** The ticked cards still in the Inbox. */
+function selectedCandidates(): Candidate[] {
+  return state.candidates.filter((c) => state.selected.has(c.id));
+}
+
 async function bulk(action: "approve" | "drop", reason: DropReason = "other") {
   // A linked card's merge plan needs a look, so bulk Approve leaves it out.
-  const picked = state.candidates.filter((c) => state.selected.has(c.id) && !(action === "approve" && isLinked(c)));
+  const picked = selectedCandidates().filter((c) => !(action === "approve" && isLinked(c)));
   const done: number[] = [];
   for (const c of picked) {
     try {
@@ -812,15 +817,16 @@ async function bulk(action: "approve" | "drop", reason: DropReason = "other") {
 }
 
 function bulkBar(): HTMLElement | "" {
-  if (!state.selected.size) return "";
+  const picked = selectedCandidates();
+  if (!picked.length) return "";
   const drop = h("details", { class: "drop-menu" },
     h("summary", { class: "ghost-btn" }, "Drop all ▾"),
     h("div", { class: "menu" }, ...DROP_REASONS.map((r) =>
       h("button", { onclick: () => { drop.open = false; void bulk("drop", r.value); } }, h("span", {}, r.label)))));
-  const linked = state.candidates.filter((c) => state.selected.has(c.id) && isLinked(c)).length;
-  const approvable = state.selected.size - linked;
+  const linked = picked.filter(isLinked).length;
+  const approvable = picked.length - linked;
   return h("div", { class: "bulk" },
-    h("span", {}, `${state.selected.size} selected`),
+    h("span", {}, `${picked.length} selected`),
     linked ? h("span", { class: "muted small" }, approvable
       ? `${linked} linked card${linked === 1 ? "" : "s"} left out`
       : "Decide linked cards one at a time") : "",
