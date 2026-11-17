@@ -544,7 +544,6 @@ export const api = {
   editCandidate: (id: number, edit: CandidateEdit) => call<Candidate>("PATCH", `/api/candidates/${id}`, edit),
   approve: (id: number, edit: CandidateEdit) =>
     call<ApproveResult>("POST", `/api/candidates/${id}/approve`, edit),
-  /** Add a possible duplicate to the issue it duplicates instead of creating a new one. */
   /** Merge a linked card into its open issue. ``edit.comment`` is the text to post; the flags set
    *  the issue's due date and priority to the card's. */
   merge: (id: number, edit: CandidateEdit, fields: { move_due_date: boolean; raise_priority: boolean }) =>
