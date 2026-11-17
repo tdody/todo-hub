@@ -32,10 +32,16 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - **Merge:** same work, but this adds something (a new ask, a date, a step, a link).
   - **Create new:** related, but a separate deliverable.
   - **Drop:** the issue already covers this exact task.
-- The card shows the linked issue (status, priority, due date; **Show description and comments** for the rest) and a switch with the three picks. Claude's pick is selected at first and has a dot. The card below the switch changes with the pick, and one button does it (**a** or ⌘↩):
-  - **Merge into ENG-…** lists what it will change on the issue: the comment it posts (**Edit** changes it; the source link is added), **Move the due date** when the card is due sooner or the issue has no due date, **Raise the priority** when the card is more urgent or the issue has no priority (both ticked; untick to skip), the subtasks it adds as sub-issues, and the links it attaches. No new issue is made. **m** merges from the keyboard.
+- The card shows the linked issue (status, priority, due date; **Show description and comments** for the rest) and a switch with the three picks. Claude's recommendation is selected at first and has a dot. The card below the switch changes with the pick, and one button does it (**a** or ⌘↩):
+  - **Merge into ENG-…** shows what it will change on the issue. No new issue is made.
+    - The comment it posts. **Edit** changes it. The source link goes under it.
+    - **Move the due date**: shown when the card has a due date and the issue has a later one or none.
+    - **Raise the priority**: shown when the card has a priority and the issue has a lower one or none.
+    - Both boxes start ticked. Untick a box to skip that change.
+    - The subtasks it adds as sub-issues, and the links it attaches.
   - **Create issue** (or **Track**) shows the usual fields.
-  - **Drop** shows the drop reasons, with Duplicate picked; 1–5 pick another.
+  - **Drop** shows the drop reasons, with Duplicate selected. 1–5 select another reason.
+- Keys on a linked card: **a** or ⌘↩ press the button, **m** merges, and **d** selects Drop.
 - Undo removes the comment, links and sub-issues, and puts the issue's old due date and priority back.
 - Bulk **Approve** leaves linked cards out; decide them one at a time.
 
@@ -54,7 +60,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 - **List and pane:** the Inbox lists the candidates on the left, two lines each: the title, then the source, who, and chips for what's set (client, High/Urgent, due date, red when late; "Same as ENG-123", "Adds to ENG-123" or "Related to ENG-123" for a linked issue, "Looks handled" when Linear already covers it). The selected one opens in full on the right: why, the excerpt, the linked issue and its plan, the draft reply, links, subtasks, the fields to edit, and its decision. ↑↓ or **j**/**k** move through the list; after a decision the next one is selected. Hover a row for its checkbox (bulk select).
 - Approve (⌘↩ or **a**), drop with a reason (**d**, 1–5), snooze (**s**, 1–3), bulk approve (linked cards left out) or drop, and full keyboard navigation (**?** lists the shortcuts).
 - Dropped reasons and recent decisions are fed back into the next sweep.
-- **Mute rules:** after you drop several items from the same sender, Slack channel or GitHub repo (3 in 30 days, none approved, not counting "already done" or "duplicate"), TodoHub offers to stop proposing them. "Not now" is remembered. The Drop menu also has **Drop and mute …**.
+- **Mute rules:** after you drop several items from the same sender, Slack channel or GitHub repo (3 in 30 days, none approved, not counting "already done" or "duplicate"), TodoHub offers to stop proposing them. "Not now" is remembered. The Drop menu also has **Drop and mute …** (linked cards have no Drop menu).
   - Muting also drops cards already waiting from that source, and Undo brings them back.
   - Muted sources are listed under **Muted** at the bottom of the Inbox, with how many items each has blocked and an **Unmute** button.
   - The sweep is told to skip muted sources, and `add_candidate` refuses anything from them that still gets through.
