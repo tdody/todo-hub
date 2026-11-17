@@ -59,16 +59,16 @@ Sam asked for churn by segment before Thursday's review.
 
 **Create new:** the card as today: the title box, the fields and the subtask editor. The main button: **Create issue** (**Track** for a Waiting card).
 
-**Drop:** the 5 drop reasons as a radio list, with **Duplicate** picked. The number keys 1–5 pick a reason. The main button: **Drop**. "Drop and mute …" is not in the list; the mute offer after a drop shows as today.
+**Drop:** as for Merge, the title shows as plain text and the fields do not show. The 5 drop reasons show as a radio list, with **Duplicate** picked. The number keys 1–5 pick a reason. The main button: **Drop**. "Drop and mute …" is not in the list; the mute offer after a drop shows as today.
 
 ### The footer
 
 - **Snooze ▾** and the main button. Linked cards have no **Drop ▾** menu.
-- The main button has the accent fill. It is the only button in the card with that fill.
+- The duplicate panel's accent button goes away, so the main button is the only action button in the box and the footer with the accent fill. (The picked part of the switch also has it, as in the Group control.)
 
 ### Keys
 
-- **⌘↩** and **a**: press the main button.
+- **⌘↩** and **a**: press the main button. Today ⌘↩ works only in the title box; it now works from anywhere in the Inbox, except in the draft reply.
 - **m**: merge, whatever the pick (as today).
 - **d**: pick Drop.
 - In the shortcuts sheet: **m** "Merge into the linked issue"; **d** "Drop (on a linked card: pick Drop)".
