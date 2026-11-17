@@ -627,23 +627,39 @@ button.theme:hover { color: var(--ink); }
 .card > .avatar, .card > .type-menu { margin-top: 2px; }
 .card-body { min-width: 0; }
 
-/* Possible duplicate: recommendation, choices, and a look at the existing issue */
-.dup {
+/* A card linked to an open issue: the issue, the switch (Merge, Create new, Drop), and the plan */
+.link-box {
   margin: 8px 0 4px; padding: 10px 12px; border-radius: 8px;
-  background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn-ink) 25%, transparent);
-  font-size: 13px;
+  background: var(--surface-2); border: 1px solid var(--border); font-size: 13px;
 }
-.dup-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
-.dup-label { font-weight: 600; color: var(--warn-ink); }
-.dup-title { color: var(--ink); }
-.dup-advice { margin-top: 4px; color: var(--ink); }
-.dup-advice strong { color: var(--warn-ink); }
-.dup-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.dup-actions button { font-size: 12px; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
-.dup-actions button.ghost-btn { background: var(--surface); color: var(--ink); }
-.dup-actions button.rec { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); font-weight: 600; }
-.dup-preview { margin-top: 8px; }
-.dup-preview > summary { cursor: pointer; color: var(--warn-ink); font-size: 12px; font-weight: 500; width: fit-content; }
+.link-head, .plan-head {
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px;
+}
+.link-issue { color: var(--ink); overflow-wrap: anywhere; }
+.link-issue .link { font-weight: 600; }
+.link-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.segmented.link-switch { display: flex; margin-top: 10px; }
+.segmented.link-switch button.seg { flex: 1; min-width: 0; border-left: 1px solid var(--border); }
+.segmented.link-switch button.seg:first-child { border-left: 0; }
+.segmented.link-switch button.seg:focus-visible { outline-offset: -2px; }   /* .segmented clips what is outside it */
+.rec-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-left: 6px; vertical-align: middle; }
+.link-reason { margin-top: 6px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.link-reason strong { color: var(--ink); font-weight: 600; }
+.dup-preview { margin-top: 6px; }
+.dup-preview > summary { cursor: pointer; color: var(--accent); font-size: 12px; width: fit-content; }
+.merge-plan, .drop-plan { margin: 10px 0 6px; }
+.plan-step { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 13px; }
+.plan-step input { margin: 3px 0 0; flex: none; }
+.plan-step .link-btn, .drop-plan kbd { margin-left: auto; }
+.plan-ic { flex: none; width: 13px; text-align: center; color: var(--muted); }
+.plan-step s { color: var(--muted); }
+.plan-new { color: var(--s-done-ink); font-weight: 600; }
+.plan-comment {
+  margin: 2px 0 6px 21px; padding: 6px 8px; border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--border); font-size: 12px;
+}
+.merge-plan .comment-input { margin: 2px 0 6px 21px; width: calc(100% - 21px); }
+.merge-plan .subtasks { margin: 4px 0 4px 21px; }
 .dup-body {
   margin-top: 6px; padding: 8px 10px; border-radius: 6px;
   background: var(--surface); border: 1px solid var(--border); color: var(--ink); font-size: 12.5px;
