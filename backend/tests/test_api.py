@@ -665,6 +665,21 @@ def test_merge_moves_only_the_due_date(env):
     assert db.get_undo(cid)["restore"] == {"dueDate": None}
 
 
+def test_merge_changes_only_what_is_still_sooner_or_higher(env):
+    client, db, fake, _ = env
+    dup_env(db)
+    fake.issues[0].update(dueDate="2026-11-15", priority=1)      # changed in Linear since the app read it
+    cid = seed(db, possible_duplicate="ENG-1", due_date="2026-11-20", priority=2)
+    r = client.post(f"/api/candidates/{cid}/merge",
+                    json={"comment": "More.", "move_due_date": True, "raise_priority": True})
+    assert r.status_code == 200, r.text
+    assert fake.updated == [] and "restore" not in db.get_undo(cid)
+    fake.issues[0].update(dueDate="2026-11-28", priority=0)      # no priority: any priority is higher
+    cid = seed(db, source_id="C1:y", possible_duplicate="ENG-1", due_date="2026-11-20", priority=4)
+    client.post(f"/api/candidates/{cid}/merge", json={"comment": "More.", "move_due_date": True, "raise_priority": True})
+    assert fake.updated == [("id-ENG-1", {"dueDate": "2026-11-20", "priority": 4})]
+
+
 def test_merge_stays_when_the_field_update_fails(env):
     client, db, fake, _ = env
     dup_env(db)

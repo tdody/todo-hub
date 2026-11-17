@@ -656,10 +656,14 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                           "attachments": [], "issues": []}
             db.set_undo(cid, undo)
 
+            # The app's copy of the issue can be old: change a field only if the card's value is still
+            # sooner (due date) or higher (priority: a smaller number, 0 is none) than the issue's now.
             changes = {}
-            if body.move_due_date:
+            if (body.move_due_date and c["due_date"]
+                    and (not target.get("dueDate") or c["due_date"] < target["dueDate"])):
                 changes["dueDate"] = c["due_date"]
-            if body.raise_priority:
+            if (body.raise_priority and c["priority"]
+                    and (not target.get("priority") or c["priority"] < target["priority"])):
                 changes["priority"] = c["priority"]
             if changes:
                 undo["restore"] = {field: target.get(field) for field in changes}
