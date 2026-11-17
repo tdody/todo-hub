@@ -1319,7 +1319,7 @@ function mergePlan(c: Candidate, d: CandidateEdit, busy: boolean): HTMLElement {
   const links = (c.source_url ? 1 : 0) + c.links.length;
   const box = (checked: boolean, set: (v: boolean) => void, ...label: Child[]) => h("label", { class: "plan-step" },
     h("input", { type: "checkbox", checked, disabled: busy,
-      onchange: (e: Event) => set((e.target as HTMLInputElement).checked) }),
+      onchange: (e: Event) => { set((e.target as HTMLInputElement).checked); render(); } }),
     h("span", {}, ...label));
   const editComment = () => {
     openComments.add(c.id);
@@ -1356,7 +1356,7 @@ function dropPlan(c: Candidate): HTMLElement {
   return h("div", { class: "drop-plan", role: "radiogroup", "aria-label": "Why drop it" },
     ...DROP_REASONS.map((r, i) => h("label", { class: "plan-step", title: r.hint },
       h("input", { type: "radio", name: `drop-${c.id}`, checked: ch.reason === r.value,
-        onchange: () => { ch.reason = r.value; } }),
+        onchange: () => { ch.reason = r.value; render(); } }),
       h("span", {}, r.label), h("kbd", {}, String(i + 1)))));
 }
 
@@ -3623,8 +3623,9 @@ document.addEventListener("keydown", (e) => {
   // not from its draft reply.
   if (state.tab === "inbox" && (e.metaKey || e.ctrlKey) && e.key === "Enter" && !document.querySelector(".overlay")
       && (!typing || target.closest(".ib-pane .card")) && !target.closest(".reply")) {
+    e.preventDefault();
     const c = focusedCard() ? focusedCandidate() : undefined;
-    if (c) { e.preventDefault(); decide(c); }
+    if (c && !e.repeat) decide(c);           // holding ⌘↩ must not decide the next card too
     return;
   }
   if (e.key === "Escape" && state.balanceOpen) { state.balanceOpen = false; render(); return; }
