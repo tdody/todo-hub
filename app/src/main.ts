@@ -350,6 +350,7 @@ async function merge(c: Candidate) {
   try {
     const d = state.drafts.get(c.id) ?? {};
     const edit = { ...d, comment: commentToPost(c, d) };
+    if (!edit.title?.trim()) delete edit.title;     // an emptied title box keeps the card's title
     if (edit.subtasks) edit.subtasks = edit.subtasks.filter((s) => s.title.trim());
     const ch = linkChoice(c);
     const before = linkedIssue(c.possible_duplicate!);
@@ -1108,7 +1109,7 @@ function replyBox(c: Candidate, d: CandidateEdit): HTMLElement {
       h("span", { class: "muted small" }, "Edits are kept when you approve.")));
 }
 
-// ---- possible duplicates ----------------------------------------------------------------------
+// ---- issue previews ---------------------------------------------------------------------------
 type PreviewState = { loading: true } | { error: string } | { issue: IssuePreview };
 const previews = new Map<string, PreviewState>();      // by identifier, for this session
 const openPreviews = new Set<number>();                // cards whose preview is expanded
@@ -1223,9 +1224,8 @@ type LinkPick = NonNullable<Candidate["duplicate_advice"]>;
 const PICKS: { value: LinkPick; label: string }[] = [
   { value: "merge", label: "Merge" }, { value: "new", label: "Create new" }, { value: "drop", label: "Drop" },
 ];
-const LINK_HEAD: Record<LinkPick, string> = {
-  merge: "Adds to an open issue", drop: "Same as an open issue", new: "Related to an open issue",
-};
+/** Claude's advice in words: the list chip ("Adds to ENG-123") and the box heading. */
+const ADVICE_WORDS: Record<LinkPick, string> = { merge: "Adds to", drop: "Same as", new: "Related to" };
 
 /** A linked card's pick, its 2 merge boxes and its drop reason, until the app restarts. */
 type LinkChoice = { pick: LinkPick; moveDue: boolean; raisePriority: boolean; reason: DropReason };
@@ -1302,7 +1302,7 @@ function linkBox(c: Candidate, busy: boolean): HTMLElement {
     },
   }, h("summary", {}, "Show description and comments"), previewBody(ident));
   return h("div", { class: "link-box" },
-    h("div", { class: "link-head" }, LINK_HEAD[advice]),
+    h("div", { class: "link-head" }, `${ADVICE_WORDS[advice]} an open issue`),
     h("div", { class: "link-issue" }, link(ident, issue?.url ?? null, "link"), issue ? ` ${issue.title}` : ""),
     issue
       ? h("div", { class: "link-facts" },
@@ -1501,7 +1501,7 @@ function inboxItem(c: Candidate, on: boolean): HTMLElement {
   const chips: (HTMLElement | "")[] = [];
   if (c.handled?.identifier) chips.push(h("span", { class: "ib-chip ok" }, "Looks handled"));
   else if (c.possible_duplicate) chips.push(h("span", { class: "ib-chip dup" },
-    `${(c.duplicate_advice ?? "merge") === "drop" ? "Same as" : (c.duplicate_advice ?? "merge") === "merge" ? "Adds to" : "Related to"} ${c.possible_duplicate}`));
+    `${ADVICE_WORDS[c.duplicate_advice ?? "merge"]} ${c.possible_duplicate}`));
   if (client) chips.push(h("span", { class: "ib-chip client" }, client));
   if (priority === 1 || priority === 2) chips.push(priorityTag(priority));
   if (due) chips.push(h("span", { class: `ib-chip${due < today ? " late" : due === today ? " soon" : ""}` },
@@ -3696,6 +3696,7 @@ document.addEventListener("keydown", (e) => {
     render();
     return;
   }
+  if (e.repeat && (e.key === "a" || e.key === "m")) return;     // holding the key must not decide the next card too
   switch (e.key) {
     case "?": showShortcuts(); break;
     case "t": nextTheme(); renderHeader(); break;

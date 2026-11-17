@@ -621,7 +621,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if c["status"] != "pending":
             raise HTTPException(409, f"Already {c['status']}")
         if c["kind"] not in ("task", "waiting") or not c.get("possible_duplicate"):
-            raise HTTPException(400, "Only a task flagged as a possible duplicate can be merged")
+            raise HTTPException(400, "Only a task linked to an open issue can be merged")
         body = body or MergeIn()
         if body.model_fields_set:
             c = edit_candidate(cid, body)
