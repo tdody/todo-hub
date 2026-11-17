@@ -183,6 +183,23 @@ def test_calendar_block_only_allows_create_event(settings, tmp_path):
         calendar_block.block_time(settings, "x", "y", datetime(2026, 11, 4, 10, 0), 600)
 
 
+def test_block_prompt_calls_a_title_with_no_words_focus_time():
+    from todohub import calendar_block
+    prompt = calendar_block.block_prompt("https://globex.example/q3", "", datetime(2026, 11, 4, 10, 0), 30)
+    assert "- Title: Focus: Focus time\n" in prompt
+
+
+def test_block_time_and_drafts_say_why_claude_code_failed(settings, monkeypatch):
+    import subprocess
+    from todohub import calendar_block, gmail_draft
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="error: bad flag"))
+    with pytest.raises(calendar_block.BlockError, match="bad flag"):
+        calendar_block.block_time(settings, "Rebin", "", datetime(2026, 11, 4, 10, 0), 60)
+    with pytest.raises(gmail_draft.DraftError, match="bad flag"):
+        gmail_draft.save_reply_draft(settings, "18f2c0ffee12ab", "Sure, Thursday.")
+
+
 def test_github_review_requests(settings, tmp_path):
     from todohub import sources
     out = tmp_path / "prs.json"
@@ -394,7 +411,7 @@ def test_gmail_draft_still_denies_all_of_hubspot(settings, monkeypatch):
         return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(
             {"is_error": False, "result": "Saved: https://mail.google.com/mail/u/0/#drafts/r1"}))
 
-    monkeypatch.setattr(gmail_draft.subprocess, "run", fake_run)
+    monkeypatch.setattr(sweep.subprocess, "run", fake_run)
     gmail_draft.save_reply_draft(settings, "18f2c0ffee12ab", "Sure, Thursday.")
     assert "mcp__claude_ai_HubSpot" in _flag_values(seen["cmd"], "--disallowedTools")
 

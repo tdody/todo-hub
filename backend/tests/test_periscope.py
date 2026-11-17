@@ -11,7 +11,7 @@ from todohub.api import create_app
 from todohub.config import load_settings
 from todohub.db import DB
 from todohub.periscope import (LAST_REPO_KEY, REPOS_KEY, Periscope, PeriscopeError, default_repo, fill_prompt,
-                               remember_repo)
+                               pane_name, remember_repo)
 from conftest import FakeLinear
 
 URL = "http://127.0.0.1:17374"
@@ -49,12 +49,13 @@ def peri():
 def test_client_calls(peri):
     client = Periscope(URL, transport=peri.transport)
     assert client.catalog() == CATALOG
-    assert client.start(repo="/dev/api", branch="me/eng-1", ticket="ENG-1", title="Fix", prompt="Read.") == SPAWNED
+    assert client.start(repo="/dev/api", branch="me/eng-1", ticket="ENG-1", title="Fix", prompt="Read.",
+                        name="eng-1-fix") == SPAWNED
     client.select("k")
     assert peri.calls == [
         ("GET", "/api/open/catalog", None),
-        ("POST", "/api/linear/start",
-         {"repo": "/dev/api", "branch": "me/eng-1", "ticket": "ENG-1", "title": "Fix", "prompt": "Read."}),
+        ("POST", "/api/linear/start", {"repo": "/dev/api", "branch": "me/eng-1", "ticket": "ENG-1", "title": "Fix",
+                                       "prompt": "Read.", "name": "eng-1-fix"}),
         ("POST", "/api/select", {"pid": "k"}),
     ]
 
@@ -63,15 +64,15 @@ def test_client_errors(peri):
     client = Periscope(URL, transport=peri.transport)
     peri.answer = httpx.Response(409, json={"detail": "start already running"})
     with pytest.raises(PeriscopeError, match="start already running") as e:
-        client.start(repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p")
+        client.start(repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p", name="eng-1")
     assert e.value.status == 409
     peri.answer = httpx.Response(502, json={"detail": "spawn failed: no server"})
     with pytest.raises(PeriscopeError, match="spawn failed: no server") as e:
-        client.start(repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p")
+        client.start(repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p", name="eng-1")
     assert e.value.status == 502
     peri.answer = httpx.Response(500, text="Internal Server Error")
     with pytest.raises(PeriscopeError, match="Periscope answered HTTP 500."):
-        client.start(repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p")
+        client.start(repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p", name="eng-1")
 
 
 def test_client_when_periscope_is_down_or_slow():
@@ -87,7 +88,65 @@ def test_client_when_periscope_is_down_or_slow():
         Periscope(URL, transport=httpx.MockTransport(slow)).catalog()
     with pytest.raises(PeriscopeError, match="Periscope didn't answer in 120 s. It may still start Claude."):
         Periscope(URL, transport=httpx.MockTransport(slow)).start(
-            repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p")
+            repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p", name="eng-1")
+
+
+NAMED = {"identifier": "ENG-1", "title": "Rebin Globex grades for jane@globex.com"}
+
+
+def haiku(monkeypatch, *, stdout="", stderr="", returncode=0, raises=None):
+    """Claude Code behind a patched subprocess.run; returns the commands it was given."""
+    ran = []
+
+    def run(cmd, **kw):
+        ran.append(cmd)
+        if raises:
+            raise raises
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(periscope.subprocess, "run", run)
+    return ran
+
+
+def test_pane_name_is_the_id_and_up_to_three_of_haikus_words(monkeypatch):
+    ran = haiku(monkeypatch, stdout=json.dumps({"result": "`Globex-Grades rebin` now"}))
+    assert pane_name(load_settings(), NAMED) == "eng-1-globex-grades-rebin"
+    cmd = ran[0]
+    assert cmd[cmd.index("--model") + 1] == "haiku" and cmd[cmd.index("--tools") + 1] == ""
+    assert "--strict-mcp-config" in cmd    # no MCP server loads, so the run can only answer with text
+    assert "Rebin Globex grades for" in cmd[2] and "jane@" not in cmd[2]
+
+
+def test_pane_name_folds_accented_letters(monkeypatch):
+    haiku(monkeypatch, stdout=json.dumps({"result": "export-données"}))
+    assert pane_name(load_settings(), NAMED) == "eng-1-export-donnees"
+
+
+def test_pane_name_is_the_id_alone_when_the_title_has_no_words(monkeypatch):
+    ran = haiku(monkeypatch, stdout=json.dumps({"result": "focus-time"}))
+    assert pane_name(load_settings(), {"identifier": "ENG-1", "title": "https://globex.example/q3-report"}) == "eng-1"
+    assert ran == []
+
+
+@pytest.mark.parametrize("answer", [
+    {"raises": FileNotFoundError()},
+    {"raises": subprocess.TimeoutExpired("claude", 30)},
+    {"stdout": "not json", "returncode": 1},
+    {"stdout": json.dumps({"is_error": True, "result": "Credit balance is too low"}), "returncode": 1},
+    {"stdout": json.dumps({"is_error": True, "result": "API Error overloaded"}), "returncode": 0},
+    {"stdout": json.dumps({"result": "grade-rebin"}), "returncode": 1},
+    {"stdout": json.dumps({"result": "—"})},
+])
+def test_pane_name_is_the_id_alone_when_haiku_gives_no_words(monkeypatch, caplog, answer):
+    haiku(monkeypatch, **answer)
+    assert pane_name(load_settings(), NAMED) == "eng-1"
+    assert "ENG-1" in caplog.text
+
+
+def test_pane_name_logs_why_claude_code_failed(monkeypatch, caplog):
+    haiku(monkeypatch, stderr="error: unknown option '--strict-mcp-config'", returncode=1)
+    assert pane_name(load_settings(), NAMED) == "eng-1"
+    assert "unknown option" in caplog.text
 
 
 def test_fill_prompt_fills_three_tokens_and_keeps_other_braces():
@@ -152,7 +211,7 @@ def env(peri):
     fronted = []
     app = create_app(settings, db, linear_factory=FakeLinear,
                      periscope_factory=lambda: Periscope(URL, transport=peri.transport),
-                     front_fn=fronted.append)
+                     front_fn=fronted.append, name_fn=lambda issue: f"{issue['identifier'].lower()}-rebin")
     return TestClient(app), db, fronted
 
 
@@ -172,13 +231,13 @@ def test_options_fill_the_popover(env):
     }
 
 
-def test_start_sends_the_issue_and_remembers_the_repo(env, peri):
+def test_start_sends_the_issue_and_its_name_and_remembers_the_repo(env, peri):
     client, db, _ = env
     r = client.post("/api/issues/id-ENG-1/periscope", json=START)
     assert r.status_code == 200 and r.json() == SPAWNED
     assert peri.calls[-1] == ("POST", "/api/linear/start", {
         "repo": "/dev/api", "branch": "me/eng-1", "ticket": "ENG-1", "title": "Rebin Globex grades",
-        "prompt": "Read ENG-1."})
+        "prompt": "Read ENG-1.", "name": "eng-1-rebin"})
     assert db.get_meta(REPOS_KEY) == {"client:Globex": "/dev/api"}
     assert db.get_meta(LAST_REPO_KEY) == "/dev/api"
 
