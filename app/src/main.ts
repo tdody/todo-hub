@@ -354,8 +354,8 @@ async function merge(c: Candidate) {
     const ch = linkChoice(c);
     const before = linkedIssue(c.possible_duplicate!);
     const change = before ? mergeChanges(c, before) : { due: null, priority: null };
-    const fields = { move_due_date: !!change.due && ch.moveDue, raise_priority: !!change.priority && ch.raisePriority };
-    const { issue, subtasks, warnings } = await api.merge(c.id, edit, fields);
+    const flags = { move_due_date: !!change.due && ch.moveDue, raise_priority: !!change.priority && ch.raisePriority };
+    const { issue, subtasks, warnings } = await api.merge(c.id, edit, flags);
     state.drafts.delete(c.id);
     state.candidates = state.candidates.filter((x) => x.id !== c.id);
     await swipeAway(c.id);
@@ -365,8 +365,8 @@ async function merge(c: Candidate) {
     const did = [
       "comment",
       subtasks.length ? `${subtasks.length} sub-issue${subtasks.length === 1 ? "" : "s"}` : "",
-      fields.move_due_date && issue.due_date === change.due ? `due ${dateText(issue.due_date)}` : "",
-      fields.raise_priority && issue.priority === change.priority ? `${priorityName(issue.priority)} priority` : "",
+      flags.move_due_date && issue.due_date === change.due ? `due ${dateText(issue.due_date)}` : "",
+      flags.raise_priority && issue.priority === change.priority ? `${priorityName(issue.priority)} priority` : "",
     ].filter(Boolean).join(", ");
     offerUndo(`Merged into ${issue.identifier}: ${did}`,
       `merge into ${issue.identifier} removed, task back in the Inbox`, () => undoDecisions([c.id], true),
@@ -434,6 +434,9 @@ const DROP_REASONS: { value: DropReason; label: string; hint: string }[] = [
 ];
 
 async function drop(c: Candidate, reason: DropReason = "other") {
+  const key = `c${c.id}`;
+  if (state.busy.has(key)) return;
+  state.busy.add(key);
   try {
     await api.drop(c.id, reason);
     state.candidates = state.candidates.filter((x) => x.id !== c.id);
@@ -443,6 +446,8 @@ async function drop(c: Candidate, reason: DropReason = "other") {
     void suggestMute(c);
   } catch (e) {
     fail(e);
+  } finally {
+    state.busy.delete(key);
   }
 }
 
@@ -1256,16 +1261,16 @@ function mergeComment(c: Candidate, d: CandidateEdit): string {
   const title = ("title" in d ? d.title : c.title) || c.title;
   const due = "due_date" in d ? d.due_date : c.due_date;
   return [
-    `**More from ${SOURCE_NAME[c.source]}${c.who ? ` · ${c.who}` : ""}:** ${title}`,
+    `**More from ${c.source === "manual" ? "a capture" : SOURCE_NAME[c.source]}${c.who ? ` · ${c.who}` : ""}:** ${title}`,
     c.why ?? "",
     c.excerpt ? c.excerpt.split("\n").map((line) => `> ${line}`).join("\n") : "",
     due ? `**Due:** ${due}` : "",
   ].filter(Boolean).join("\n\n");
 }
 
-/** The comment a merge posts: the edited text, else the default. */
+/** The comment a merge posts: the text edited in the draft, else the default. */
 function commentToPost(c: Candidate, d: CandidateEdit): string {
-  return (d.comment ?? c.comment ?? "").trim() || mergeComment(c, d);
+  return (d.comment ?? "").trim() || mergeComment(c, d);
 }
 
 /** The open issue a card is linked to, and the switch: Merge, Create new or Drop. */
@@ -1274,12 +1279,14 @@ function linkBox(c: Candidate, busy: boolean): HTMLElement {
   const advice = c.duplicate_advice ?? "merge";
   const ch = linkChoice(c);
   const issue = linkedIssue(ident);
+  if (openPreviews.has(c.id) && !previews.has(ident)) loadPreview(ident);
   const loaded = previews.get(ident);
   const preview = h("details", {
     class: "dup-preview", "data-ident": ident, open: openPreviews.has(c.id),
     ontoggle: (e: Event) => {
-      if ((e.target as HTMLDetailsElement).open) { openPreviews.add(c.id); loadPreview(ident); }
-      else openPreviews.delete(c.id);
+      const open = (e.currentTarget as HTMLDetailsElement).open;
+      if (open === openPreviews.has(c.id)) return;      // re-created open by a render, not a click
+      if (open) { openPreviews.add(c.id); loadPreview(ident); } else openPreviews.delete(c.id);
     },
   }, h("summary", {}, "Show description and comments"), previewBody(ident));
   return h("div", { class: "link-box" },
@@ -1296,7 +1303,7 @@ function linkBox(c: Candidate, busy: boolean): HTMLElement {
     h("div", { class: "segmented link-switch", role: "group", "aria-label": `What to do with ${ident}` },
       ...PICKS.map((p) => h("button", {
         class: `seg${ch.pick === p.value ? " on" : ""}`, "aria-pressed": String(ch.pick === p.value), disabled: busy,
-        onclick: (e: Event) => { e.stopPropagation(); ch.pick = p.value; render(); },
+        onclick: () => { ch.pick = p.value; render(); },
       }, p.label, p.value === advice ? h("span", { class: "rec-dot", title: "Claude's recommendation" }) : ""))),
     h("div", { class: "link-reason" },
       h("strong", {}, `Claude recommends ${PICKS.find((p) => p.value === advice)!.label}`),
@@ -1325,7 +1332,11 @@ function mergePlan(c: Candidate, d: CandidateEdit, busy: boolean): HTMLElement {
       !openComments.has(c.id) && h("button", { class: "link-btn", onclick: editComment }, "Edit")),
     openComments.has(c.id)
       ? h("textarea", { class: "comment-input", rows: 6, value: commentToPost(c, d), "aria-label": `Comment to post on ${ident}`,
-          oninput: (e: Event) => { d.comment = (e.target as HTMLTextAreaElement).value; } })
+          maxLength: 4000,
+          oninput: (e: Event) => {
+            const text = (e.target as HTMLTextAreaElement).value;
+            if (text.trim()) d.comment = text; else delete d.comment;
+          } })
       : h("div", { class: "plan-comment md" }, ...renderMarkdown(commentToPost(c, d))),
     issue && change.due ? box(ch.moveDue, (v) => { ch.moveDue = v; }, "Move the due date ",
       h("s", {}, issue.due_date ? dateText(issue.due_date) : "none"), " → ",
@@ -1333,7 +1344,7 @@ function mergePlan(c: Candidate, d: CandidateEdit, busy: boolean): HTMLElement {
     issue && change.priority ? box(ch.raisePriority, (v) => { ch.raisePriority = v; }, "Raise the priority ",
       h("s", {}, priorityName(issue.priority)), " → ",
       h("b", { class: "plan-new" }, priorityName(change.priority))) : "",
-    (d.subtasks ?? c.subtasks).length ? subtaskEditor(c, d) : "",
+    c.subtasks.length || d.subtasks?.length ? subtaskEditor(c, d) : "",
     links ? h("div", { class: "plan-step" }, h("span", { class: "plan-ic" }, "+"),
       h("span", {}, `Attach ${links} link${links === 1 ? "" : "s"}`)) : "",
   );
@@ -1363,12 +1374,11 @@ function candidateCardBody(c: Candidate): HTMLElement {
   const val = <K extends keyof CandidateEdit>(k: K) => (k in d ? d[k] : (c as unknown as CandidateEdit)[k]);
   const busy = state.busy.has(`c${c.id}`);
   const acting = c.kind === "close" || c.kind === "comment";
-  const ref = acting ? c.target_issue : c.possible_duplicate;
-  const refIssue = ref ? state.issues.find((i) => i.identifier === ref) : undefined;
+  const refIssue = acting ? state.issues.find((i) => i.identifier === c.target_issue) : undefined;
   const linked = isLinked(c);
   const pick = linked ? linkChoice(c).pick : null;
-  const fixed = linked && pick !== "new";           // Merge or Drop: no title box, no fields
-  const fields = !acting && !fixed;
+  const hasPlan = linked && pick !== "new";         // Merge or Drop picked: a plan in place of the title box and the fields
+  const showFields = !acting && !hasPlan;
   const label = pick === "merge" ? `Merge into ${c.possible_duplicate}` : pick === "drop" ? "Drop"
     : pick === "new" && c.kind === "task" ? "Create issue"
     : { task: "Approve", waiting: "Track", close: `Close ${c.target_issue}`, comment: "Post update" }[c.kind];
@@ -1377,7 +1387,7 @@ function candidateCardBody(c: Candidate): HTMLElement {
     ? h("div", { class: "title-static" },
         c.kind === "close" ? "Close " : "Update ", link(c.target_issue ?? "", refIssue?.url ?? null, "link"),
         refIssue ? `: ${refIssue.title}` : c.title.replace(/^(Close|Update) [A-Z]+-\d+/, ""))
-    : fixed
+    : hasPlan
       ? h("div", { class: "title-static" }, val("title") || c.title)
       : h("input", {
           class: "title-input",
@@ -1422,15 +1432,15 @@ function candidateCardBody(c: Candidate): HTMLElement {
       oninput: (e: Event) => { d.comment = (e.target as HTMLTextAreaElement).value; },
     }),
     linksRow(c),
-    fields && subtaskEditor(c, d),
+    showFields && subtaskEditor(c, d),
     h(
       "div",
       { class: "card-actions" },
-      fields && clientSelect(val("client_label") ?? null, (v) => { d.client_label = v; }),
-      fields && projectSelect(val("project") ?? null, (v) => { d.project = v; }),
-      fields && priorityPill(val("priority") ?? 0, (v) => { d.priority = v; }),
-      fields && c.kind === "waiting" && h("span", { class: "muted small" }, "Follow up"),
-      fields && dateInput(val("due_date") ?? null, (v) => { d.due_date = v; }),
+      showFields && clientSelect(val("client_label") ?? null, (v) => { d.client_label = v; }),
+      showFields && projectSelect(val("project") ?? null, (v) => { d.project = v; }),
+      showFields && priorityPill(val("priority") ?? 0, (v) => { d.priority = v; }),
+      showFields && c.kind === "waiting" && h("span", { class: "muted small" }, "Follow up"),
+      showFields && dateInput(val("due_date") ?? null, (v) => { d.due_date = v; }),
       h("span", { class: "spacer" }),
       snoozeMenu(c, busy),
       !linked && dropMenu(c, busy),
