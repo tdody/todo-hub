@@ -120,8 +120,9 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - **Prompt** comes from the template on the Settings page. `{identifier}`, `{title}` and `{url}` become the issue's.
 - **Start** (↵, or ⌘↵ in the prompt) asks periscope to make the worktree (or use the one on that branch). Periscope starts Claude Code in it and sends the prompt, and the new card shows the issue.
   If a Claude is already on that branch, periscope starts nothing.
+- Before the start, Haiku names the new Claude on periscope's rail: the issue's ID and up to three words, for example `eng-123-grade-rebin`. This adds about 5 seconds. Periscope pins the name, so it does not rename the Claude. If Claude Code fails, the name is the ID alone.
 - The toast's **Show** selects that Claude in periscope. When `app.periscope_app_id` is set, **Show** also brings the app to the front.
-- Periscope must be running. It must answer `POST /api/linear/start` and `POST /api/select`.
+- Periscope must be running. It must answer `POST /api/linear/start` and `POST /api/select`. A periscope that does not know the `name` field starts Claude without it.
 
 ## Safety model
 
