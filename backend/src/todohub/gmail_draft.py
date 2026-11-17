@@ -7,12 +7,10 @@ subject) and create one draft. Nothing is sent: the draft waits in Gmail for Thi
 
 from __future__ import annotations
 
-import json
 import re
-import subprocess
 
 from .config import Settings
-from .sweep import _env, denied_servers, hardening_flags
+from .sweep import ClaudeCodeError, denied_servers, hardening_flags, run_claude_code
 
 MESSAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 GMAIL_URL_RE = re.compile(r"https://mail\.google\.com/[^\s\"'<>]+")
@@ -58,19 +56,10 @@ def save_reply_draft(settings: Settings, message_id: str, body: str) -> str:
         "--disallowedTools", ",".join(["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch",
                                        "WebSearch", "Task", "Agent", *denied_servers(settings)]),
     ]
-    settings.sweep_dir.mkdir(parents=True, exist_ok=True)
     try:
-        proc = subprocess.run(cmd, cwd=settings.sweep_dir, env=_env(), capture_output=True, text=True, timeout=180)
-    except FileNotFoundError:
-        raise DraftError(f"Can't find Claude Code at {settings.claude_path!r}.")
-    except subprocess.TimeoutExpired:
-        raise DraftError("Saving the Gmail draft timed out.")
-    try:
-        result = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        raise DraftError(f"Claude Code failed: {proc.stderr.strip()[:300]}")
-    if result.get("is_error") or proc.returncode != 0:
-        raise DraftError(f"Claude Code failed: {str(result.get('result', ''))[:300]}")
+        result = run_claude_code(settings, cmd, 180)
+    except ClaudeCodeError as exc:
+        raise DraftError(str(exc)) from None
     if result.get("permission_denials"):
         names = sorted({d.get("tool_name", "?") for d in result["permission_denials"]})
         raise DraftError("Gmail tool was denied: " + ", ".join(names) + ". Check gmail_draft_tool in config.toml.")

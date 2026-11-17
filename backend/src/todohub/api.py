@@ -214,7 +214,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     linear_factory = linear_factory or (lambda: Linear(get_linear_key()))
     periscope_factory = periscope_factory or (lambda: Periscope(settings.periscope_url))
     front = front_fn or bring_to_front
-    name_pane = name_fn or (lambda issue: pane_name(settings, issue))
+    name_claude = name_fn or (lambda issue: pane_name(settings, issue))
     token = os.environ.get("TODOHUB_TOKEN")
 
     def default_launcher(args: list[str]) -> None:
@@ -962,7 +962,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if not branch:
             raise HTTPException(400, "The branch is empty")
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
-        name = name_pane(issue)
+        name = name_claude(issue)
         try:
             result = periscope_call(lambda p: p.start(
                 repo=body.repo, branch=branch, ticket=issue["identifier"], title=issue["title"],

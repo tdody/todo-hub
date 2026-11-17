@@ -94,7 +94,7 @@ def test_client_when_periscope_is_down_or_slow():
 NAMED = {"identifier": "ENG-1", "title": "Rebin Globex grades for jane@globex.com"}
 
 
-def haiku(monkeypatch, *, stdout="", returncode=0, raises=None):
+def haiku(monkeypatch, *, stdout="", stderr="", returncode=0, raises=None):
     """Claude Code behind a patched subprocess.run; returns the commands it was given."""
     ran = []
 
@@ -102,7 +102,7 @@ def haiku(monkeypatch, *, stdout="", returncode=0, raises=None):
         ran.append(cmd)
         if raises:
             raise raises
-        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr(periscope.subprocess, "run", run)
     return ran
@@ -113,7 +113,19 @@ def test_pane_name_is_the_id_and_up_to_three_of_haikus_words(monkeypatch):
     assert pane_name(load_settings(), NAMED) == "eng-1-globex-grades-rebin"
     cmd = ran[0]
     assert cmd[cmd.index("--model") + 1] == "haiku" and cmd[cmd.index("--tools") + 1] == ""
+    assert "--strict-mcp-config" in cmd    # no MCP server loads, so the run can only answer with text
     assert "Rebin Globex grades for" in cmd[2] and "jane@" not in cmd[2]
+
+
+def test_pane_name_folds_accented_letters(monkeypatch):
+    haiku(monkeypatch, stdout=json.dumps({"result": "export-données"}))
+    assert pane_name(load_settings(), NAMED) == "eng-1-export-donnees"
+
+
+def test_pane_name_is_the_id_alone_when_the_title_has_no_words(monkeypatch):
+    ran = haiku(monkeypatch, stdout=json.dumps({"result": "focus-time"}))
+    assert pane_name(load_settings(), {"identifier": "ENG-1", "title": "https://globex.example/q3-report"}) == "eng-1"
+    assert ran == []
 
 
 @pytest.mark.parametrize("answer", [
@@ -121,12 +133,20 @@ def test_pane_name_is_the_id_and_up_to_three_of_haikus_words(monkeypatch):
     {"raises": subprocess.TimeoutExpired("claude", 30)},
     {"stdout": "not json", "returncode": 1},
     {"stdout": json.dumps({"is_error": True, "result": "Credit balance is too low"}), "returncode": 1},
+    {"stdout": json.dumps({"is_error": True, "result": "API Error overloaded"}), "returncode": 0},
+    {"stdout": json.dumps({"result": "grade-rebin"}), "returncode": 1},
     {"stdout": json.dumps({"result": "—"})},
 ])
 def test_pane_name_is_the_id_alone_when_haiku_gives_no_words(monkeypatch, caplog, answer):
     haiku(monkeypatch, **answer)
     assert pane_name(load_settings(), NAMED) == "eng-1"
     assert "ENG-1" in caplog.text
+
+
+def test_pane_name_logs_why_claude_code_failed(monkeypatch, caplog):
+    haiku(monkeypatch, stderr="error: unknown option '--strict-mcp-config'", returncode=1)
+    assert pane_name(load_settings(), NAMED) == "eng-1"
+    assert "unknown option" in caplog.text
 
 
 def test_fill_prompt_fills_three_tokens_and_keeps_other_braces():
