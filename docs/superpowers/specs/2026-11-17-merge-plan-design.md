@@ -43,7 +43,7 @@ The box replaces the duplicate panel, in the same place (after the why and the q
   - **Add N sub-issues:** the subtask editor that exists today. It does not show when the card has no subtasks.
   - **Attach N links:** the source link and the card's links. Links already on the issue are not attached again (as today).
 - The main button: **Merge into ENG-412**.
-- The 2 boxes keep their state for each card, with the pick. **m** uses that state, also when another part is picked.
+- The 2 boxes keep their state for each card, with the pick.
 
 The default comment is the text today's `merge_text` writes, without its last 2 lines, built from what the card shows (so a title edit shows in it):
 
@@ -69,7 +69,7 @@ Sam asked for churn by segment before Thursday's review.
 ### Keys
 
 - **⌘↩** and **a**: press the main button. Today ⌘↩ works only in the title box; it now works from anywhere in the Inbox, except in the draft reply.
-- **m**: merge, whatever the pick (as today).
+- **m**: selects Merge and shows its plan. With Merge already selected, it merges.
 - **d**: pick Drop.
 - In the shortcuts sheet: **m** "Merge into the linked issue"; **d** "Drop (on a linked card: pick Drop)".
 

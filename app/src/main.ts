@@ -3494,7 +3494,7 @@ const SHORTCUTS: [string, string][] = [
   ["a or ⌘↩", "Approve (or close / post / track); on a linked card, do its pick"],
   ["d, then 1–5", "Drop, with a reason (on a linked card: pick Drop)"],
   ["s, then 1–3", "Snooze: tomorrow / next Monday / in a week"],
-  ["m", "Merge into the linked issue"],
+  ["m", "Linked card: select Merge; with Merge selected, merge"],
   ["x", "Select for bulk actions"],
   ["⌘Z", "Undo the last action (approve, drop, snooze, issue edit)"],
   ["⌘R", "Reload from Linear now (it also reloads every minute)"],
@@ -3711,7 +3711,12 @@ document.addEventListener("keydown", (e) => {
     case "j": if (state.tab === "inbox") moveFocus(1); else if (issueList) stepList(1); break;
     case "k": if (state.tab === "inbox") moveFocus(-1); else if (issueList) stepList(-1); break;
     case "a": if (c) decide(c); break;
-    case "m": if (c && isLinked(c)) void merge(c); break;
+    case "m":     // shows the Merge plan first; with Merge selected, merges
+      if (c && isLinked(c)) {
+        if (linkChoice(c).pick === "merge") void merge(c);
+        else { linkChoice(c).pick = "merge"; render(); }
+      }
+      break;
     case "x": if (c) toggleSelect(c.id); break;
     case "e": if (c) { e.preventDefault(); focusedCard()?.querySelector<HTMLInputElement>(".title-input")?.focus(); } break;
     case "d":

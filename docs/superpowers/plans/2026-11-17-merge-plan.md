@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-17-merge-plan-design.md`.
 
-Review fixes changed the code after this plan was written. Task 2: the backend checks again that the card's date is sooner and its priority higher. Task 3: the preview's `toggle` guard, no empty comment draft, the comment ignores the stored copy, a guarded Drop, clearer names. Task 4: holding ⌘↩ decides one card; a click on a drop reason or a merge box re-renders. Task 5: `selectedCandidates()`. Task 6: `.segmented.link-switch` selectors, wrapping, the comment box's indent. The code is the source of truth.
+Review fixes changed the code after this plan was written. Task 2: the backend checks again that the card's date is sooner and its priority higher. Task 3: the preview's `toggle` guard, no empty comment draft, the comment ignores the stored copy, a guarded Drop, clearer names. Task 4: holding ⌘↩ decides one card; a click on a drop reason or a merge box re-renders. Task 5: `selectedCandidates()`. Task 6: `.segmented.link-switch` selectors, wrapping, the comment box's indent. After the final review, **m** selects Merge when another pick is selected. The code is the source of truth.
 
 **Worktree:** `/Users/thibaultdody/dev/worktrees/todo-hub/main`, branch `merge-plan`. Run every command from there (Task 0 sets it up).
 
