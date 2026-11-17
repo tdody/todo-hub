@@ -41,7 +41,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
     - The subtasks it adds as sub-issues, and the links it attaches.
   - **Create issue** (or **Track**) shows the usual fields.
   - **Drop** shows the drop reasons, with Duplicate selected. 1–5 select another reason.
-- Keys on a linked card: **a** or ⌘↩ press the button, **m** merges, and **d** selects Drop.
+- Keys on a linked card: **a** or ⌘↩ press the button, **m** selects Merge (with Merge selected, it merges), and **d** selects Drop.
 - Undo removes the comment, links and sub-issues, and puts the issue's old due date and priority back.
 - Bulk **Approve** leaves linked cards out; decide them one at a time.
 
