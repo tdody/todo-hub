@@ -441,13 +441,13 @@ async function drop(c: Candidate, reason: DropReason = "other") {
     await api.drop(c.id, reason);
     state.candidates = state.candidates.filter((x) => x.id !== c.id);
     await swipeAway(c.id, "drop");
-    render();
     offerUndo(`Dropped "${c.title}"`, `"${c.title}" is back in the Inbox`, () => undoDecisions([c.id], false));
     void suggestMute(c);
   } catch (e) {
     fail(e);
   } finally {
     state.busy.delete(key);
+    render();
   }
 }
 
@@ -3479,10 +3479,10 @@ async function submitCapture() {
 // ---- keyboard -----------------------------------------------------------------------------------
 const SHORTCUTS: [string, string][] = [
   ["j / k", "Next / previous task or pull request"],
-  ["a", "Approve (or close / post / track)"],
-  ["d, then 1–5", "Drop, with a reason"],
+  ["a or ⌘↩", "Approve (or close / post / track); on a linked card, do its pick"],
+  ["d, then 1–5", "Drop, with a reason (on a linked card: pick Drop)"],
   ["s, then 1–3", "Snooze: tomorrow / next Monday / in a week"],
-  ["m", "Merge a possible duplicate into the existing issue"],
+  ["m", "Merge into the linked issue"],
   ["x", "Select for bulk actions"],
   ["⌘Z", "Undo the last action (approve, drop, snooze, issue edit)"],
   ["⌘R", "Reload from Linear now (it also reloads every minute)"],
@@ -3619,6 +3619,14 @@ document.addEventListener("keydown", (e) => {
       return;
     }
   }
+  // ⌘↩ presses the focused Inbox card's main button: from the page or a field in the card, but
+  // not from its draft reply.
+  if (state.tab === "inbox" && (e.metaKey || e.ctrlKey) && e.key === "Enter" && !document.querySelector(".overlay")
+      && (!typing || target.closest(".ib-pane .card")) && !target.closest(".reply")) {
+    const c = focusedCard() ? focusedCandidate() : undefined;
+    if (c) { e.preventDefault(); decide(c); }
+    return;
+  }
   if (e.key === "Escape" && state.balanceOpen) { state.balanceOpen = false; render(); return; }
   // The periscope popover takes the keys: Esc closes it, its own keydown handles ↵, and no key acts
   // on the issue behind it. The ⌘ keys above still work.
@@ -3669,6 +3677,12 @@ document.addEventListener("keydown", (e) => {
 
   // Only act on a card you can see (a filter may have hidden the focused one).
   const c = focusedCard() ? focusedCandidate() : undefined;
+  // A linked card with Drop picked takes 1–5 as the reason.
+  if (c && isLinked(c) && linkChoice(c).pick === "drop" && /^[1-5]$/.test(e.key)) {
+    linkChoice(c).reason = DROP_REASONS[Number(e.key) - 1].value;
+    render();
+    return;
+  }
   switch (e.key) {
     case "?": showShortcuts(); break;
     case "t": nextTheme(); renderHeader(); break;
@@ -3682,11 +3696,14 @@ document.addEventListener("keydown", (e) => {
     case "c": e.preventDefault(); goTab("inbox"); captureInput.focus(); break;
     case "j": if (state.tab === "inbox") moveFocus(1); else if (issueList) stepList(1); break;
     case "k": if (state.tab === "inbox") moveFocus(-1); else if (issueList) stepList(-1); break;
-    case "a": if (c) void approve(c); break;
-    case "m": if (c?.possible_duplicate && (c.kind === "task" || c.kind === "waiting")) void merge(c); break;
+    case "a": if (c) decide(c); break;
+    case "m": if (c && isLinked(c)) void merge(c); break;
     case "x": if (c) toggleSelect(c.id); break;
     case "e": if (c) { e.preventDefault(); focusedCard()?.querySelector<HTMLInputElement>(".title-input")?.focus(); } break;
-    case "d": if (c) { closeMenus(); const m = focusedCard()?.querySelector<HTMLDetailsElement>("details.drop-menu:not(.snooze-menu)"); if (m) m.open = true; } break;
+    case "d":
+      if (c && isLinked(c)) { linkChoice(c).pick = "drop"; render(); }
+      else if (c) { closeMenus(); const m = focusedCard()?.querySelector<HTMLDetailsElement>("details.drop-menu:not(.snooze-menu)"); if (m) m.open = true; }
+      break;
     case "s": if (c) { closeMenus(); const m = focusedCard()?.querySelector<HTMLDetailsElement>("details.snooze-menu"); if (m) m.open = true; } break;
     default: return;
   }
