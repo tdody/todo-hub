@@ -483,6 +483,16 @@ Soft and friendly, small and calm.
 - **Focused:** accent border plus a 1px accent ring. **Selected (bulk):** a 6% accent tint.
 - **Decided:** approved turns green-ringed with a 9% green tint, then swipes off to the right with a slight tilt (420ms); dropped turns red and swipes off to the left. With Reduce motion it fades out (160ms).
 
+### Linked issue box (Inbox)
+
+A card linked to one of your open issues shows the issue, a switch, and the plan for the pick.
+
+- **Box:** Shaded Paper, Hairline border, 8px corners, 10px × 12px padding. An 11px uppercase Pencil heading at 700 ("Adds to an open issue"), the identifier (a link at 600) and the title, then the status and priority pills and "due Nov 28" in 12px Pencil.
+- **Switch:** the segmented control of the Group control, across the box; the 3 parts share its width. Claude's recommendation has a 6px dot in the text color. Under it, a 12px Pencil line: "Claude recommends Merge" in Ink at 600, then the reason.
+- **Plan:** an 11px uppercase heading ("Merge will change ENG-412"), then one 13px line for each change, with a Pencil icon (✎, +) or a checkbox. An old value is Pencil and struck through; the new one is the Done pill ink (`s-done-ink`) at 600. The comment shows as Markdown in a Paper box with a Hairline border, at 12px.
+- **Drop:** the reasons as radio rows, each with its number key at the right.
+- **Footer:** Snooze ▾ and one primary button that names the pick ("Merge into ENG-412", "Create issue", "Drop"). No Drop ▾ menu.
+
 ### List items and the reading pane
 
 - **List item:** no border or fill at rest; hover shows a 60% Paper wash; selected becomes Paper with an accent-tinted border, the Selected row shadow and a 600 title. One line of 12px meta under the title.

@@ -544,8 +544,10 @@ export const api = {
   editCandidate: (id: number, edit: CandidateEdit) => call<Candidate>("PATCH", `/api/candidates/${id}`, edit),
   approve: (id: number, edit: CandidateEdit) =>
     call<ApproveResult>("POST", `/api/candidates/${id}/approve`, edit),
-  /** Add a possible duplicate to the issue it duplicates instead of creating a new one. */
-  merge: (id: number, edit: CandidateEdit) => call<ApproveResult>("POST", `/api/candidates/${id}/merge`, edit),
+  /** Merge a linked card into its open issue. ``edit.comment`` is the text to post; the flags set
+   *  the issue's due date and priority to the card's. */
+  merge: (id: number, edit: CandidateEdit, fields: { move_due_date: boolean; raise_priority: boolean }) =>
+    call<ApproveResult>("POST", `/api/candidates/${id}/merge`, { ...edit, ...fields }),
   /** Save a reply as a Gmail draft in the email's thread (nothing is sent). */
   replyDraft: (id: number, body: string) => call<{ url: string | null }>("POST", `/api/candidates/${id}/reply-draft`, { body }),
   issuePreview: (ident: string) => call<IssuePreview>("GET", `/api/issues/${encodeURIComponent(ident)}/preview`),

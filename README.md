@@ -25,16 +25,25 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - a required link back to its source, plus the links mentioned in it;
   - subtasks when the source spells out steps;
   - a suggested client label, project, priority and due date;
-  - a "possible duplicate of ENG-…" panel when one of your open issues may already cover it (see below).
+  - a link to one of your open issues when that issue may already cover it (see below).
 
-**Possible duplicates**
-- The sweep recommends one of three choices, with a one-line reason:
-  - **Drop as duplicate:** the issue already covers this exact task.
-  - **Merge into ENG-…:** same work, but this adds something. Merging posts a comment on the issue with what's new (title, why, quote, due date, source link), attaches the new links, and creates the subtasks as sub-issues. No new issue is made.
+**Linked issues**
+- When one of your open issues may already cover a card, the sweep links them and recommends one of three picks, with a one-line reason:
+  - **Merge:** same work, but this adds something (a new ask, a date, a step, a link).
   - **Create new:** related, but a separate deliverable.
-- The recommended choice is highlighted, and all three are always available. **m** merges from the keyboard.
-- **Show ENG-…** expands a preview of the existing issue: status, priority, due date, assignee, description, and its latest three comments.
-- Merges can be undone like approvals: the comment, links and sub-issues are removed.
+  - **Drop:** the issue already covers this exact task.
+- The card shows the linked issue (status, priority, due date; **Show description and comments** for the rest) and a switch with the three picks. Claude's recommendation is selected at first and has a dot. The card below the switch changes with the pick, and one button does it (**a** or ⌘↩):
+  - **Merge into ENG-…** shows what it will change on the issue. No new issue is made.
+    - The comment it posts. **Edit** changes it. The source link goes under it.
+    - **Move the due date**: shown when the card has a due date and the issue has a later one or none.
+    - **Raise the priority**: shown when the card has a priority and the issue has a lower one or none.
+    - Both boxes start ticked. Untick a box to skip that change.
+    - The subtasks it adds as sub-issues, and the links it attaches.
+  - **Create issue** (or **Track**) shows the usual fields.
+  - **Drop** shows the drop reasons, with Duplicate selected. 1–5 select another reason.
+- Keys on a linked card: **a** or ⌘↩ press the button, **m** selects Merge (with Merge selected, it merges), and **d** selects Drop.
+- Undo removes the comment, links and sub-issues, and puts the issue's old due date and priority back.
+- Bulk **Approve** leaves linked cards out; decide them one at a time.
 
 **Task icons**
 - Every card and row shows the client's logo with a small badge for the task type. Work with no client shows the type icon on its own.
@@ -48,10 +57,10 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 - Issues from a HubSpot ticket are proposed for closing once the ticket is closed.
 
 **Review**
-- **List and pane:** the Inbox lists the candidates on the left, two lines each: the title, then the source, who, and chips for what's set (client, High/Urgent, due date, red when late; "Same as ENG-123" or "Adds to ENG-123" for a possible duplicate, "Looks handled" when Linear already covers it). The selected one opens in full on the right: why, the excerpt, the duplicate panel, the draft reply, links, subtasks, the fields to edit, and its decision. ↑↓ or **j**/**k** move through the list; after a decision the next one is selected. Hover a row for its checkbox (bulk select).
-- Approve (⌘↩ or **a**), drop with a reason (**d**, 1–5), snooze (**s**, 1–3), bulk approve or drop, and full keyboard navigation (**?** lists the shortcuts).
+- **List and pane:** the Inbox lists the candidates on the left, two lines each: the title, then the source, who, and chips for what's set (client, High/Urgent, due date, red when late; "Same as ENG-123", "Adds to ENG-123" or "Related to ENG-123" for a linked issue, "Looks handled" when Linear already covers it). The selected one opens in full on the right: why, the excerpt, the linked issue and its plan, the draft reply, links, subtasks, the fields to edit, and its decision. ↑↓ or **j**/**k** move through the list; after a decision the next one is selected. Hover a row for its checkbox (bulk select).
+- Approve (⌘↩ or **a**), drop with a reason (**d**, 1–5), snooze (**s**, 1–3), bulk approve (linked cards left out) or drop, and full keyboard navigation (**?** lists the shortcuts).
 - Dropped reasons and recent decisions are fed back into the next sweep.
-- **Mute rules:** after you drop several items from the same sender, Slack channel or GitHub repo (3 in 30 days, none approved, not counting "already done" or "duplicate"), TodoHub offers to stop proposing them. "Not now" is remembered. The Drop menu also has **Drop and mute …**.
+- **Mute rules:** after you drop several items from the same sender, Slack channel or GitHub repo (3 in 30 days, none approved, not counting "already done" or "duplicate"), TodoHub offers to stop proposing them. "Not now" is remembered. The Drop menu also has **Drop and mute …** (linked cards have no Drop menu).
   - Muting also drops cards already waiting from that source, and Undo brings them back.
   - Muted sources are listed under **Muted** at the bottom of the Inbox, with how many items each has blocked and an **Unmute** button.
   - The sweep is told to skip muted sources, and `add_candidate` refuses anything from them that still gets through.
@@ -60,7 +69,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - for email, **Save as Gmail draft**. This saves a reply in the original thread, to the sender only, with your signature. Nothing is sent. It's a one-off Claude Code run allowed only Gmail's `get_message` and `create_draft`, set by `gmail_draft_tool` in `config.toml`.
 - **Undo:** approve, drop, snooze, bulk actions, and status, priority or due-date edits each show a banner with **Undo**. **⌘Z** undoes your recent actions one at a time, for up to 10 minutes; in a text field it undoes typing as usual. Undoing an approval puts the card back in the Inbox and reverses what it did in Linear:
   - created issues and subtasks go to Linear's trash, where they can be restored for 30 days;
-  - a closed issue gets its old status back;
+  - a closed issue gets its old status back, and an issue you merged into gets its old due date and priority back;
   - a posted update is deleted.
 
   Approvals made before undo existed can't be undone this way. **Block time** isn't covered either; delete the calendar event instead.
@@ -94,7 +103,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - **Approval rate:** approved ÷ (approved + dropped) per week; **By source and why you dropped** unfolds the per-source table and the breakdown of drop reasons.
 - **Sweep history** (a dialog from **Sweep history →** in the sources popover, or the sweep-cost tile): cost and turns for each run (scheduled, run now, capture, re-plan or wrap-up), with its log, plus the average cost per sweep this week against last week (re-plans and wrap-up redos aren't counted as sweeps).
 - **Sidebar:** Inbox, Today, Client, Dev, Pull requests and Insights on the left with their counts, then your clients, the ones that need you first: overdue issues ("2 late"), then a meeting still ahead today ("2:30"), then the most open issues. Click a client to see its issues in the Client tab. Below, **Projects**: the projects of your open issues, Client and Dev (a client issue can belong to a project too), late ones first and then the busiest, with "N late" or the open count. Click one for its own view: every open issue in the project grouped by status, as in By status (In Progress first, backlog behind **Show backlog**), each row naming its client, with the same reading pane and a header like "3 open · 1 client, 2 dev"; the filter searches within it, and any tab in the sidebar leaves it. Issues without a project stay under "No project" in Dev. Each list shows six, with **+ N more**. The **+** captures a task. At the bottom, one line sums up the sources: a green dot and the next sweep ("next 12pm"), a red dot and "1 error" (or "2 errors") when a source's last check failed, or "Sweeping…". Click it (or press **r**) for the Sources popover: Slack, Gmail, Grain, Calendar, HubSpot, Linear and GitHub with when each last worked, and the reason under any that failed. Hover a source and click **↻** to check only that one: it reads what's new since that source last worked, with a smaller Claude run (GitHub needs none; Calendar re-reads today's and tomorrow's agenda). **Run all** sweeps everything; **Sweep history →** opens the run list in Insights. The theme and shortcuts sit next to the line. In a narrow window the sidebar shrinks to icons.
-- **Changes you make in Linear:** Client, Dev and Today read Linear every minute and when the window comes back to the front. **⌘R** reloads now and also re-reads labels, projects and statuses (a new client label shows up without a restart) and re-checks the Inbox. Before each sweep, and on ⌘R, every pending suggestion is compared with your issues, and one that looks handled already gets a green "Looks handled in Linear" note: the issue it's about or its possible duplicate was closed or canceled; a closed or canceled issue from the last 14 days has a close title (similarity 0.78, or 0.66 with the same client label); or an open issue you created after the suggestion arrived has a close title. Each note has **Drop as already done** (or **Drop as duplicate** for a ticket you opened) and **Keep**, which clears it and never matches that issue again. A banner above the cards drops them all in one click, with undo. It's a title comparison, not a model, so it costs nothing.
+- **Changes you make in Linear:** Client, Dev and Today read Linear every minute and when the window comes back to the front. **⌘R** reloads now and also re-reads labels, projects and statuses (a new client label shows up without a restart) and re-checks the Inbox. Before each sweep, and on ⌘R, every pending suggestion is compared with your issues, and one that looks handled already gets a green "Looks handled in Linear" note: the issue it's about or its linked issue was closed or canceled; a closed or canceled issue from the last 14 days has a close title (similarity 0.78, or 0.66 with the same client label); or an open issue you created after the suggestion arrived has a close title. Each note has **Drop as already done** (or **Drop as duplicate** for a ticket you opened) and **Keep**, which clears it and never matches that issue again. A banner above the cards drops them all in one click, with undo. It's a title comparison, not a model, so it costs nothing.
 - **Daylight theme:** the theme button opens a menu of System (follows the Mac), Light, Dark and **Daylight** (with the current phase and when the next starts); **t** still cycles them. Daylight changes the colors through the day: Morning (cream and amber, from 6:00 or 30 minutes before sunrise, whichever is earlier) → Day (the Light theme, 10:30–2:00) → Afternoon (warm sand, until an hour before sunset) → Dusk (lavender, an hour each side of sunset) → Night (indigo dark, from an hour after sunset). Light phases blend over 30 minutes; Dusk to Night switches at once. Sunset is worked out on the Mac for the city your time zone is named after (America/New_York → New York), or for `daylight_latitude` / `daylight_longitude` under `[app]` in config.toml (with `daylight_place` as its name). The button's tooltip says the phase, when the next one starts, and today's sunset and where it was worked out for. Status colors and pills keep their meaning in every phase.
 - **Settings** (bottom of the sidebar, ⌘7 or ⌘,): one page with four sections; a list on the left jumps to each. Changes save as you make them, to `settings.json` in the TodoHub folder, which wins over `config.toml` for these keys (config.toml stays as you wrote it). Nothing on the page can send anything.
   - **Appearance:** the four styles as small pictures (the theme button and **t** change the same setting), and where Daylight follows the sun: a place name with latitude and longitude, or **Use my time zone**. It shows today's sunrise and sunset there.
