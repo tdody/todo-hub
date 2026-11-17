@@ -57,10 +57,16 @@ class CandidateEdit(BaseModel):
     due_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     priority: int | None = Field(default=None, ge=0, le=4)
     subtasks: list[SubtaskIn] | None = Field(default=None, max_length=10)
-    comment: str | None = Field(default=None, min_length=1, max_length=2000)
+    comment: str | None = Field(default=None, min_length=1, max_length=4000)
     project: str | None = None
     category: Literal["code", "analysis", "model", "review", "meeting", "email", "writing", "admin"] | None = None
     reply_draft: str | None = Field(default=None, max_length=4000)
+
+
+class MergeIn(CandidateEdit):
+    """A merge: the card's edits (``comment`` is the text to post) and the issue fields to change."""
+    move_due_date: bool = False      # set the issue's due date to the card's
+    raise_priority: bool = False     # set the issue's priority to the card's
 
 
 class MuteIn(BaseModel):
@@ -607,37 +613,28 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "warnings": warnings,
         }
 
-    def merge_text(c: dict) -> str:
-        source = SOURCE_NAMES.get(c["source"], c["source"])
-        parts = [f"**More from {source}{' · ' + c['who'] if c.get('who') else ''}:** {c['title']}"]
-        if c.get("why"):
-            parts.append(c["why"])
-        if c.get("excerpt"):
-            parts.append("\n".join("> " + line for line in c["excerpt"].splitlines()))
-        if c.get("due_date"):
-            parts.append(f"**Due:** {c['due_date']}")
-        parts.append(source_line(c))
-        return "\n\n".join(parts) + "\n\n_Merged from TodoHub._"
-
     @app.post("/api/candidates/{cid}/merge", dependencies=auth)
-    def merge(cid: int, edit: CandidateEdit | None = None) -> dict:
-        """Add a candidate to the open issue it duplicates, instead of making a new issue:
-        a comment with what's new, its links, and its subtasks as sub-issues."""
+    def merge(cid: int, body: MergeIn | None = None) -> dict:
+        """Add a candidate to the open issue it is linked to, instead of making a new issue: the
+        comment, its links, its subtasks as sub-issues and, when asked, its due date and priority."""
         c = candidate_or_404(cid)
         if c["status"] != "pending":
             raise HTTPException(409, f"Already {c['status']}")
         if c["kind"] not in ("task", "waiting") or not c.get("possible_duplicate"):
             raise HTTPException(400, "Only a task flagged as a possible duplicate can be merged")
-        if edit and edit.model_fields_set:
-            c = edit_candidate(cid, edit)
+        body = body or MergeIn()
+        if body.model_fields_set:
+            c = edit_candidate(cid, body)
+        if not c.get("comment"):
+            raise HTTPException(400, "A merge needs a comment")
         if not db.claim(cid):
             raise HTTPException(409, "Already being approved")
         try:
-            return merge_claimed(c)
+            return merge_claimed(c, body)
         finally:
             db.release(cid)
 
-    def merge_claimed(c: dict) -> dict:
+    def merge_claimed(c: dict, body: MergeIn) -> dict:
         cid = c["id"]
         m = team_meta()
         warnings: list[str] = []
@@ -649,7 +646,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         try:
             try:
                 target = client.get_issue(c["possible_duplicate"])
-                comment_id = client.create_comment(target["id"], merge_text(c))
+                comment_id = client.create_comment(
+                    target["id"], f"{c['comment']}\n\n{source_line(c)}\n\n_Merged from TodoHub._")
             except LinearError as exc:
                 raise HTTPException(502, str(exc))
             # The comment is in, so the candidate counts as handled; the rest is best effort.
@@ -657,6 +655,24 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             undo: dict = {"issue": target["id"], "comments": [comment_id] if comment_id else [],
                           "attachments": [], "issues": []}
             db.set_undo(cid, undo)
+
+            changes = {}
+            if body.move_due_date:
+                changes["dueDate"] = c["due_date"]
+            if body.raise_priority:
+                changes["priority"] = c["priority"]
+            if changes:
+                undo["restore"] = {field: target.get(field) for field in changes}
+                db.set_undo(cid, undo)
+                try:
+                    target = client.update_issue(target["id"], changes)
+                except LinearError as exc:
+                    undo.pop("restore")
+                    db.set_undo(cid, undo)
+                    what = " and ".join(name for field, name in (("dueDate", "due date"), ("priority", "priority"))
+                                        if field in changes)
+                    warnings.append(f"{target['identifier']}'s {what} {'were' if len(changes) > 1 else 'was'} "
+                                    f"not changed: {exc}")
 
             source = SOURCE_NAMES.get(c["source"], c["source"])
             links = ([{"url": c["source_url"], "title": source}] if c.get("source_url") else []) + c["links"]
@@ -804,8 +820,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.post("/api/candidates/{cid}/undo", dependencies=auth)
     def undo(cid: int) -> dict:
         """Put an approved or dropped candidate back in the Inbox, reversing what it did in Linear:
-        created issues go to Linear's trash, a closed or merged-into issue gets its old fields back, and posted
-        comments are deleted. If Linear fails part-way, what's left is kept for a retry."""
+        created issues go to Linear's trash, a closed or merged-into issue gets its old fields back,
+        and posted comments are deleted. If Linear fails part-way, what's left is kept for a retry."""
         c = candidate_or_404(cid)
         if c["status"] == "pending":
             raise HTTPException(409, "Nothing to undo: it's already in the Inbox")
