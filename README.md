@@ -25,16 +25,19 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - a required link back to its source, plus the links mentioned in it;
   - subtasks when the source spells out steps;
   - a suggested client label, project, priority and due date;
-  - a "possible duplicate of ENG-…" panel when one of your open issues may already cover it (see below).
+  - a link to one of your open issues when that issue may already cover it (see below).
 
-**Possible duplicates**
-- The sweep recommends one of three choices, with a one-line reason:
-  - **Drop as duplicate:** the issue already covers this exact task.
-  - **Merge into ENG-…:** same work, but this adds something. Merging posts a comment on the issue with what's new (title, why, quote, due date, source link), attaches the new links, and creates the subtasks as sub-issues. No new issue is made.
+**Linked issues**
+- When one of your open issues may already cover a card, the sweep links them and recommends one of three picks, with a one-line reason:
+  - **Merge:** same work, but this adds something (a new ask, a date, a step, a link).
   - **Create new:** related, but a separate deliverable.
-- The recommended choice is highlighted, and all three are always available. **m** merges from the keyboard.
-- **Show ENG-…** expands a preview of the existing issue: status, priority, due date, assignee, description, and its latest three comments.
-- Merges can be undone like approvals: the comment, links and sub-issues are removed.
+  - **Drop:** the issue already covers this exact task.
+- The card shows the linked issue (status, priority, due date; **Show description and comments** for the rest) and a switch with the three picks. Claude's pick comes first and has a dot. The card below the switch changes with the pick, and one button does it (**a** or ⌘↩):
+  - **Merge into ENG-…** lists what it will change on the issue: the comment it posts (**Edit** changes it; the source link is added), **Move the due date** when the card is due sooner, **Raise the priority** when the card is more urgent (both ticked; untick to skip), the subtasks it adds as sub-issues, and the links it attaches. No new issue is made. **m** merges from the keyboard.
+  - **Create issue** (or **Track**) shows the usual fields.
+  - **Drop** shows the drop reasons, with Duplicate picked; 1–5 pick another.
+- Undo removes the comment, links and sub-issues, and puts the issue's old due date and priority back.
+- Bulk **Approve** leaves linked cards out; decide them one at a time.
 
 **Task icons**
 - Every card and row shows the client's logo with a small badge for the task type. Work with no client shows the type icon on its own.
@@ -48,8 +51,8 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 - Issues from a HubSpot ticket are proposed for closing once the ticket is closed.
 
 **Review**
-- **List and pane:** the Inbox lists the candidates on the left, two lines each: the title, then the source, who, and chips for what's set (client, High/Urgent, due date, red when late; "Same as ENG-123" or "Adds to ENG-123" for a possible duplicate, "Looks handled" when Linear already covers it). The selected one opens in full on the right: why, the excerpt, the duplicate panel, the draft reply, links, subtasks, the fields to edit, and its decision. ↑↓ or **j**/**k** move through the list; after a decision the next one is selected. Hover a row for its checkbox (bulk select).
-- Approve (⌘↩ or **a**), drop with a reason (**d**, 1–5), snooze (**s**, 1–3), bulk approve or drop, and full keyboard navigation (**?** lists the shortcuts).
+- **List and pane:** the Inbox lists the candidates on the left, two lines each: the title, then the source, who, and chips for what's set (client, High/Urgent, due date, red when late; "Same as ENG-123", "Adds to ENG-123" or "Related to ENG-123" for a linked issue, "Looks handled" when Linear already covers it). The selected one opens in full on the right: why, the excerpt, the linked issue and its plan, the draft reply, links, subtasks, the fields to edit, and its decision. ↑↓ or **j**/**k** move through the list; after a decision the next one is selected. Hover a row for its checkbox (bulk select).
+- Approve (⌘↩ or **a**), drop with a reason (**d**, 1–5), snooze (**s**, 1–3), bulk approve (linked cards left out) or drop, and full keyboard navigation (**?** lists the shortcuts).
 - Dropped reasons and recent decisions are fed back into the next sweep.
 - **Mute rules:** after you drop several items from the same sender, Slack channel or GitHub repo (3 in 30 days, none approved, not counting "already done" or "duplicate"), TodoHub offers to stop proposing them. "Not now" is remembered. The Drop menu also has **Drop and mute …**.
   - Muting also drops cards already waiting from that source, and Undo brings them back.
@@ -60,7 +63,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - for email, **Save as Gmail draft**. This saves a reply in the original thread, to the sender only, with your signature. Nothing is sent. It's a one-off Claude Code run allowed only Gmail's `get_message` and `create_draft`, set by `gmail_draft_tool` in `config.toml`.
 - **Undo:** approve, drop, snooze, bulk actions, and status, priority or due-date edits each show a banner with **Undo**. **⌘Z** undoes your recent actions one at a time, for up to 10 minutes; in a text field it undoes typing as usual. Undoing an approval puts the card back in the Inbox and reverses what it did in Linear:
   - created issues and subtasks go to Linear's trash, where they can be restored for 30 days;
-  - a closed issue gets its old status back;
+  - a closed issue gets its old status back, and an issue you merged into gets its old due date and priority back;
   - a posted update is deleted.
 
   Approvals made before undo existed can't be undone this way. **Block time** isn't covered either; delete the calendar event instead.
