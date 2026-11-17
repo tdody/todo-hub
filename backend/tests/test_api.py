@@ -568,17 +568,19 @@ def test_merge_adds_comment_links_and_subtasks_then_undoes(env):
     cid = seed(db, title="Send Jordan the rebinned grade table", possible_duplicate="ENG-1", due_date="2026-11-09",
                links=[{"url": "https://docs.google.com/d/9", "title": "Grade table"}],
                subtasks=[{"title": "Export the table"}])
-    r = client.post(f"/api/candidates/{cid}/merge")
+    r = client.post(f"/api/candidates/{cid}/merge", json={"comment": "**More from Slack · Sam:** Send Jordan the table"})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["candidate"]["status"] == "approved" and body["candidate"]["linear_identifier"] == "ENG-1"
-    issue_id, text = fake.comments[0]
-    assert issue_id == "id-ENG-1" and "Send Jordan the rebinned grade table" in text and "**Due:** 2026-11-09" in text
-    assert "**More from Slack message · Sam:** Send Jordan the rebinned grade table" in text
+    assert fake.comments[0] == ("id-ENG-1", "**More from Slack · Sam:** Send Jordan the table\n\n"
+                                "**Source:** [Slack message](https://example.slack.com/archives/C1/p1)\n\n"
+                                "_Merged from TodoHub._")
+    assert db.get_candidate(cid)["comment"] == "**More from Slack · Sam:** Send Jordan the table"
+    assert fake.updated == []                       # no flag: the issue's fields stay
     assert fake.links == [("id-ENG-1", "https://docs.google.com/d/9", "Grade table")]   # no second source link
     assert fake.created[0]["parent_id"] == "id-ENG-1" and fake.created[0]["title"] == "Export the table"
     assert [s["title"] for s in body["subtasks"]] == ["Export the table"]
-    assert client.post(f"/api/candidates/{cid}/merge").status_code == 409
+    assert client.post(f"/api/candidates/{cid}/merge", json={"comment": "Again."}).status_code == 409
 
     r = client.post(f"/api/candidates/{cid}/undo")
     assert r.status_code == 200, r.text
@@ -599,7 +601,7 @@ def test_merge_sub_issues_follow_the_target(env):
     fake.team_states = ops_states
     cid = seed(db, title="Send Jordan the table", possible_duplicate="ENG-1", priority=2,
                subtasks=[{"title": "Export the table", "due_date": "2026-11-12"}, {"title": "Send it"}])
-    r = client.post(f"/api/candidates/{cid}/merge")
+    r = client.post(f"/api/candidates/{cid}/merge", json={"comment": "More."})
     assert r.status_code == 200, r.text
     made = fake.created[0]
     assert (made["team_id"], made["state_id"], made["project_id"]) == ("team-ops", "ops-next", "p-ops")
@@ -612,7 +614,7 @@ def test_merge_sub_issues_follow_the_target(env):
     fake.team_states = unreachable
     cid = seed(db, source_id="C1:z", title="Another", possible_duplicate="ENG-1",
                subtasks=[{"title": "Export the table"}, {"title": "Send it"}])
-    r = client.post(f"/api/candidates/{cid}/merge")
+    r = client.post(f"/api/candidates/{cid}/merge", json={"comment": "More."})
     assert r.status_code == 200, r.text
     assert r.json()["warnings"] == ["Subtask not created (Export the table): Can't reach Linear",
                                     "Subtask not created (Send it): Can't reach Linear"]
@@ -623,6 +625,60 @@ def test_merge_needs_a_flagged_duplicate(env):
     client, db, fake, _ = env
     cid = seed(db)
     assert client.post(f"/api/candidates/{cid}/merge").status_code == 400
+
+
+def test_merge_needs_a_comment(env):
+    client, db, fake, _ = env
+    dup_env(db)
+    cid = seed(db, possible_duplicate="ENG-1")
+    r = client.post(f"/api/candidates/{cid}/merge")
+    assert r.status_code == 400 and "comment" in r.json()["error"]
+    assert fake.comments == [] and db.get_candidate(cid)["status"] == "pending"
+    long = "x" * 2300                    # a 1,000-character why and quote, the title and the labels
+    assert client.post(f"/api/candidates/{cid}/merge", json={"comment": long}).status_code == 200
+    assert fake.comments[0][1].startswith(long + "\n\n**Source:**")
+
+
+def test_merge_moves_the_due_date_and_raises_the_priority_then_undoes(env):
+    client, db, fake, _ = env
+    dup_env(db)
+    fake.issues[0].update(dueDate="2026-11-28", priority=3)
+    cid = seed(db, possible_duplicate="ENG-1", due_date="2026-11-20", priority=2)
+    r = client.post(f"/api/candidates/{cid}/merge",
+                    json={"comment": "More.", "move_due_date": True, "raise_priority": True})
+    assert r.status_code == 200, r.text
+    assert fake.updated == [("id-ENG-1", {"dueDate": "2026-11-20", "priority": 2})]
+    assert (r.json()["issue"]["due_date"], r.json()["issue"]["priority"]) == ("2026-11-20", 2)
+    assert db.get_undo(cid)["restore"] == {"dueDate": "2026-11-28", "priority": 3}
+    assert client.post(f"/api/candidates/{cid}/undo").status_code == 200
+    assert fake.updated[-1] == ("id-ENG-1", {"dueDate": "2026-11-28", "priority": 3})
+    assert fake.deleted_comments == ["comment-1"]
+
+
+def test_merge_moves_only_the_due_date(env):
+    client, db, fake, _ = env
+    dup_env(db)
+    cid = seed(db, possible_duplicate="ENG-1", due_date="2026-11-20", priority=2)
+    r = client.post(f"/api/candidates/{cid}/merge", json={"comment": "More.", "move_due_date": True})
+    assert r.status_code == 200, r.text
+    assert fake.updated == [("id-ENG-1", {"dueDate": "2026-11-20"})]
+    assert db.get_undo(cid)["restore"] == {"dueDate": None}
+
+
+def test_merge_stays_when_the_field_update_fails(env):
+    client, db, fake, _ = env
+    dup_env(db)
+
+    def refuse(issue_id, changes):
+        raise LinearError("Can't reach Linear")
+    fake.update_issue = refuse
+    cid = seed(db, possible_duplicate="ENG-1", due_date="2026-11-20", priority=2)
+    r = client.post(f"/api/candidates/{cid}/merge",
+                    json={"comment": "More.", "move_due_date": True, "raise_priority": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["candidate"]["status"] == "approved"
+    assert r.json()["warnings"] == ["ENG-1's due date and priority were not changed: Can't reach Linear"]
+    assert "restore" not in db.get_undo(cid)
 
 
 def test_issue_preview(env):
