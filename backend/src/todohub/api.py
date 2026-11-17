@@ -33,7 +33,8 @@ from .config import (DEFAULT_PERISCOPE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SC
                      write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
-from .periscope import Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, remember_repo
+from .periscope import (Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, pane_name,
+                        remember_repo)
 from .selfcmd import self_command
 from .sources import SourceError
 from .sweep import _env, next_working_day
@@ -211,6 +212,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                draft_fn: Callable[[str, str], str | None] | None = None,
                periscope_factory: Callable[[], Periscope] | None = None,
                front_fn: Callable[[str], None] | None = None,
+               name_fn: Callable[[dict], str] | None = None,
                scheduler=schedule) -> FastAPI:
     settings = settings or load_settings()
     db = db or DB(settings.db_path)
@@ -218,6 +220,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     linear_factory = linear_factory or (lambda: Linear(get_linear_key()))
     periscope_factory = periscope_factory or (lambda: Periscope(settings.periscope_url))
     front = front_fn or bring_to_front
+    name_claude = name_fn or (lambda issue: pane_name(settings, issue))
     token = os.environ.get("TODOHUB_TOKEN")
 
     def default_launcher(args: list[str]) -> None:
@@ -973,16 +976,17 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.post("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
-        """Ask periscope to start Claude on the branch with the prompt, then remember the repo for the issue's
-        project (or client). A Claude already on the branch is answered as mode "existing"."""
+        """Ask periscope to start Claude on the branch with the prompt and a name from Haiku, then remember the
+        repo for the issue's project (or client). A Claude already on the branch is answered as mode "existing"."""
         branch = body.branch.strip()
         if not branch:
             raise HTTPException(400, "The branch is empty")
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
+        name = name_claude(issue)
         try:
             result = periscope_call(lambda p: p.start(
                 repo=body.repo, branch=branch, ticket=issue["identifier"], title=issue["title"],
-                prompt=body.prompt))
+                prompt=body.prompt, name=name))
         except HTTPException as exc:
             if exc.status_code == 409:
                 raise HTTPException(409, f"Periscope is already starting {issue['identifier']}.")

@@ -355,6 +355,29 @@ def _env() -> dict:
     return env
 
 
+class ClaudeCodeError(RuntimeError):
+    pass
+
+
+def run_claude_code(settings: Settings, cmd: list[str], timeout: int) -> dict:
+    """Run a one-off ``claude -p … --output-format json`` in the sweep dir and return its JSON result.
+    Raises ClaudeCodeError, with the reason, when Claude Code is missing, times out or fails."""
+    settings.sweep_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(cmd, cwd=settings.sweep_dir, env=_env(), capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise ClaudeCodeError(f"Can't find Claude Code at {settings.claude_path!r}.") from None
+    except subprocess.TimeoutExpired:
+        raise ClaudeCodeError(f"Claude Code did not finish in {timeout} s.") from None
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise ClaudeCodeError(f"Claude Code failed: {proc.stderr.strip()[:300]}") from None
+    if result.get("is_error") or proc.returncode != 0:
+        raise ClaudeCodeError(f"Claude Code failed: {str(result.get('result', ''))[:300]}")
+    return result
+
+
 def refresh_linear_context(settings: Settings, db: DB) -> list[dict]:
     """Cache client labels and open issues for the prompt. Falls back to the last cache on error."""
     try:
