@@ -509,6 +509,7 @@ def test_undo_close_reopens_and_deletes_comment(env):
     close = tools.propose_close(db, None, source="slack", source_id="C1:2", source_url="https://x/p1",
                                 target_issue="ENG-1", why="Sent.", excerpt="here")["id"]
     client.post(f"/api/candidates/{close}/approve")
+    assert db.get_undo(close)["restore"] == {"stateId": "s-Todo"}
     r = client.post(f"/api/candidates/{close}/undo")
     assert r.status_code == 200, r.text
     assert fake.updated[-1] == ("id-ENG-1", {"stateId": "s-Todo"})     # back to its old status
