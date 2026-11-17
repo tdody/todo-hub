@@ -152,7 +152,7 @@ uv run todohub set-linear-key    # Linear personal API key (hidden input, saved 
 uv run todohub check             # Linear, Claude Code, gh, schedule, settings
 ```
 
-Create the Linear key in your team's workspace, under Settings → Security & access → Personal API keys.
+Create the Linear key in your team's workspace, under Settings → Security & access → Personal API keys. The sweep looks for tasks for the person that key belongs to: `todohub check` prints the name. Set `sweep.about_me` to tell Claude what you do.
 
 ### 2. First sweep, by hand
 
@@ -217,6 +217,7 @@ Create a snitch with a **daily** interval and put its URL in `snitch_url`. Each 
 | `sweep.claude_path` | `claude` | Full path if launchd can't find Claude Code |
 | `sweep.model` / `max_turns` / `timeout_minutes` | `sonnet` / `60` / `20` | Per sweep |
 | `sweep.restricted` | `true` | Run Claude Code in restricted mode (see Safety) |
+| `sweep.about_me` | empty | What you do, in a few words. It follows your name in the prompts: "Ada Lovelace, a staff engineer (about half client work, half development)". Your name comes from your Linear account |
 | `sweep.slack_tools` / `gmail_tools` / `grain_tools` / `calendar_tools` / `hubspot_tools` | read-only lists | `[]` turns that source off |
 | `sweep.linear_mentions` / `github_reviews` | `true` | The two sources read without Claude's connectors |
 | `settings.json` (same folder) | none | Written by the Settings page: sources added, paused or removed; the schedule; the Daylight place; the periscope prompt. Wins over config.toml for those. Delete it to go back to config.toml |

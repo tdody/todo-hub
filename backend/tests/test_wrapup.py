@@ -98,7 +98,7 @@ def test_section_lists_the_day_and_the_week():
         "notes": [("2026-11-04", ["Sent Riley the file (ENG-3)"])], "client_done": 1, "done": 3,
     }
     text = wrapup.section(ctx)
-    assert "### Wrap up Thibault's day (Friday 2026-11-06)" in text
+    assert "### Wrap up the day (Friday 2026-11-06)" in text
     assert "ENG-1 [client: Globex; project: Improve our scoring models] Re-binning | due today | Todo" in text
     assert "due date pushed 3×" in text and "this morning's reason: Review at 2." in text
     assert "Monday's meetings:\n  (not read yet)" in text and "14:00–14:45 Globex review (external)" in text
@@ -193,7 +193,7 @@ def test_run_wrapup(tmp_path, monkeypatch):
     assert db.latest_run("wrapup")["id"] == run["id"] and db.latest_run() is None
     argv = json.loads((s.home / "argv.json").read_text())
     prompt = argv[argv.index("-p") + 1]
-    assert "### Wrap up Thibault's day" in prompt and "$" not in prompt
+    assert "### Wrap up the day" in prompt and "$" not in prompt
     assert "mcp__todo-db__report_wrapup" in argv[argv.index("--allowedTools") + 1].split(",")
 
 
@@ -210,8 +210,8 @@ def test_afternoon_sweep_wraps_up(tmp_path, monkeypatch):
     monkeypatch.setattr(wrapup, "wrapup_due", lambda db: True)
     sweep.run_sweep(s, "schedule")
     prompt = (lambda a: a[a.index("-p") + 1])(json.loads((s.home / "argv.json").read_text()))
-    assert "### Wrap up Thibault's day" in prompt
+    assert "### Wrap up the day" in prompt
     monkeypatch.setattr(wrapup, "wrapup_due", lambda db: False)
     sweep.run_sweep(s, "schedule")
     prompt = (lambda a: a[a.index("-p") + 1])(json.loads((s.home / "argv.json").read_text()))
-    assert "### Wrap up Thibault's day" not in prompt
+    assert "### Wrap up the day" not in prompt

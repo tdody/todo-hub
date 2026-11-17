@@ -21,7 +21,7 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
         assert request.headers["authorization"] == "lin_key"
         if "teams" in body["query"]:
             return httpx.Response(200, json={"data": {
-                "viewer": {"id": "me"},
+                "viewer": {"id": "me", "name": "Ada Lovelace"},
                 "teams": {"nodes": [{"id": "t1", "states": {"nodes": [
                     {"id": "b", "name": "Todo", "type": "unstarted", "position": 2},
                     {"id": "a", "name": "Backlog", "type": "backlog", "position": 1}]}}]}}})
@@ -39,7 +39,7 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
     meta = Linear("lin_key", transport=transport(handler)).team_meta("ENG", "client")
     assert [s["name"] for s in meta.states] == ["Backlog", "Todo"]
     assert [l["name"] for l in meta.client_labels] == ["acme", "Vandelay"]
-    assert meta.viewer_id == "me" and len(calls) == 5
+    assert meta.viewer_id == "me" and meta.viewer_name == "Ada Lovelace" and len(calls) == 5
     assert meta.projects == [{"id": "p1", "name": "Globex"}]
 
 
@@ -66,7 +66,7 @@ def test_network_and_http_errors_become_linear_errors():
 
 def test_missing_team():
     def handler(request):
-        return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": []}}})
+        return httpx.Response(200, json={"data": {"viewer": {"id": "me", "name": "Ada Lovelace"}, "teams": {"nodes": []}}})
 
     with pytest.raises(LinearError, match="No Linear team"):
         Linear("k", transport=transport(handler)).team_meta("ENG", "client")
@@ -92,7 +92,7 @@ def test_team_meta_and_team_states_order_states_like_linear():
     def handler(request: httpx.Request):
         body = json.loads(request.content)
         if "teams" in body["query"]:
-            return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": [{"id": "t1", "states": states}]}}})
+            return httpx.Response(200, json={"data": {"viewer": {"id": "me", "name": "Ada Lovelace"}, "teams": {"nodes": [{"id": "t1", "states": states}]}}})
         if "projects" in body["query"]:
             return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": []}}}})
         if "states" in body["query"]:          # another team's statuses

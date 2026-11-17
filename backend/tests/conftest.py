@@ -54,6 +54,7 @@ class FakeLinear:
             client_labels=[{"id": "l-Initech & Co", "name": "Initech & Co"},
                            {"id": "l-Globex", "name": "Globex"}],
             viewer_id="me",
+            viewer_name="Ada Lovelace",
             projects=[{"id": "p-globex", "name": "Globex"}, {"id": "p-out", "name": "Improve our \"Forecast\" models"}],
         )
 

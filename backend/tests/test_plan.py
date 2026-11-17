@@ -191,7 +191,7 @@ def test_run_plan(tmp_path, monkeypatch):
     assert db.latest_run("plan")["id"] == run["id"] and db.latest_run() is None   # not a sweep
     argv = json.loads((s.home / "argv.json").read_text())
     prompt = argv[argv.index("-p") + 1]
-    assert "### Plan Thibault's day" in prompt and "$" not in prompt
+    assert "### Plan the day" in prompt and "$" not in prompt
     assert "## First: today's calendar" in prompt           # no agenda saved yet
     assert "mcp__todo-db__report_plan" in argv[argv.index("--allowedTools") + 1].split(",")
 
@@ -208,9 +208,9 @@ def test_morning_sweep_plans_the_day(tmp_path, monkeypatch):
     monkeypatch.setattr(plan, "plan_due", lambda db: True)
     sweep.run_sweep(s, "schedule")
     prompt = (lambda a: a[a.index("-p") + 1])(json.loads((s.home / "argv.json").read_text()))
-    assert "### Plan Thibault's day" in prompt
-    assert prompt.index("### Google Calendar") < prompt.index("### Plan Thibault's day")
+    assert "### Plan the day" in prompt
+    assert prompt.index("### Google Calendar") < prompt.index("### Plan the day")
     monkeypatch.setattr(plan, "plan_due", lambda db: False)
     sweep.run_sweep(s, "schedule")
     prompt = (lambda a: a[a.index("-p") + 1])(json.loads((s.home / "argv.json").read_text()))
-    assert "### Plan Thibault's day" not in prompt
+    assert "### Plan the day" not in prompt

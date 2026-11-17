@@ -10,6 +10,7 @@ import pytest
 from todohub import sweep, tools
 from todohub.config import DEFAULT_HUBSPOT_TOOLS, load_settings
 from todohub.db import DB
+from todohub.linear import LinearError
 from conftest import FakeLinear
 
 FAKE_CLAUDE = textwrap.dedent("""\
@@ -39,6 +40,8 @@ FAKE_CLAUDE = textwrap.dedent("""\
     print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "num_turns": 7,
                       "total_cost_usd": 0.12, "result": "slack: 1", "permission_denials": []}}))
 """)
+
+ADA = sweep.User("Ada Lovelace")
 
 
 @pytest.fixture
@@ -81,7 +84,7 @@ def test_sweep_end_to_end(settings):
     assert "mcp__claude_ai_Gmail__search_threads" in allowed
     assert {"mcp__claude_ai_Gmail__send_message", "mcp__claude_ai_Gmail__reply",
             "mcp__claude_ai_Gmail__forward", "mcp__claude_ai_Gmail__trash_thread"} <= set(denied)
-    assert "### Linear: mentions of Thibault" in prompt and "(no new mentions)" in prompt
+    assert "### Linear: mentions of Ada since" in prompt and "(no new mentions)" in prompt
     assert by_source["linear"]["ok"] and not by_source["github"]["ok"]
     assert "Can't find gh" in by_source["github"]["detail"]
     assert "### Google Calendar: meeting prep for" in prompt
@@ -117,10 +120,10 @@ def test_bad_output(settings, tmp_path):
 def test_gmail_section_when_configured(settings):
     settings.gmail_tools = ["mcp__claude_ai_Gmail__search_threads"]
     from datetime import datetime, timezone
-    text = sweep.build_prompt(settings, datetime.now(timezone.utc), ["Acme"], [], [])
+    text = sweep.build_prompt(settings, ADA, datetime.now(timezone.utc), ["Acme"], [], [])
     assert "### Gmail" in text and "### Slack" in text and "### Grain" in text
     settings.gmail_tools = []
-    assert "### Gmail" not in sweep.build_prompt(settings, datetime.now(timezone.utc), [], [], [])
+    assert "### Gmail" not in sweep.build_prompt(settings, ADA, datetime.now(timezone.utc), [], [], [])
 
 
 def test_capture_run(settings):
@@ -261,8 +264,8 @@ def test_meeting_prep_runs_once_a_day(settings, tmp_path):
     db.finish_run(run, "ok")
     assert not sweep.meeting_prep_due(db, now)                   # done this morning
     assert sweep.meeting_prep_due(db, now + timedelta(days=1))   # due again tomorrow
-    with_prep = sweep.build_prompt(settings, datetime.now(timezone.utc), [], [], [])
-    without = sweep.build_prompt(settings, datetime.now(timezone.utc), [], [], [], meeting_prep=False)
+    with_prep = sweep.build_prompt(settings, ADA, datetime.now(timezone.utc), [], [], [])
+    without = sweep.build_prompt(settings, ADA, datetime.now(timezone.utc), [], [], [], meeting_prep=False)
     assert "meeting prep" in with_prep and "### Google Calendar" not in without
     nxt = sweep.next_working_day(datetime.now(sweep.TZ).date()).isoformat()
     assert f"`report_agenda` a second time with day {nxt}" in with_prep               # tomorrow, for the wrap-up
@@ -356,7 +359,7 @@ def test_hubspot_section_when_configured(settings):
     settings.hubspot_tools = list(DEFAULT_HUBSPOT_TOOLS)
     since = datetime(2026, 11, 4, 20, 0, tzinfo=timezone.utc)          # the other sources' window
     hubspot = {"hubspot": datetime(2026, 11, 4, 10, 0, tzinfo=sweep.TZ)}  # 15:00 UTC
-    text = sweep.build_prompt(settings, since, [], [], [], sinces=hubspot)
+    text = sweep.build_prompt(settings, ADA, since, [], [], [], sinces=hubspot)
     section = text.split("### HubSpot")[1].split("###")[0]
     assert "2026-11-04T13:00:00Z" in section                  # the window start, minus the 2-hour overlap
     assert "hubspot_owner_assigneddate" in section and "ticket:<id>" in section and "note:<id>" in section
@@ -366,7 +369,7 @@ def test_hubspot_section_when_configured(settings):
     assert "`TASK`" not in section                            # HubSpot tasks are Grain's action items
     assert "HubSpot tickets and notes" in text.split("## Safety")[1][:600]
     settings.hubspot_tools = []
-    assert "### HubSpot" not in sweep.build_prompt(settings, since, [], [], [], sinces=hubspot)
+    assert "### HubSpot" not in sweep.build_prompt(settings, ADA, since, [], [], [], sinces=hubspot)
 
 
 def test_sweep_may_read_hubspot_but_never_write(settings, tmp_path):
@@ -416,7 +419,7 @@ def test_watched_section_rechecks_hubspot_tickets_only():
 
 
 def test_prompt_tells_the_sweep_to_close_finished_tickets(settings):
-    text = sweep.build_prompt(settings, datetime.now(timezone.utc), [], [], [])
+    text = sweep.build_prompt(settings, ADA, datetime.now(timezone.utc), [], [], [])
     assert "ticket:<id>#closed" in text and "Ticket closed in HubSpot on" in text
 
 
@@ -479,3 +482,32 @@ def test_connector_outage_reads_the_status_page_only_when_a_connector_source_fai
     monkeypatch.setattr(sweep.outage, "claude_code_incident", no_call)
     run = sweep.run_sweep(settings, "manual", only="slack")      # the fake reports Slack fine
     assert {s["source"]: s["detail"] for s in run["sources"]} == {"slack": "3 searches"}
+
+
+def test_prompts_are_about_the_linear_account_holder(settings):
+    settings.about_me = "a staff engineer (mostly development)"
+    settings.hubspot_tools = list(DEFAULT_HUBSPOT_TOOLS)
+    sweep.run_sweep(settings)
+    argv = json.loads((settings.home / "argv.json").read_text())
+    prompt = argv[argv.index("-p") + 1]
+    assert prompt.startswith("You are running an unattended, read-only sweep for Ada Lovelace, "
+                             "a staff engineer (mostly development). Your job is to find **tasks for Ada**")
+    assert "CONTAINS_TOKEN `Ada`" in prompt and "Ada's open Linear issues" in prompt
+
+    settings.about_me = ""
+    now = datetime.now(timezone.utc)
+    assert sweep.build_prompt(settings, ADA, now, [], [], []).startswith(
+        "You are running an unattended, read-only sweep for Ada Lovelace. Your job")
+
+
+def test_no_run_starts_claude_before_linear_has_named_the_user(settings, monkeypatch):
+    class Down:
+        def __init__(self, key):
+            raise LinearError("Linear is down")
+
+    monkeypatch.setattr(sweep, "Linear", Down)
+    for run in (sweep.run_sweep(settings), sweep.run_capture(settings, "https://example.slack.com/archives/C9/p20"),
+                sweep.run_plan(settings), sweep.run_note(settings), sweep.run_wrapup(settings)):
+        assert run["status"] == "error" and run["error"] == sweep.NO_USER
+    assert not (settings.home / "argv.json").exists()            # Claude never ran
+    assert sweep.run_sweep(settings, only="github")["status"] == "ok"   # reads GitHub without Claude, or a name

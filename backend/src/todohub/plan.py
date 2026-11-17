@@ -203,7 +203,7 @@ def section(ctx: dict, agenda_from_this_run: bool) -> str:
     listed = "\n".join(row(i) for i in ctx["on_today"]) or "  (empty)"
 
     return (
-        f"### Plan Thibault's day ({today.strftime('%A %Y-%m-%d')})\n"
+        f"### Plan the day ({today.strftime('%A %Y-%m-%d')})\n"
         "He opens TodoHub between 8:00 and 9:30 to plan his day. Call `report_plan` once, after the sources "
         "above, with:\n"
         "- `picks`: 2 to 6 of the issues below to do today, most important first. Weigh: a person waiting "

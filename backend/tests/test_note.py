@@ -72,7 +72,7 @@ def test_gather_and_section(db, monkeypatch):
     assert [i["identifier"] for i in ctx["done_today"]] == ["ENG-5"]
     assert [e["title"] for e in ctx["agenda_left"]] == ["Globex weekly", "Initech & Co sync"]
     text = note.section(ctx, agenda_from_this_run=False)
-    assert "### Midday note for Thibault (Tuesday 2026-11-10, 12:05)" in text
+    assert "### Midday note (Tuesday 2026-11-10, 12:05)" in text
     assert "This morning's plan picked:\n  - ENG-1: Globex review at 2." in text
     assert "Done today:\n  - ENG-5 [dev] Send Hooli the scores" in text
     assert "  - ENG-2 [dev] Fix outcome report copy | no due date | Pending | a follow-up: he's waiting on someone" in text
@@ -131,7 +131,7 @@ def test_run_note(tmp_path, monkeypatch):
     assert db.latest_run("note")["id"] == run["id"] and db.latest_run() is None
     argv = json.loads((s.home / "argv.json").read_text())
     prompt = argv[argv.index("-p") + 1]
-    assert "### Midday note for Thibault" in prompt and "$" not in prompt
+    assert "### Midday note" in prompt and "$" not in prompt
     assert "## First: today's calendar" in prompt                                  # no agenda saved yet
     assert "mcp__todo-db__report_note" in argv[argv.index("--allowedTools") + 1].split(",")
 
@@ -149,8 +149,8 @@ def test_midday_sweep_writes_the_note(tmp_path, monkeypatch):
     monkeypatch.setattr(note, "note_due", lambda db: True)
     sweep.run_sweep(s, "schedule")
     prompt = (lambda a: a[a.index("-p") + 1])(json.loads((s.home / "argv.json").read_text()))
-    assert "### Midday note for Thibault" in prompt
+    assert "### Midday note" in prompt
     monkeypatch.setattr(note, "note_due", lambda db: False)
     sweep.run_sweep(s, "schedule")
     prompt = (lambda a: a[a.index("-p") + 1])(json.loads((s.home / "argv.json").read_text()))
-    assert "### Midday note for Thibault" not in prompt
+    assert "### Midday note" not in prompt

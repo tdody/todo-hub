@@ -192,7 +192,7 @@ def section(ctx: dict) -> str:
                  if friday else "The week isn't over: write it as the week so far; it's rebuilt each day.")
 
     return (
-        f"### Wrap up Thibault's day ({today.strftime('%A %Y-%m-%d')})\n"
+        f"### Wrap up the day ({today.strftime('%A %Y-%m-%d')})\n"
         "He closes his day in TodoHub late in the afternoon. Call `report_wrapup` once, after the sources "
         "above, with:\n"
         f"- `summary`: two or three short sentences, the way a colleague would say it: what moved today, "

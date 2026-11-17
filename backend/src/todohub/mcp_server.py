@@ -98,7 +98,7 @@ def add_candidate(
     sender: str | None = None,
     channel: str | None = None,
 ) -> dict:
-    """Add one candidate task to Thibault's review queue. He approves or drops it later.
+    """Add one candidate task to the user's review queue. He approves or drops it later.
 
     source_id: "<channel id>:<message ts>" for Slack, the Gmail message id, the Grain meeting id, or
         "ticket:<id>" or "note:<id>" for HubSpot.
@@ -125,7 +125,7 @@ def add_candidate(
     sender: who sent it: the sender's email address for email, the person's Slack display name for
         Slack, the commenter's name for Linear, the note's author for HubSpot. Used for mute rules.
     channel: Slack only: the channel name, e.g. "#data-team", or "DM".
-    reply_draft: Slack or email asks only: the reply Thibault could send now, in his voice. Answer it
+    reply_draft: Slack or email asks only: the reply the user could send now, in his voice. Answer it
         if the source has what's needed; otherwise acknowledge and say when he'll do it. Plain text,
         no subject line or greeting boilerplate, usually 1 to 4 sentences.
     duplicate_reason: with duplicate_advice: one short sentence saying why, e.g. "Same deck Sam asked
@@ -159,7 +159,7 @@ def propose_close(
     why: str,
     excerpt: str,
 ) -> dict:
-    """Propose closing one of Thibault's open issues because the source shows it's finished.
+    """Propose closing one of the user's open issues because the source shows it's finished.
 
     Use it when a later message shows the task was done (he sent the file, the PR merged,
     the client confirmed), or when the reply he was waiting on arrived.
@@ -183,7 +183,7 @@ def propose_update(
     why: str,
     excerpt: str,
 ) -> dict:
-    """Propose a comment on one of Thibault's open issues, instead of a new task.
+    """Propose a comment on one of the user's open issues, instead of a new task.
 
     Use it when a message adds information to something already tracked: a new date, a
     changed requirement, an answer, a file. comment: 1-4 sentences to post on the issue,
@@ -206,7 +206,7 @@ class AgendaEvent(BaseModel):
 
 @server.tool()
 def report_agenda(day: str, events: list[AgendaEvent]) -> dict:
-    """Save one day's calendar: today's for Thibault's morning brief, the next working day's for
+    """Save one day's calendar: today's for the user's morning brief, the next working day's for
     his wrap-up. Call once per day, with every timed event he hasn't declined on that day (skip
     all-day events), in start order.
 
@@ -232,7 +232,7 @@ class PlanAside(BaseModel):
 @server.tool()
 def report_plan(day: str, headline: str, recap: str, summary: str, picks: list[PlanPick],
                 set_aside: list[PlanAside] | None = None) -> dict:
-    """Save today's plan for Thibault: what to do today, most important first, each with why and
+    """Save today's plan for the user: what to do today, most important first, each with why and
     how long; and a next step for each late issue you left out. Call once. These are suggestions
     he reviews; nothing is changed in Linear.
 
@@ -282,7 +282,7 @@ class Checkin(BaseModel):
 @server.tool()
 def report_wrapup(day: str, summary: str, items: list[WrapupItem], start_with: StartWith | None = None,
                   notes: list[str] | None = None, checkin: Checkin | None = None) -> dict:
-    """Save today's wrap-up for Thibault: a short summary, a next step for each issue still open on
+    """Save today's wrap-up for the user: a short summary, a next step for each issue still open on
     today's list, what to start the next working day with, notes on today's work kept for the
     week, and the week's mission check-in draft. Call once. These are suggestions he reviews;
     nothing is changed in Linear and nothing is sent.
@@ -299,7 +299,7 @@ def report_wrapup(day: str, summary: str, items: list[WrapupItem], start_with: S
 
 @server.tool()
 def report_note(day: str, headline: str, summary: str) -> dict:
-    """Save Thibault's midday note: a fresh look at the rest of his day. Call once. It's a
+    """Save the user's midday note: a fresh look at the rest of his day. Call once. It's a
     suggestion he reads; nothing is changed in Linear and nothing is sent.
 
     day: YYYY-MM-DD (America/New_York).

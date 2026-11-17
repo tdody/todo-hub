@@ -75,7 +75,7 @@ def section(ctx: dict, agenda_from_this_run: bool) -> str:
         meetings = "His calendar for today isn't available."
 
     return (
-        f"### Midday note for Thibault ({today.strftime('%A %Y-%m-%d')}, {ctx['now']})\n"
+        f"### Midday note ({today.strftime('%A %Y-%m-%d')}, {ctx['now']})\n"
         "He checks TodoHub between meetings. Call `report_note` once, after the sources above, with:\n"
         "- `headline`: one plain line on what to do next, like \"Finish the Globex grades before the 2:00 "
         "review.\" No links.\n"

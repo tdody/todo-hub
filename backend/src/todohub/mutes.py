@@ -80,7 +80,7 @@ def prompt_section(rules: list[dict]) -> str:
     """For the sweep: what to skip, and how to leave it out of searches."""
     if not rules:
         return ""
-    lines = ["### Muted by Thibault", "Don't propose tasks from these, and don't open or read their messages:"]
+    lines = ["### Muted sources", "Don't propose tasks from these, and don't open or read their messages:"]
     names = {"sender": "sender", "channel": "Slack channel", "repo": "GitHub repo"}
     for r in rules:
         where = {"gmail": "email", "slack": "Slack", "linear": "Linear", "github": "GitHub",

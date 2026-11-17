@@ -772,9 +772,9 @@ def test_mute_suggestion_rule_and_enforcement(env):
     assert out["status"] == "muted" and db.is_seen("slack", "C9ALERT:10.0")
     assert client.get("/api/mutes").json()[0]["blocked"] == 1
     from datetime import datetime as dt, timezone as tz
-    prompt = sweep.build_prompt(load_settings(), dt.now(tz.utc), [], [], [],
+    prompt = sweep.build_prompt(load_settings(), sweep.User("Ada Lovelace"), dt.now(tz.utc), [], [], [],
                                 muted=db.list_mutes())
-    assert "### Muted by Thibault" in prompt and "Slack channel #data-alerts" in prompt
+    assert "### Muted sources" in prompt and "Slack channel #data-alerts" in prompt
 
     # unmuting lets it through again
     assert client.delete(f"/api/mutes/{r['rule']['id']}").status_code == 200
