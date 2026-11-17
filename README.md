@@ -32,8 +32,8 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   - **Merge:** same work, but this adds something (a new ask, a date, a step, a link).
   - **Create new:** related, but a separate deliverable.
   - **Drop:** the issue already covers this exact task.
-- The card shows the linked issue (status, priority, due date; **Show description and comments** for the rest) and a switch with the three picks. Claude's pick comes first and has a dot. The card below the switch changes with the pick, and one button does it (**a** or ⌘↩):
-  - **Merge into ENG-…** lists what it will change on the issue: the comment it posts (**Edit** changes it; the source link is added), **Move the due date** when the card is due sooner, **Raise the priority** when the card is more urgent (both ticked; untick to skip), the subtasks it adds as sub-issues, and the links it attaches. No new issue is made. **m** merges from the keyboard.
+- The card shows the linked issue (status, priority, due date; **Show description and comments** for the rest) and a switch with the three picks. Claude's pick is selected at first and has a dot. The card below the switch changes with the pick, and one button does it (**a** or ⌘↩):
+  - **Merge into ENG-…** lists what it will change on the issue: the comment it posts (**Edit** changes it; the source link is added), **Move the due date** when the card is due sooner or the issue has no due date, **Raise the priority** when the card is more urgent or the issue has no priority (both ticked; untick to skip), the subtasks it adds as sub-issues, and the links it attaches. No new issue is made. **m** merges from the keyboard.
   - **Create issue** (or **Track**) shows the usual fields.
   - **Drop** shows the drop reasons, with Duplicate picked; 1–5 pick another.
 - Undo removes the comment, links and sub-issues, and puts the issue's old due date and priority back.
