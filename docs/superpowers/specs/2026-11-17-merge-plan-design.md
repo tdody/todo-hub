@@ -37,7 +37,7 @@ The box replaces the duplicate panel, in the same place (after the why and the q
 
 - The title shows as plain text. The client, project, priority and due date fields do not show.
 - Under the heading "Merge will change ENG-412":
-  - **Post this comment:** the comment, drawn by the Markdown renderer. **Edit** turns it into a text box. The text is kept in the card's draft (`comment`), and goes back to the default when the draft is cleared.
+  - **Post this comment:** the comment, drawn by the Markdown renderer. **Edit** turns it into a text box (at most 4,000 characters). The text is kept in the card's draft (`comment`). An empty box, or a cleared draft, gives the default again.
   - **☑ Move the due date Nov 28 → Nov 20:** shows only when the card has a due date and the issue has none or a later one. Ticked at first.
   - **☑ Raise the priority Medium → High:** shows only when the card has a priority (1–4) and the issue has none (0) or a lower one (a larger number). Ticked at first.
   - **Add N sub-issues:** the subtask editor that exists today. It does not show when the card has no subtasks.
@@ -95,7 +95,7 @@ Sam asked for churn by segment before Thursday's review.
 - `merge_claimed`, in this order:
   1. Get the issue and post the comment. If this fails: 502, nothing changed (as today).
   2. Mark the card approved and write the undo record (as today).
-  3. When `move_due_date` or `raise_priority` is set: one `update_issue` call with `dueDate` (the card's `due_date`) and/or `priority` (the card's `priority`). Before the call, the undo record gets `restore` with the issue's old values. If the call fails, `restore` is removed and a warning says "ENG-412's due date and priority were not changed: …". The returned issue replaces the one from step 1.
+  3. When `move_due_date` or `raise_priority` is set, and the card's value is still sooner (due date) or higher (priority) than the issue just read: one `update_issue` call with `dueDate` (the card's `due_date`) and/or `priority` (the card's `priority`). Before the call, the undo record gets `restore` with the issue's old values. If the call fails, `restore` is removed and a warning says "ENG-412's due date and priority were not changed: …". The returned issue replaces the one from step 1.
   4. Links and sub-issues, as today.
 - `act_on_issue` (Close) writes `restore: {"stateId": …}` in place of `state_id`.
 - `undo` reads `restore`: one `update_issue(record["issue"], record["restore"])`, then removes the key. The `state_id` branch goes away.
@@ -144,7 +144,9 @@ Sam asked for churn by segment before Thursday's review.
 
 ## Assumptions
 
-- **The linked issue is usually in `state.issues`.** The sweep may link only one of your open issues (`tools.py` drops other links), and the app reads your open issues every minute. When it is not there (closed since, or the list is still loading), the box falls back to the preview.
+- **The linked issue is usually in `state.issues`.** The sweep may link only one of your open issues (`tools.py` drops other links). On the Inbox tab the app does not reload the issue list every minute, so its copy can be old: the box can show an old status, due date or priority. The backend checks again before it changes the due date or the priority. When the issue is not in the list, the box falls back to the preview.
+- **The 2 boxes are worked out again when you press Merge.** If the issue's preview arrives while you type in the comment, a box can be sent ticked without being shown. The backend's check limits this to a sooner date or a higher priority.
+- **A lost answer from Linear on the field update** removes `restore`. If Linear made the change but its answer was lost, Undo does not put the old due date and priority back.
 - **Linear priority numbers:** 1 Urgent, 2 High, 3 Medium, 4 Low, 0 none. "Higher" means a smaller number that is not 0.
 - **Undo records with `state_id` are not read after this change.** The app offers Undo for 10 minutes, so only a Close made in the 10 minutes before the update is affected.
 - **The pick is not saved.** It goes back to Claude's advice when the app restarts.
