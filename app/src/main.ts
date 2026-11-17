@@ -790,7 +790,8 @@ function toggleSelect(id: number) {
 }
 
 async function bulk(action: "approve" | "drop", reason: DropReason = "other") {
-  const picked = state.candidates.filter((c) => state.selected.has(c.id));
+  // A linked card's merge plan needs a look, so bulk Approve leaves it out.
+  const picked = state.candidates.filter((c) => state.selected.has(c.id) && !(action === "approve" && isLinked(c)));
   const done: number[] = [];
   for (const c of picked) {
     try {
@@ -816,12 +817,17 @@ function bulkBar(): HTMLElement | "" {
     h("summary", { class: "ghost-btn" }, "Drop all ▾"),
     h("div", { class: "menu" }, ...DROP_REASONS.map((r) =>
       h("button", { onclick: () => { drop.open = false; void bulk("drop", r.value); } }, h("span", {}, r.label)))));
+  const linked = state.candidates.filter((c) => state.selected.has(c.id) && isLinked(c)).length;
+  const approvable = state.selected.size - linked;
   return h("div", { class: "bulk" },
     h("span", {}, `${state.selected.size} selected`),
+    linked ? h("span", { class: "muted small" }, approvable
+      ? `${linked} linked card${linked === 1 ? "" : "s"} left out`
+      : "Decide linked cards one at a time") : "",
     h("span", { class: "spacer" }),
     h("button", { class: "ghost", onclick: () => { state.selected.clear(); render(); } }, "Clear"),
     drop,
-    h("button", { class: "primary", onclick: () => void bulk("approve") }, `Approve ${state.selected.size}`),
+    approvable ? h("button", { class: "primary", onclick: () => void bulk("approve") }, `Approve ${approvable}`) : "",
   );
 }
 
