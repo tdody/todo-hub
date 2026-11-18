@@ -405,7 +405,7 @@ Daylight's Day phase is the Light theme. Night sits on the Dark base, so its sta
 
 ## Layout
 
-The window is a fixed 224px sidebar beside the page. The page is centered with a 1020px maximum and 16px/20px padding (80px at the bottom so toasts never cover the last row). Pages built as a list plus a reading pane (Inbox, Today, Client, Dev) widen to 1560px with 28px sides, because a wide window should show more, not more empty margin.
+The window is the sidebar beside the page. The sidebar is 224px wide by default: a drag on its right edge sets 200–400px, and the hide button shrinks it to the 60px icon column. It always leaves the page 600px of the window. The page is centered with a 1020px maximum and 16px/20px padding (80px at the bottom so toasts never cover the last row). The wide pages (Inbox, Today, Client, Dev and Pull requests) widen to 1560px with 28px sides, because a wide window should show more, not more empty margin.
 
 **List and reading pane.** The list takes the left column and the selected item opens on the right (columns 1fr and 1.05fr, 16px gap). The pane is sticky 12px from the top and scrolls on its own. Rows in the list sit 2px apart; groups are 22px apart, each led by a heading with a logo or initial, a bold name, a short summary and a hairline rule running to its action.
 
@@ -415,13 +415,12 @@ The window is a fixed 224px sidebar beside the page. The page is centered with a
 
 **Rhythm.** 2px between list rows, 6–10px between controls and inside rows, 12px around groups of controls, 16px between page sections, 22px between groups. The spacing tokens in the frontmatter are these steps.
 
-**Responsive behavior.** The window can shrink to 760×520.
+**Responsive behavior.** The window can shrink to 760×520. The width rules are container queries on the page, so they hold at every sidebar width. The numbers below are page widths: the window, less the sidebar, less the side padding. With the 224px sidebar, a 1120px window gives an 840px page on Inbox, Today, Client, Dev and Pull requests.
 
-- At 1280px and wider, Inbox rows add a clipped line of "why".
-- Below 1000px the reading pane moves under the list. On Today the list is capped at 236px tall above the pane, the band drops its later meeting, and the morning cover's side margins narrow from 44px to 24px.
-- Below 900px list rows drop their least important columns (the plan's avatar and due date).
-- Below 820px the sidebar becomes a 60px column of icons, keeping only the urgent counts as small badges.
-- Below 760px two-column panels stack.
+- At a 1000px page and wider, Inbox rows add a clipped line of "why".
+- At a 720px page and narrower, the reading pane moves under the list. On Today the list is capped at 236px tall above the pane, the band drops its later meeting, and the morning cover's side margins narrow from 44px to 24px.
+- In a window 820px or narrower, the sidebar is always the 60px column of icons, keeping only the urgent counts as small badges. The hide button gives the same column in a wider window.
+- At a 496px page and narrower, two-column panels stack.
 
 ## Elevation & Depth
 
@@ -509,7 +508,7 @@ One row of plain segments. Each segment is a count over a label, and one segment
 - **Filter note:** an optional 12px tabular note under the count, in its tone: Alarm Red at 600, Morning Amber ink, or the Done pill ink (`s-done-ink`) for a green note ("2 CI failing"). Done Green is too light for small text on the pressed and hover fills.
 - **Note states:** a click presses the segment and filters the table to that part. Hover on a note that is not pressed underlines it. A pressed note gets a full-pill wash in its tone (`bad-bg`, `warn-bg`, `s-done-bg`) and a 10px × that clears it.
 - **Focus:** segments and notes use the 2px accent focus outline of all buttons. On a segment, the outline is inside the button, because the strip clips what is outside it.
-- **Narrow windows:** below 1000px the notes go away. A segment with no note keeps an empty line, so the counts stay aligned.
+- **Narrow pages:** at a 720px page and narrower, the notes go away. A segment with no note keeps an empty line, so the counts stay aligned.
 
 ### The stack rail (Pull requests)
 
@@ -528,11 +527,11 @@ A stack of pull requests sorts, shows, lights up and folds as one unit.
 Mine shows the client or project of each pull request: in a column when the groups are off, and in sections when they are on.
 
 - **Number column:** the first sortable column, 64px wide. A Pencil "#", then the number in Ink, 13px tabular. A stack's summary row shows its lowest number, all in Pencil.
-- **Client / project column:** 168px, after the title. It shows only in Mine with the groups off, in windows wider than 1400px. An 18px client logo or project initial with 5px corners, then the name at 13px with an ellipsis. "No client or project" has a "–" initial and a Pencil name.
+- **Client / project column:** 168px, after the title. It shows only in Mine with the groups off, on pages wider than 1120px (a 1400px window with the default sidebar). An 18px client logo or project initial with 5px corners, then the name at 13px with an ellipsis. "No client or project" has a "–" initial and a Pencil name.
 - **Group starts:** sorted by Client / project, a darker line (Pencil 40% into Hairline) starts each group, and a name shows on a group's first row and where the row above is in another group.
 - **Group control:** a 12px Pencil "Group" label and the segmented control (None · Client or project), before Refresh all. Paper, a Hairline border, 7px corners, 12px Pencil text, as tall as Refresh all and the filter. The pressed one has the accent fill and 600 text.
 - **Section heading:** a row across the table. A chevron (down when open, right when folded), the 26px logo or initial, the name at 16px and 700, the 12px Pencil summary ("5 open · 2 need you · 1 CI failing", the CI part in Alarm Red), then a Hairline rule to the edge. 22px above it (10px for the first), 6px below it, a Hairline under it. A click folds the section to its heading.
-- **Narrow windows:** Client / project folds below 1400px and Size below 1200px, so the titles keep about 235px at the default 1120px window. Below 1000px the "Group" label hides, Refresh all shows only its icon, and the filter can shrink to 120px, so the header line fits from 760px.
+- **Narrow pages:** Client / project folds at a 1120px page and narrower, and Size at 920px, so the titles keep about 235px at the default 1120px window (an 840px page). Comments folds at 620px. At 720px the "Group" label hides, Refresh all shows only its icon, and the filter can shrink to 120px, so the header line fits on the narrowest page (about 530px).
 
 ### Inputs / Fields
 
@@ -542,7 +541,7 @@ Mine shows the client or project of each pull request: in a column when the grou
 
 ### Navigation
 
-- **Sidebar:** Paper with a hairline right edge. Items are 14px Pencil with an icon; hover shows Shaded Paper; active gets a 12% accent tint, Ink text at 600 and an accent icon. Counts sit at the right in Pencil; the Inbox count becomes an accent pill when there's work. Uppercase labels head the client and project lists. The sources line sits at the bottom with a green or red dot.
+- **Sidebar:** Paper with a hairline right edge. Items are 14px Pencil with an icon; hover shows Shaded Paper; active gets a 12% accent tint, Ink text at 600 and an accent icon. Counts sit at the right in Pencil; the Inbox count becomes an accent pill when there's work. Uppercase labels head the client and project lists. The sources line sits at the bottom with a green or red dot. The hide button (a sidebar glyph in Pencil, Shaded Paper on hover) sits after **+**, and under it in the icon column. The right edge is a 6px drag edge: on hover and while dragging, a 2px accent line covers the hairline. In the icon column, the Sources popover and the theme menu open beside the column.
 - **Page tabs:** plain 14px text in Pencil; the active tab is Ink at 600 with a 2px accent underline sitting on the header's hairline.
 
 ### Menus and popovers

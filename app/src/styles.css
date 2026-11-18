@@ -107,8 +107,10 @@ body {
 
 button, input, select { font: inherit; color: inherit; }
 
-/* App frame: sidebar on the left, the page on the right. */
-#app { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
+/* App frame: sidebar on the left, the page on the right. sidebar.ts sets --side-w (the dragged width) and
+   .side-icons (the icon column). --side is the shown width: capped so the page keeps 600px of the window, and 60px in the icon column. */
+#app { --side: min(var(--side-w), 100vw - 600px); display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
+#app.side-icons { --side: 60px; }
 .sidebar {
   position: sticky; top: 0; height: 100vh; overflow-y: auto; box-sizing: border-box; z-index: 5;
   display: flex; flex-direction: column; gap: 2px; padding: 14px 10px 12px;
@@ -116,9 +118,20 @@ button, input, select { font: inherit; color: inherit; }
 }
 .side-brand { display: flex; align-items: center; gap: 8px; padding: 2px 8px 12px; font-size: 15px; }
 .side-brand .brand-logo { width: 24px; height: 24px; }
-.side-brand .add { margin-left: auto; width: 26px; height: 26px; padding: 0; font-size: 17px; color: var(--ink);
+.side-brand .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-brand .add { flex: none; margin-left: auto; width: 26px; height: 26px; padding: 0; font-size: 17px; color: var(--ink);
   border: 1px solid var(--border); background: var(--surface); border-radius: 7px; }
 .side-brand .add:hover { color: var(--accent); background: var(--surface-2); }
+/* The hide button: a quiet icon right after +. */
+.side-brand .side-toggle { flex: none; width: 26px; height: 26px; padding: 0; margin-left: -4px; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: 7px; }
+.side-brand .side-toggle:hover { color: var(--ink); background: var(--surface-2); }
+/* The drag edge: 6px over the sidebar's hairline, with a 2px accent line on hover and while dragging. */
+.side-edge { position: fixed; top: 0; bottom: 0; left: calc(var(--side) - 3px); width: 6px; z-index: 6; cursor: col-resize; touch-action: none; }
+.side-edge::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: var(--accent);
+  opacity: 0; transition: opacity .12s; }
+.side-edge:hover::after, body.side-drag .side-edge::after { opacity: 1; }
+body.side-drag, body.side-drag * { cursor: col-resize !important; }    /* past the 200–400px limits too */
 .side-nav { display: flex; flex-direction: column; gap: 2px; }
 .nav {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -159,19 +172,19 @@ button, input, select { font: inherit; color: inherit; }
 .sweep-actions { display: flex; align-items: center; gap: 4px; }
 .sweep-actions .spacer { flex: 1; }
 
-/* Narrow window: the sidebar shrinks to icons. */
-@media (max-width: 820px) {
-  #app { grid-template-columns: 60px minmax(0, 1fr); }
-  .sidebar { padding: 12px 8px; align-items: center; }
-  .sidebar .nav-label, .side-group, .side-clients, .sweep-line, .sweep-sources, .sweep-actions .secondary, .src-head, .src-list, .sweep-next { display: none; }
-  .side-brand { flex-direction: column; padding: 2px 0 10px; }
-  .side-brand .add { margin: 6px 0 0; }
-  .nav { position: relative; justify-content: center; padding: 8px; }
-  .nav .count { position: absolute; top: 0; right: -2px; margin: 0; font-size: 10px; }
-  .nav .count:not(.hot) { display: none; }
-  .sweep { padding: 10px 0 0; border-top: 0; }
-  .sweep-actions { flex-direction: column; }
-}
+/* The icon column: the sidebar hidden, or a window 820px or narrower (sidebar.ts sets .side-icons). */
+#app.side-icons .sidebar { padding: 12px 8px; align-items: center; }
+#app.side-icons :is(.nav-label, .side-group, .side-clients, .side-edge) { display: none; }
+#app.side-icons .side-brand { flex-direction: column; padding: 2px 0 10px; }
+#app.side-icons .side-brand .add { margin: 6px 0 0; }
+#app.side-icons .side-brand .side-toggle { margin: 0; }
+#app.side-icons .nav { position: relative; justify-content: center; padding: 8px; }
+#app.side-icons .nav .count { position: absolute; top: 0; right: -2px; margin: 0; font-size: 10px; }
+#app.side-icons .nav .count:not(.hot) { display: none; }
+#app.side-icons .sweep { padding: 10px 0 0; border-top: 0; }
+#app.side-icons .sweep-actions { flex-direction: column; }
+/* A narrow window always shows the icon column, so it has no hide button. */
+@media (max-width: 820px) { .side-brand .side-toggle { display: none; } }
 
 .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; letter-spacing: -0.01em; }
 .brand-logo { width: 22px; height: 22px; flex: none; }
@@ -208,7 +221,9 @@ button, input, select { font: inherit; color: inherit; }
 
 /* Approved and dropped cards swipe off the window's edge; don't let that add a horizontal scrollbar. */
 html, body { overflow-x: clip; }
-main { width: 100%; box-sizing: border-box; max-width: 1020px; margin: 0 auto; padding: 16px 20px 80px; }
+/* Width rules use container queries on main, so they measure the page and hold at any sidebar width.
+   Page width = window − sidebar − side padding (2 × 28px on wide pages, 2 × 20px on Insights and Settings), up to main's max-width. */
+main { width: 100%; box-sizing: border-box; max-width: 1020px; margin: 0 auto; padding: 16px 20px 80px; container-type: inline-size; }
 /* Inbox and Today are a list plus a reading pane: they use a wide window instead of leaving it empty. */
 main.wide { max-width: 1560px; padding-left: 28px; padding-right: 28px; }
 
@@ -399,11 +414,6 @@ select.prio.p2 { color: var(--warn-ink); }
 input.date.overdue { color: var(--bad); border-color: var(--bad); }
 input.date.due-today { color: var(--warn-ink); }
 
-@media (max-width: 900px) {
-  .row { grid-template-columns: 26px 26px 72px 1fr 120px; }
-  .row select.prio, .row input.date { grid-column: span 1; }
-}
-
 /* Toasts */
 .toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 10; }
 .toast {
@@ -494,7 +504,7 @@ button.star:hover { background: var(--surface-2); }
 .key-dev { background: var(--dev-fill); }
 .key-target { height: 0; width: 14px; border-top: 2px dashed var(--warn-ink); border-radius: 0; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-@media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+@container (max-width: 496px) { .two-col { grid-template-columns: 1fr; } }
 table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.stats th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 4px 6px; border-bottom: 1px solid var(--border); }
 table.stats td { padding: 5px 6px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
@@ -894,7 +904,7 @@ button.theme:hover { color: var(--ink); }
 .tl-subs li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; min-width: 0; }
 .tl-subs .ident { flex: none; font-size: 12px; }
 .tl-subs .dtitle { flex: 1; min-width: 0; }
-@media (max-width: 1000px) { .tl-grid { grid-template-columns: 1fr; } .tl-pane { position: static; max-height: none; } }
+@container (max-width: 720px) { .tl-grid { grid-template-columns: 1fr; } .tl-pane { position: static; max-height: none; } }
 .tl-item > .avatar.sm { margin-top: 0; }
 
 .tl-fields .slip { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
@@ -957,6 +967,7 @@ summary.pill:hover { filter: brightness(0.97); box-shadow: 0 0 0 1px color-mix(i
 .src-row.bad { color: var(--bad); }
 .src-row.bad .src-dot { background: var(--bad); }
 .src-name { flex: 1; min-width: 0; }
+.src-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .src-row.bad .src-time { color: var(--bad); font-weight: 600; }
 .src-row.busy .src-time { color: var(--accent); }
@@ -1207,8 +1218,8 @@ button.ref:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--bor
 .td-clear .td-acts { justify-content: center; margin-bottom: 0; }
 .td-empty { display: flex; flex: 1; margin-top: 14px; min-height: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 
-/* A narrow window: the list, then the selected issue under it. */
-@media (max-width: 1000px) {
+/* A narrow page: the list, then the selected issue under it. */
+@container (max-width: 720px) {
   .td-cols { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
   .td-qp { max-height: 236px; }
   .td-hint { display: none; }
@@ -1273,12 +1284,10 @@ button.ref:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--bor
   border-radius: 5px; background: transparent; color: var(--muted); }
 .src-menu .src-pop .src-row:hover button.src-act { background: var(--surface); border-color: var(--border); color: var(--accent); }
 .src-menu .src-pop .src-row.bad button.src-act { color: var(--bad); }
-@media (max-width: 820px) {
-  .src-line-text { display: none; }
-  .src-line { flex: none; justify-content: center; }
-  .src-menu .menu.src-pop { position: fixed; left: 68px; right: auto; bottom: 16px; width: 260px; }
-  .src-pop .src-list { display: flex; }
-}
+#app.side-icons .src-line-text { display: none; }
+#app.side-icons .src-line { flex: none; justify-content: center; }
+#app.side-icons .src-menu .menu.src-pop { position: fixed; left: calc(var(--side) + 8px); right: auto; bottom: 16px; width: 260px; }
+#app.side-icons .theme-menu .menu { position: fixed; left: calc(var(--side) + 8px); right: auto; bottom: 16px; width: 220px; }
 
 /* ---- Quiet empty fields: an unset date, priority, client or project shows nothing; a set date
    shows as text. The control appears on hover of its row or card, on focus, or in the Today pane. */
@@ -1382,16 +1391,16 @@ details.more[open] > summary { margin-bottom: 10px; }
 .ib-chip.dup { background: var(--warn-bg); color: var(--warn-ink); font-weight: 600; }
 .ib-chip.ok { background: color-mix(in srgb, var(--good) 14%, var(--surface)); color: var(--good); font-weight: 600; }
 .ib-meta .chip.kind { font-size: 11px; padding: 1px 7px; }
-/* With room to spare, each row adds one clipped line of why (hidden on narrower windows). */
+/* With room to spare, each row adds one clipped line of why (hidden on narrower pages). */
 .ib-why { display: none; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@media (min-width: 1280px) { .ib-why { display: block; } }
+@container (min-width: 1000px) { .ib-why { display: block; } }
 /* The padding keeps the selected card's accent ring inside the scroll box, so its corners aren't clipped. */
 .ib-pane { position: sticky; top: 10px; max-height: calc(100vh - 20px); overflow: auto; padding: 2px; margin: -2px; }
 .ib-pane .card { margin: 0; padding: 16px 18px; border-radius: 12px; }
 /* In the pane the fields sit on one line and the decision on the next, right-aligned. */
 .ib-pane .card-actions .spacer { flex-basis: 100%; height: 0; }
 .ib-pane .card-actions .spacer + * { margin-left: auto; }
-@media (max-width: 1000px) { .ib { grid-template-columns: 1fr; } .ib-pane { position: static; max-height: none; } }
+@container (max-width: 720px) { .ib { grid-template-columns: 1fr; } .ib-pane { position: static; max-height: none; } }
 .ib-meta .pill { font-size: 11px; padding: 1px 7px; }
 .ib-pane .card .card-meta .select { display: none; }
 
@@ -1510,7 +1519,7 @@ details.more[open] > summary { margin-bottom: 10px; }
 .set-legend .set-cell { width: 10px; height: 10px; border-radius: 2px; }
 .set-note { margin: 10px 0 0; }
 
-@media (max-width: 860px) {
+@container (max-width: 596px) {
   .set-wrap { grid-template-columns: 1fr; }
   .set-toc { position: static; flex-direction: row; flex-wrap: wrap; }
   .set-styles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1529,7 +1538,7 @@ details.more[open] > summary { margin-bottom: 10px; }
 .dec-when { white-space: nowrap; text-align: right; }
 .decided-row > :last-child { justify-self: end; white-space: nowrap; }
 .decided .link-btn { margin-top: 4px; }
-@media (max-width: 860px) {
+@container (max-width: 580px) {
   .decided-row { grid-template-columns: 1fr auto; }
   .dec-from, .dec-when { display: none; }
 }
@@ -1618,8 +1627,8 @@ button.seg-n:not([aria-pressed="true"]):hover { text-decoration: underline; text
 .pr-table tr.sec-h .avatar.sm .mark { border-radius: 7px; font-size: 11px; }
 .pr-table tr.sec-h .sec-b:hover .ll-name { text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
 /* sorted by Client / project: a darker line where the group changes. With collapsed borders the row
-   above owns that line; the column must show (it folds below 1400px). */
-@media (width > 1400px) {
+   above owns that line; the column must show (it folds at a 1120px page and narrower). */
+@container (width > 1120px) {
   .pr-table tr:has(+ tr.grp-start) > td:not(.rail) { border-bottom-color: color-mix(in srgb, var(--muted) 40%, var(--border)); }
 }
 .pr-table td.st { overflow: hidden; text-overflow: ellipsis; }
@@ -1729,7 +1738,7 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
 .pr-empty button { margin-top: 10px; }
 .pr-hint { margin: 14px 0 0; font-size: 12px; color: var(--muted); }
 .pr-hint kbd { margin: 0 1px; }
-@media (max-width: 1000px) {
+@container (max-width: 720px) {
   .seg-n { display: none; }
   .prs .dgrid { grid-template-columns: 1fr 1fr; }
   .prs .dgrid .box:last-child { grid-column: 1 / -1; }
@@ -1748,21 +1757,21 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
   .page-right .pr-refresh { align-self: stretch; }
   .page-right .pr-refresh > .i { margin: 0; }
 }
-/* A narrow window collapses a column to zero width; its cells stay, so the open row's colspan still fits.
-   Client / project folds first, below 1400px: at the default 1120px window the titles would get no room. */
-@media (max-width: 1400px) {
+/* A narrow page collapses a column to zero width; its cells stay, so the open row's colspan still fits.
+   Client / project folds first, at a 1120px page: at the default window (an 840px page) the titles would get no room. */
+@container (max-width: 1120px) {
   .pr-table th.c-grp { width: 0; visibility: hidden; overflow: hidden; }
   .pr-table td.grp { padding: 0; visibility: hidden; overflow: hidden; }
 }
-@media (max-width: 1200px) {
+@container (max-width: 920px) {
   .pr-table th.c-size { width: 0; visibility: hidden; overflow: hidden; }
   .pr-table td.c-size { padding: 0; visibility: hidden; overflow: hidden; }
 }
-@media (max-width: 900px) {
+@container (max-width: 620px) {
   .pr-table th.c-cm { width: 0; visibility: hidden; overflow: hidden; }
   .pr-table td.cm { padding: 0; visibility: hidden; overflow: hidden; }
 }
-@media (max-width: 860px) { .prs .dgrid { grid-template-columns: 1fr; } }
+@container (max-width: 580px) { .prs .dgrid { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .pr-table td.x .i, .fold-b .i, .pr-table tr.sec-h .sec-b > .i { transition: none; } }
 
 /* Start in periscope: the popover under the reading pane's ⋯ row (Popover shadow, 12px corners). The
