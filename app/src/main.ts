@@ -3604,7 +3604,6 @@ document.addEventListener("pointerdown", (e) => {
   });
 }, true);
 
-
 function isTextField(el: Element | null): boolean {
   return !!el && (el.tagName === "TEXTAREA"
     || (el.tagName === "INPUT" && ["text", "search", "url", "email", ""].includes((el as HTMLInputElement).type)));
