@@ -1,0 +1,60 @@
+name: release
+
+# A pushed `vX.Y.Z` tag (see bin/release) builds TodoHub for Apple Silicon and publishes a GitHub
+# release: the .dmg for a first install, and the signed update and latest.json that installed apps read.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  macos:
+    runs-on: macos-latest   # Apple Silicon: the backend file runs only on the chip it is built on
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3   # this action publishes no moving major tag
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Build the backend file
+        run: backend/packaging/build-backend.sh
+
+      - name: Install the app's packages
+        working-directory: app
+        run: npm ci
+
+      # The CHANGELOG.md section that bin/release refused to tag without. The app's update panel shows it.
+      - name: Release notes
+        id: notes
+        run: |
+          {
+            echo 'body<<TODOHUB_NOTES_EOF'
+            bin/release-notes "${GITHUB_REF_NAME#v}"
+            echo 'TODOHUB_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: TodoHub ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          args: --config src-tauri/tauri.bundle.conf.json --config src-tauri/tauri.release.conf.json --bundles app,dmg
