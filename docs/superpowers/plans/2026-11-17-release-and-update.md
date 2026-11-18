@@ -37,6 +37,7 @@
 | `app/package.json`, `package-lock.json` | 5 | The 2 JS plugins |
 | `app/src/desktop.ts`, `theme.ts` | 5 | One `inTauri()` test |
 | `app/src/update.ts` | 5 | Check, timer, install, state |
+| `app/tsconfig.json` | 5 | Vite client types, for `import.meta.env` |
 | `app/src/main.ts`, `styles.css` | 6 | Sidebar line and panel |
 | `app/src/settings.ts` | 7 | The Updates card |
 | `README.md`, `DESIGN.md`, `docs/releasing.md` | 8 | Docs |
@@ -465,6 +466,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `app/src/main.ts:3583` and its uses (`inApp` becomes `inTauri()`)
 - Modify: `app/src/theme.ts:22`
 - Create: `app/src/update.ts`
+- Modify: `app/tsconfig.json` (`"types": ["vite/client"]`, so `import.meta.env` has types)
 
 - [ ] **Step 1: Add the JS plugins**
 
