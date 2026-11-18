@@ -161,6 +161,16 @@ fn set_tray_count(app: tauri::AppHandle, count: u32) {
     }
 }
 
+/// Update and restart: open the new app with its window, also when login started this one with --hidden.
+#[tauri::command]
+fn restart_shown(app: tauri::AppHandle) {
+    let mut env = app.env();
+    env.args_os.retain(|a| a != "--hidden");
+    stop_backend(&mut app.state::<Backend>().0.lock().unwrap());
+    app.cleanup_before_exit();
+    tauri::process::restart(&env);
+}
+
 fn show_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -338,9 +348,8 @@ fn main() {
             Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .manage(start_backend())
-        .invoke_handler(tauri::generate_handler![backend_info, set_tray_count])
+        .invoke_handler(tauri::generate_handler![backend_info, set_tray_count, restart_shown])
         .setup(|app| {
             #[cfg(desktop)]
             first_run_login_item(app.handle());

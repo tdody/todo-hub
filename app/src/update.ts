@@ -2,7 +2,7 @@
 // replaces /Applications/TodoHub.app and restarts it. On only in the built app: in the dev app, an
 // install would put the update in the wrong folder.
 import { getVersion } from "@tauri-apps/api/app";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { inTauri } from "./desktop";
@@ -63,7 +63,7 @@ export async function installUpdate(ready: Update) {
         if (pct !== update.progress) { update.progress = pct; changed(); }
       } else if (e.event === "Finished") { update.progress = 100; changed(); }
     });
-    await relaunch();
+    await invoke("restart_shown");
   } catch (e) {
     update.progress = null;
     update.error = e instanceof Error ? e.message : String(e);
