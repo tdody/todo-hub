@@ -109,7 +109,7 @@ button, input, select { font: inherit; color: inherit; }
 
 /* App frame: sidebar on the left, the page on the right. sidebar.ts sets --side-w (the dragged width) and
    .side-icons (the icon column). --side is the shown width: capped so the page keeps 600px of the window, and 60px in the icon column. */
-#app { --side: min(var(--side-w, 224px), 100vw - 600px); display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
+#app { --side: min(var(--side-w), 100vw - 600px); display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
 #app.side-icons { --side: 60px; }
 .sidebar {
   position: sticky; top: 0; height: 100vh; overflow-y: auto; box-sizing: border-box; z-index: 5;
@@ -967,6 +967,7 @@ summary.pill:hover { filter: brightness(0.97); box-shadow: 0 0 0 1px color-mix(i
 .src-row.bad { color: var(--bad); }
 .src-row.bad .src-dot { background: var(--bad); }
 .src-name { flex: 1; min-width: 0; }
+.src-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .src-row.bad .src-time { color: var(--bad); font-weight: 600; }
 .src-row.busy .src-time { color: var(--accent); }
