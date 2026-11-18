@@ -6,7 +6,7 @@
 
 **Architecture:** `bin/release` sets the version and tags; a GitHub workflow builds the backend file and the app, and `tauri-action` publishes the `.dmg`, the signed update and `latest.json`. In the app, `tauri-plugin-updater` checks `latest.json`, and `app/src/update.ts` holds the update state that the sidebar line (`main.ts`) and the Settings card (`settings.ts`) show.
 
-**Tech Stack:** POSIX sh, GitHub Actions, Tauri v2 (`tauri-plugin-updater`, `tauri-plugin-process`), TypeScript with the `h()` DOM helper, Vite.
+**Tech Stack:** POSIX sh, GitHub Actions, Tauri v2 (`tauri-plugin-updater`), TypeScript with the `h()` DOM helper, Vite.
 
 **Spec:** `docs/superpowers/specs/2026-11-17-release-and-update-design.md`.
 
@@ -376,16 +376,28 @@ In `app/src-tauri/Cargo.toml`, under `[target.'cfg(not(any(target_os = "android"
 
 ```toml
 tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
 ```
 
-- [ ] **Step 2: Register the plugins**
+- [ ] **Step 2: Register the plugin and add the restart command**
 
 In `app/src-tauri/src/main.rs`, in `main()`, after the `tauri_plugin_autostart` plugin:
 
 ```rust
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+```
+
+Add this command near `backend_info` and `set_tray_count`, and add `restart_shown` to `generate_handler!`:
+
+```rust
+/// Update and restart: open the new app with its window, also when login started this one with --hidden.
+#[tauri::command]
+fn restart_shown(app: tauri::AppHandle) {
+    let mut env = app.env();
+    env.args_os.retain(|a| a != "--hidden");
+    stop_backend(&mut app.state::<Backend>().0.lock().unwrap());
+    app.cleanup_before_exit();
+    tauri::process::restart(&env);
+}
 ```
 
 - [ ] **Step 3: The config**
@@ -393,7 +405,7 @@ In `app/src-tauri/src/main.rs`, in `main()`, after the `tauri_plugin_autostart` 
 Read the public key: `cat ~/.tauri/todohub.key.pub`. If the file is missing, stop and report BLOCKED.
 
 In `app/src-tauri/tauri.conf.json`:
-- in `bundle`, after `"active": true,`, add `"macOS": { "signingIdentity": "-" },`;
+- in `bundle`, after `"active": true,`, add `"macOS": { "signingIdentity": "-", "hardenedRuntime": false },`;
 - after the `bundle` object, add a top-level `plugins` object:
 
 ```json
@@ -417,7 +429,7 @@ The public key is safe to commit. Do not add any other `"version"` key to this f
   "identifier": "default",
   "description": "Main window: core APIs, opening links in the browser, notifications, and updates",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-theme", "opener:default", "notification:default", "updater:default", "process:allow-restart"]
+  "permissions": ["core:default", "core:window:allow-set-theme", "opener:default", "notification:default", "updater:default"]
 }
 ```
 
@@ -439,9 +451,12 @@ cd app && npm ci --no-fund --no-audit && npm run tauri build -- --config src-tau
 codesign -dv src-tauri/target/release/bundle/macos/TodoHub.app 2>&1 | grep -E "Signature|Identifier"
 codesign --verify --deep --strict src-tauri/target/release/bundle/macos/TodoHub.app && echo "signature OK"
 codesign -dv src-tauri/target/release/bundle/macos/TodoHub.app/Contents/MacOS/todohub-backend 2>&1 | grep Signature
+codesign -dv --verbose=2 src-tauri/target/release/bundle/macos/TodoHub.app 2>&1 | grep flags
+codesign -dv --verbose=2 src-tauri/target/release/bundle/macos/TodoHub.app/Contents/MacOS/todohub-backend 2>&1 | grep flags
+T=$(mktemp -d); TODOHUB_HOME="$T" src-tauri/target/release/bundle/macos/TodoHub.app/Contents/MacOS/todohub-backend --help
 ```
 
-Expected: the build ends with the bundle path; `Signature=adhoc` for the app and for `todohub-backend`; `signature OK`. Do not copy the app to `/Applications` and do not open it.
+Expected: the build ends with the bundle path; `Signature=adhoc` for the app and for `todohub-backend`; `signature OK`; `flags=0x2(adhoc)` for both, with no `runtime`; the last command prints the usage and exits 0. Run `sweep --help` and `cli --help` the same way. Do not run `api`, `mcp` or any `cli` command that reads the Keychain. Do not copy the app to `/Applications` and do not open it.
 
 - [ ] **Step 7: Commit**
 
@@ -471,10 +486,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Add the JS plugins**
 
 ```bash
-cd app && npm install --no-fund --no-audit @tauri-apps/plugin-updater@^2 @tauri-apps/plugin-process@^2
+cd app && npm install --no-fund --no-audit @tauri-apps/plugin-updater@^2
 ```
 
-Expected: both are in `dependencies` in `package.json`.
+Expected: it is in `dependencies` in `package.json`.
 
 - [ ] **Step 2: One way to ask "in the Tauri app"**
 
@@ -492,7 +507,7 @@ Expected: only `app/src/desktop.ts`.
 // replaces /Applications/TodoHub.app and restarts it. On only in the built app: in the dev app, an
 // install would put the update in the wrong folder.
 import { getVersion } from "@tauri-apps/api/app";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { inTauri } from "./desktop";
@@ -548,7 +563,7 @@ export async function installUpdate(ready: Update) {
         if (pct !== update.progress) { update.progress = pct; changed(); }
       } else if (e.event === "Finished") { update.progress = 100; changed(); }
     });
-    await relaunch();
+    await invoke("restart_shown");
   } catch (e) {
     update.progress = null;
     update.error = e instanceof Error ? e.message : String(e);

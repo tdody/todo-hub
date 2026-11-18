@@ -123,7 +123,7 @@ The first release is v0.2.0.
 
 1. The button changes to "Downloading… 40%", and it is disabled.
 2. The updater checks the signature with the public key, then replaces `/Applications/TodoHub.app`.
-3. `relaunch()` from `tauri-plugin-process` restarts the app.
+3. An app command, `restart_shown`, restarts the app and removes `--hidden`. The window then opens also after a start at login.
 
 When a step fails, the panel shows "The update failed: <error>" and the **All releases** link, and the button is active again.
 
@@ -146,6 +146,8 @@ A last card, "Updates":
 
 Set `bundle.macOS.signingIdentity` to `"-"` in `tauri.conf.json`, as Periscope does. Each build then signs every file in the app ad hoc, including the backend file. Apple Silicon does not run code without a valid signature.
 
+Set `bundle.macOS.hardenedRuntime` to `false`. With hardened runtime, the PyInstaller backend cannot load its Python library. Only notarization needs hardened runtime.
+
 A colleague:
 
 1. downloads the `.dmg` from `https://github.com/tdody/todo-hub/releases/latest`;
@@ -159,10 +161,10 @@ Updates that the app downloads do not get the quarantine mark, so step 3 is need
 ## Changes
 
 - **New:** `CHANGELOG.md`, `bin/release`, `bin/release-notes`, `.github/workflows/release.yml`, `app/src-tauri/tauri.release.conf.json`, `app/src/update.ts`, `docs/releasing.md`.
-- **`app/src-tauri/Cargo.toml` and `main.rs`:** add and register `tauri-plugin-updater` and `tauri-plugin-process`.
-- **`app/src-tauri/tauri.conf.json`:** `plugins.updater.pubkey`, `plugins.updater.endpoints`, `bundle.macOS.signingIdentity: "-"`.
-- **`app/src-tauri/capabilities/default.json`:** add `updater:default` and `process:allow-restart`.
-- **`app/package.json`:** add `@tauri-apps/plugin-updater` and `@tauri-apps/plugin-process`.
+- **`app/src-tauri/Cargo.toml` and `main.rs`:** add and register `tauri-plugin-updater`. `main.rs` also adds the command `restart_shown`.
+- **`app/src-tauri/tauri.conf.json`:** `plugins.updater.pubkey`, `plugins.updater.endpoints`, `bundle.macOS.signingIdentity: "-"`, `bundle.macOS.hardenedRuntime: false`.
+- **`app/src-tauri/capabilities/default.json`:** add `updater:default`.
+- **`app/package.json`:** add `@tauri-apps/plugin-updater`.
 - **`app/src/desktop.ts`:** export `inTauri`, so `update.ts` uses the same test.
 - **`app/src/update.ts`:** the check, the hourly timer, the install with its progress, and the state that the sidebar and Settings read.
 - **`app/src/main.ts`:** the sidebar line and its panel.
@@ -194,7 +196,7 @@ Updates that the app downloads do not get the quarantine mark, so step 3 is need
 - Updates that the app downloads do not get the quarantine mark. The v0.2.1 test proves this.
 - Colleagues can write to `/Applications`, as admin users can. If they cannot, the update fails, and the panel shows the error and the releases link.
 - After each update, macOS asks again whether `todohub-backend` can use the Keychain, because an ad-hoc signature changes at each build. Choose **Always Allow**. The README says this.
-- Ad-hoc signing works on the PyInstaller backend file. The first release build proves this.
+- Ad-hoc signing works on the PyInstaller backend file. A local build proves that the backend starts (`--help`). The first release proves the same for the release build.
 - The panel shows only the newest notes. The **All releases** link shows the older notes.
 - Each release is public, and anyone can download it. The code has no client or work data, so this is safe.
 - `main` has no branch protection today, so `bin/release` can push to it.
