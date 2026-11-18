@@ -6,7 +6,7 @@ import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { loadPulls, pullsCount, pullsKey, pullsView, setupPulls } from "./pulls";
 import { notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
-import { setupSidebar, sidebarEdge, sidebarToggle, toggleSidebar } from "./sidebar";
+import { setupSidebar, sidebarEdge, hideButton, toggleSidebar } from "./sidebar";
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
 import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";
@@ -3308,7 +3308,7 @@ function renderHeader() {
         class: "icon add", title: "Capture a task (c)", "aria-label": "Capture a task",
         onclick: () => { goTab("inbox"); captureInput.focus(); },
       }, "+"),
-      sidebarToggle()),
+      hideButton()),
     h("nav", { class: "side-nav", "aria-label": "Sections" },
       item("inbox", "Inbox", 1), item("today", "Today", 2), item("client", "Client", 3), item("dev", "Dev", 4),
       item("pulls", "Pull requests", 5), item("insights", "Insights", 6), h("div", { class: "nav-gap" }), item("settings", "Settings", 7)),
@@ -3741,7 +3741,7 @@ document.addEventListener("keydown", (e) => {
 async function start() {
   document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), sidebarEdge(), h("main", {}),
     h("div", { class: "toasts", role: "status" }));
-  setupSidebar(renderHeader);
+  setupSidebar({ rerender: renderHeader });
   render();
   try {
     await waitForBackend();
