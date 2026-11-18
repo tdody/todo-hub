@@ -105,7 +105,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 - **Sidebar:** Inbox, Today, Client, Dev, Pull requests and Insights on the left with their counts, then your clients, the ones that need you first: overdue issues ("2 late"), then a meeting still ahead today ("2:30"), then the most open issues. Click a client to see its issues in the Client tab. Below, **Projects**: the projects of your open issues, Client and Dev (a client issue can belong to a project too), late ones first and then the busiest, with "N late" or the open count. Click one for its own view: every open issue in the project grouped by status, as in By status (In Progress first, backlog behind **Show backlog**), each row naming its client, with the same reading pane and a header like "3 open · 1 client, 2 dev"; the filter searches within it, and any tab in the sidebar leaves it. Issues without a project stay under "No project" in Dev. Each list shows six, with **+ N more**. The **+** captures a task. At the bottom, one line sums up the sources: a green dot and the next sweep ("next 12pm"), a red dot and "1 error" (or "2 errors") when a source's last check failed, or "Sweeping…". Click it (or press **r**) for the Sources popover: Slack, Gmail, Grain, Calendar, HubSpot, Linear and GitHub with when each last worked, and the reason under any that failed. Hover a source and click **↻** to check only that one: it reads what's new since that source last worked, with a smaller Claude run (GitHub needs none; Calendar re-reads today's and tomorrow's agenda). **Run all** sweeps everything; **Sweep history →** opens the run list in Insights. The theme and shortcuts sit next to the line. In a narrow window the sidebar shrinks to icons.
 - **Changes you make in Linear:** Client, Dev and Today read Linear every minute and when the window comes back to the front. **⌘R** reloads now and also re-reads labels, projects and statuses (a new client label shows up without a restart) and re-checks the Inbox. Before each sweep, and on ⌘R, every pending suggestion is compared with your issues, and one that looks handled already gets a green "Looks handled in Linear" note: the issue it's about or its linked issue was closed or canceled; a closed or canceled issue from the last 14 days has a close title (similarity 0.78, or 0.66 with the same client label); or an open issue you created after the suggestion arrived has a close title. Each note has **Drop as already done** (or **Drop as duplicate** for a ticket you opened) and **Keep**, which clears it and never matches that issue again. A banner above the cards drops them all in one click, with undo. It's a title comparison, not a model, so it costs nothing.
 - **Daylight theme:** the theme button opens a menu of System (follows the Mac), Light, Dark and **Daylight** (with the current phase and when the next starts); **t** still cycles them. Daylight changes the colors through the day: Morning (cream and amber, from 6:00 or 30 minutes before sunrise, whichever is earlier) → Day (the Light theme, 10:30–2:00) → Afternoon (warm sand, until an hour before sunset) → Dusk (lavender, an hour each side of sunset) → Night (indigo dark, from an hour after sunset). Light phases blend over 30 minutes; Dusk to Night switches at once. Sunset is worked out on the Mac for the city your time zone is named after (America/New_York → New York), or for `daylight_latitude` / `daylight_longitude` under `[app]` in config.toml (with `daylight_place` as its name). The button's tooltip says the phase, when the next one starts, and today's sunset and where it was worked out for. Status colors and pills keep their meaning in every phase.
-- **Settings** (bottom of the sidebar, ⌘7 or ⌘,): one page with four sections; a list on the left jumps to each. Changes save as you make them, to `settings.json` in the TodoHub folder, which wins over `config.toml` for these keys (config.toml stays as you wrote it). Nothing on the page can send anything.
+- **Settings** (bottom of the sidebar, ⌘7 or ⌘,): one page with five sections; a list on the left jumps to each. Changes save as you make them, to `settings.json` in the TodoHub folder, which wins over `config.toml` for these keys (config.toml stays as you wrote it). Nothing on the page can send anything. The last section, **Updates**, shows your version and checks for a new release.
   - **Appearance:** the four styles as small pictures (the theme button and **t** change the same setting), and where Daylight follows the sun: a place name with latitude and longitude, or **Use my time zone**. It shows today's sunrise and sunset there.
   - **Sources:** the sources the sweep reads, each with its status ("OK · read 10:02", or the problem in red, with **Open claude.ai ↗** for a connector), **Check now**, and a tick box: untick to pause it (it stays in the list, and sweeps skip it). **Remove** (on hover) takes it off the list; **+ Add a source** lists the supported sources you don't use and adds one back with its read-only tools. A source TodoHub doesn't support yet (Zoom, another mail service) can't be added from here. **Check all now** sweeps every source that's on.
   - **Schedule:** every 1, 2, 3 or 4 hours, between a first and last hour, on weekdays or every day, with a week grid that marks the sweep that writes the morning plan (the first between 6am and 11am) and the one that writes the wrap-up (the first at 3pm or later); if none qualifies, it says so. Saving rewrites the Mac's launchd schedule and reloads it, so the new hours apply at once; if the schedule isn't installed, **Set it up** installs it. The sidebar's "next 12pm" follows these hours.
@@ -147,9 +147,38 @@ If `--restricted` turns out to hide your claude.ai connectors in your Claude Cod
 
 When Anthropic's connector service is down, the connector sources a sweep couldn't read (Slack, Gmail, Grain, HubSpot, and Calendar when it was due for meeting prep) each say "Anthropic's connector service didn't respond (HTTP 503), so it wasn't read", followed by Anthropic's incident title when status.claude.com has one. Nothing is lost: the next sweep reads each of them from its last success. The end of each sweep log (`logs/sweep-*.log`, section `--- claude.ai connectors ---`) shows how the connector fetch went.
 
-## Setup (macOS)
+## Install (Apple Silicon Mac)
 
-You need Python 3.11+ with [uv](https://docs.astral.sh/uv/), Node 20+, Rust (`rustup`), the Xcode command-line tools, and `gh` (signed in) for GitHub reviews and the Pull requests tab.
+1. Download the `.dmg` from the [newest release](https://github.com/tdody/todo-hub/releases/latest).
+2. Open it and drag **TodoHub** to **Applications**.
+3. Apple did not sign TodoHub, so macOS says that it "is damaged". Run this one time in Terminal:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/TodoHub.app
+   ```
+
+4. Set up with the command line inside the app:
+
+   ```bash
+   todohub=/Applications/TodoHub.app/Contents/MacOS/todohub-backend
+   $todohub cli init              # creates ~/Library/Application Support/TodoHub
+   $todohub cli set-linear-key    # Linear personal API key (hidden input, saved in Keychain)
+   ```
+
+   Put your Linear team's key in `config.toml` (`team_key = "ENG"` under `[linear]`), then run `$todohub cli check`.
+5. Open TodoHub. In **Settings → Schedule**, click **Set it up**.
+
+You also need Claude Code (`claude`), signed in, and `gh`, signed in, for GitHub reviews and the Pull requests tab.
+
+### Updates
+
+TodoHub checks for a new release when it starts and every hour. When one exists, **↑ Update to v0.3.0** shows at the bottom of the sidebar. Click it to read what changed, then click **Update and restart**. **Settings → Updates** shows your version and has **Check for updates**.
+
+After an update, macOS may ask again whether `todohub-backend` can use the Linear key in your Keychain. Choose **Always Allow**.
+
+## Build from source
+
+To work on TodoHub, build it from a checkout. You need Python 3.11+ with [uv](https://docs.astral.sh/uv/), Node 20+, Rust (`rustup`), the Xcode command-line tools, and `gh` (signed in) for GitHub reviews and the Pull requests tab.
 
 ### 1. Backend
 
@@ -266,6 +295,8 @@ backend/src/todohub/
   schedule.py         the launchd schedule: hours from Settings, install, and which run plans and wraps up
   __main__.py         single entry point: api | sweep | mcp | cli
 backend/packaging/    PyInstaller build for the bundled backend
-app/src/              UI: main.ts (Inbox, Today, lists), insights.ts, settings.ts, desktop.ts (menu bar, notifications), dom.ts
+bin/release           cut a release: check, set the version, tag and push (see docs/releasing.md)
+bin/release-notes     print one version's CHANGELOG.md section
+app/src/              UI: main.ts (Inbox, Today, lists), insights.ts, settings.ts, desktop.ts (menu bar, notifications), update.ts (updates), dom.ts
 app/src-tauri/        Rust shell: starts the backend, menu bar, ⌥⌘T, close-to-menu-bar
 ```

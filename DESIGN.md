@@ -542,7 +542,7 @@ Mine shows the client or project of each pull request: in a column when the grou
 
 ### Navigation
 
-- **Sidebar:** Paper with a hairline right edge. Items are 14px Pencil with an icon; hover shows Shaded Paper; active gets a 12% accent tint, Ink text at 600 and an accent icon. Counts sit at the right in Pencil; the Inbox count becomes an accent pill when there's work. Uppercase labels head the client and project lists. The sources line sits at the bottom with a green or red dot.
+- **Sidebar:** Paper with a hairline right edge. Items are 14px Pencil with an icon; hover shows Shaded Paper; active gets a 12% accent tint, Ink text at 600 and an accent icon. Counts sit at the right in Pencil; the Inbox count becomes an accent pill when there's work. Uppercase labels head the client and project lists. The sources line sits at the bottom with a green or red dot. When a newer release exists, an accent line, **↑ Update to vX.Y.Z**, sits just above it and opens the release's notes in a popover like the sources popover.
 - **Page tabs:** plain 14px text in Pencil; the active tab is Ink at 600 with a 2px accent underline sitting on the header's hairline.
 
 ### Menus and popovers
