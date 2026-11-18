@@ -3770,7 +3770,7 @@ async function start() {
   }).catch(() => undefined);
   onDesktopEvent("capture", () => { forgetPeriscope(); state.tab = "inbox"; render(); captureInput.focus(); });
   onDesktopEvent("run-now", () => void runNow());
-  watchForUpdates(() => { renderHeader(); settingsCtx.rerender(); });
+  watchForUpdates(() => { if (state.tab === "settings" && !editing()) settingsCtx.rerender(); else renderHeader(); });
   await refresh(true);
   void loadPulls();                  // for the sidebar's count
   pollWhileRunning();
