@@ -44,7 +44,7 @@ todo-hub adds the comment only when periscope answers mode "spawned" with a `ses
 4. New `store.account_email(account_id) -> str | None` reads `oauthAccount.emailAddress` from the account's `.claude.json`: `~/.claude.json` for the default account (`config_dir` is `""`), else `<config_dir>/.claude.json`. It returns `None` when the file is missing or not valid JSON, or when it has no email. An account that is not logged in has no email.
 5. `/api/linear/start` answers mode "spawned" with `{mode, pid, path, reused, session_id, email}`. Mode "existing" stays `{mode, pid}`.
 6. `resurrect` reads a captured `--session-id <uuid>` as `--resume <uuid>`. Claude refuses to start a second time with the same `--session-id` ("Session ID … is already in use"). Without this, a pane that has no `pane_sessions` row keeps its captured command, and after a reboot its Claude does not start. With it, the pane resumes its session, as a captured `--resume` does today. A demoted duplicate loses the flag, as it loses `--resume`.
-7. The `/api/linear/start` section of periscope's README names the 2 new fields. The README also says that each spawn starts with `--session-id`, and that a re-run from shell history fails. `docs/tmux-persistence.md` says that a captured `--session-id` counts as `--resume`.
+7. The `/api/linear/start` section of periscope's README names the 2 new fields. The README also says that a Claude started with a prompt (the 3 callers above) gets `--session-id`, and that a re-run from shell history fails. The + New tab launcher and the resume path do not pass the flag. `docs/tmux-persistence.md` says that a captured `--session-id` counts as `--resume`.
 
 Tests:
 
