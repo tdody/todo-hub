@@ -31,13 +31,18 @@ export function watchForUpdates(onChange: () => void) {
   setInterval(quietly, 60 * 60_000);
 }
 
-/** The newest release when it is newer than this app, else null. Throws when the check fails. */
+/** The newest release when it is newer than this app, else null. Throws when the check fails.
+ *  Each check holds a new update in Rust: keep one and close the other. While an install runs,
+ *  the update being installed stays. */
 export async function checkForUpdate(): Promise<Update | null> {
   const found = await check();
-  if (found?.version !== update.ready?.version) {
-    update.ready = found;
-    changed();
+  if (update.progress !== null || found?.version === update.ready?.version) {
+    void found?.close();
+    return update.ready;
   }
+  void update.ready?.close();
+  update.ready = found;
+  changed();
   return found;
 }
 
