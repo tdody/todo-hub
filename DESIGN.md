@@ -405,7 +405,7 @@ Daylight's Day phase is the Light theme. Night sits on the Dark base, so its sta
 
 ## Layout
 
-The window is the sidebar beside the page. The sidebar is 224px wide by default: a drag on its right edge sets 200–400px, and the hide button shrinks it to the 60px icon column. It always leaves the page 600px of the window. The page is centered with a 1020px maximum and 16px/20px padding (80px at the bottom so toasts never cover the last row). Pages built as a list plus a reading pane (Inbox, Today, Client, Dev) widen to 1560px with 28px sides, because a wide window should show more, not more empty margin.
+The window is the sidebar beside the page. The sidebar is 224px wide by default: a drag on its right edge sets 200–400px, and the hide button shrinks it to the 60px icon column. It always leaves the page 600px of the window. The page is centered with a 1020px maximum and 16px/20px padding (80px at the bottom so toasts never cover the last row). The wide pages (Inbox, Today, Client, Dev and Pull requests) widen to 1560px with 28px sides, because a wide window should show more, not more empty margin.
 
 **List and reading pane.** The list takes the left column and the selected item opens on the right (columns 1fr and 1.05fr, 16px gap). The pane is sticky 12px from the top and scrolls on its own. Rows in the list sit 2px apart; groups are 22px apart, each led by a heading with a logo or initial, a bold name, a short summary and a hairline rule running to its action.
 
@@ -531,7 +531,7 @@ Mine shows the client or project of each pull request: in a column when the grou
 - **Group starts:** sorted by Client / project, a darker line (Pencil 40% into Hairline) starts each group, and a name shows on a group's first row and where the row above is in another group.
 - **Group control:** a 12px Pencil "Group" label and the segmented control (None · Client or project), before Refresh all. Paper, a Hairline border, 7px corners, 12px Pencil text, as tall as Refresh all and the filter. The pressed one has the accent fill and 600 text.
 - **Section heading:** a row across the table. A chevron (down when open, right when folded), the 26px logo or initial, the name at 16px and 700, the 12px Pencil summary ("5 open · 2 need you · 1 CI failing", the CI part in Alarm Red), then a Hairline rule to the edge. 22px above it (10px for the first), 6px below it, a Hairline under it. A click folds the section to its heading.
-- **Narrow pages:** Client / project folds at a 1120px page and narrower, and Size at 920px, so the titles keep about 235px at the default 1120px window (an 840px page). Comments folds at 620px. At 720px the "Group" label hides, Refresh all shows only its icon, and the filter can shrink to 120px, so the header line fits from 760px.
+- **Narrow pages:** Client / project folds at a 1120px page and narrower, and Size at 920px, so the titles keep about 235px at the default 1120px window (an 840px page). Comments folds at 620px. At 720px the "Group" label hides, Refresh all shows only its icon, and the filter can shrink to 120px, so the header line fits on the narrowest page (about 530px).
 
 ### Inputs / Fields
 
