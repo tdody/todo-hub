@@ -6,6 +6,7 @@ import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { loadPulls, pullsCount, pullsKey, pullsView, setupPulls } from "./pulls";
 import { inTauri, notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
+import { hideButton, setupSidebar, sidebarEdge, toggleSidebar } from "./sidebar";
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
 import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";
@@ -3226,7 +3227,7 @@ function sweepStatus(): HTMLElement {
       : o.last_ok_at ? `${name}: last checked ${shortWhen(o.last_ok_at)}.` : `${name}: not checked yet.`;
     return h("div", { class: `src-row${failed ? " bad" : ""}${busy ? " busy" : ""}`, title: tip },
       h("span", { class: `src-dot${o.ok === null ? " none" : ""}` }),
-      h("span", { class: "src-name" }, name,
+      h("span", { class: "src-name" }, h("span", { class: "src-n" }, name),
         failed && o.detail ? h("span", { class: "src-why" }, o.detail) : ""),
       h("span", { class: "src-time" }, timeText),
       busy ? h("span", { class: "src-act" }, h("span", { class: "spinner" }))
@@ -3293,10 +3294,11 @@ function themeButton(): HTMLElement {
 const SIDEBAR_CLIENTS = 6;
 
 /** The left sidebar: sections, clients that need you, and the sweep. (Named for the top bar it
- *  replaced; everything that changes a count calls it.) */
+ *  replaced; everything that changes a count calls it.) A sidebar control with data-focus keeps the focus. */
 function renderHeader() {
   const side = document.querySelector("aside.sidebar");
   if (!side) return;
+  const focus = (document.activeElement as HTMLElement | null)?.dataset.focus;
   if (state.issuesLoaded) ensureBrief();     // for "meeting at 2:30" next to a client
   const counts: Record<Tab, number> = {
     inbox: state.candidates.length,
@@ -3328,7 +3330,8 @@ function renderHeader() {
       h("button", {
         class: "icon add", title: "Capture a task (c)", "aria-label": "Capture a task",
         onclick: () => { goTab("inbox"); captureInput.focus(); },
-      }, "+")),
+      }, "+"),
+      hideButton()),
     h("nav", { class: "side-nav", "aria-label": "Sections" },
       item("inbox", "Inbox", 1), item("today", "Today", 2), item("client", "Client", 3), item("dev", "Dev", 4),
       item("pulls", "Pull requests", 5), item("insights", "Insights", 6), h("div", { class: "nav-gap" }), item("settings", "Settings", 7)),
@@ -3362,6 +3365,7 @@ function renderHeader() {
     updateLine(),
     sweepStatus(),
   );
+  if (focus) side.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
 }
 
 // ---- due-date slips -------------------------------------------------------------------------------
@@ -3528,7 +3532,9 @@ const SHORTCUTS: [string, string][] = [
   ["c", "Capture a task"],
   ["/", "Filter"],
   ["⌘1 – ⌘7", "Inbox, Today, Client, Dev, Pull requests, Insights, Settings (also ⌘,)"],
+  ["⌃⌘S", "Hide the sidebar to icons, or show it again (drag its edge to resize it)"],
   ["⌥⌘T", "Capture from anywhere (when TodoHub is running)"],
+  ["⌘+ · ⌘− · ⌘0", "Zoom in · zoom out · back to 100%"],
   ["⌘↵ · m · b", "Today: mark done · move to tomorrow's list · block time"],
   ["n · d · a · o", "Today: copy the nudge or message · Claude's due date · add to Today · open in Linear"],
   ["x · ↵", "Today, in the morning: check a suggestion · start the day"],
@@ -3626,6 +3632,11 @@ document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ",") {          // the Mac's usual Settings shortcut
     e.preventDefault();
     goTab("settings");
+    return;
+  }
+  if (e.metaKey && e.ctrlKey && e.key.toLowerCase() === "s") {   // the Mac's usual Show/Hide Sidebar
+    e.preventDefault();
+    toggleSidebar();
     return;
   }
   if ((e.metaKey || e.ctrlKey) && /^[1-7]$/.test(e.key)) {
@@ -3751,7 +3762,9 @@ document.addEventListener("keydown", (e) => {
 
 // ---- start ----------------------------------------------------------------------------------
 async function start() {
-  document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), h("main", {}), h("div", { class: "toasts", role: "status" }));
+  document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), sidebarEdge(), h("main", {}),
+    h("div", { class: "toasts", role: "status" }));
+  setupSidebar({ rerender: renderHeader });
   render();
   try {
     await waitForBackend();
