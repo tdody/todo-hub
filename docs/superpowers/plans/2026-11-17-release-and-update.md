@@ -189,8 +189,7 @@ git add CHANGELOG.md app/src-tauri/tauri.conf.json app/src-tauri/Cargo.toml app/
   app/package.json app/package-lock.json backend/pyproject.toml backend/uv.lock
 git commit -m "release: v$VERSION"
 git tag -m "TodoHub v$VERSION" "v$VERSION"
-git push origin HEAD
-git push origin "v$VERSION"
+git push --atomic origin HEAD "v$VERSION"
 
 echo
 echo "Tagged v$VERSION and pushed. The release build (about 10 minutes):"
@@ -892,15 +891,18 @@ A local build with `install-app.sh` does not make update files, so it does not n
   2. Fix the cause in a pull request and merge it.
   3. Change the changelog heading to the next patch version and run `bin/release 0.3.1`.
 
-## When bin/release stops after its commit
+## When bin/release stops halfway
 
-If the tag or the push fails (for example, no network), the release commit is already on `main`. Finish by hand:
+- **Before its commit** (for example, `uv lock` or `cargo metadata` has no network): the version files have changes. Put them back with `git checkout -- app backend`, fix the cause, and run `bin/release 0.3.0` again. `CHANGELOG.md` keeps your section.
+- **At the push** (for example, no network): the release commit and the tag exist on your Mac only. The push sends both or neither, so run it again: `git push --atomic origin HEAD v0.3.0`.
+- **GitHub refuses `main`** because someone pushed first: put your release commit on top, then tag it again.
 
-```bash
-git tag -m "TodoHub v0.3.0" v0.3.0
-git push origin HEAD
-git push origin v0.3.0
-```
+  ```bash
+  git tag -d v0.3.0
+  git pull --rebase
+  git tag -m "TodoHub v0.3.0" v0.3.0
+  git push --atomic origin HEAD v0.3.0
+  ```
 ````
 
 - [ ] **Step 5: Commit**
