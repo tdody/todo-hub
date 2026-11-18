@@ -956,6 +956,18 @@ Replace with:
     - When the page is wider than 1120 px (a window wider than 1400 px with the default sidebar), a **Client / project** column shows it on each row.
 ```
 
+Then, in the **Table** line above it, find:
+
+```markdown
+Size folds away in windows under 1200 px.
+```
+
+Replace with:
+
+```markdown
+Size folds away when the page is 920 px or narrower (a window under 1200 px with the default sidebar).
+```
+
 - [ ] **Step 3: PRODUCT.md**
 
 Find:
@@ -1163,10 +1175,10 @@ Replace with:
 - [ ] **Step 10: Check that no old window number is left in the docs**
 
 ```bash
-cd /Users/thibaultdody/dev/worktrees/todo-hub/main && grep -n "1400\|1280px\|Below 1000\|below 1000\|1200px\|fixed 224" README.md DESIGN.md PRODUCT.md .impeccable/surfaces/app-src-pulls-ts.md
+cd /Users/thibaultdody/dev/worktrees/todo-hub/main && grep -n "1400\|1280px\|Below 1000\|below 1000\|1200px\|1200 px\|fixed 224" README.md DESIGN.md PRODUCT.md .impeccable/surfaces/app-src-pulls-ts.md
 ```
 
-Expected: only lines that name the window next to its page width ("a 1400px window with the default sidebar", "a window wider than 1400 px with the default sidebar").
+Expected: only lines that name the window next to its page width ("a 1400px window with the default sidebar", "a window wider than 1400 px with the default sidebar", "a window under 1200 px with the default sidebar").
 
 - [ ] **Step 11: Commit**
 
