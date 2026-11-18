@@ -118,7 +118,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 `git grep -n __version__` shows only its definition. Delete the line `__version__ = "0.1.0"` from `backend/src/todohub/__init__.py`, and the blank line before it if the file then ends with 2 blank lines. Keep the rest of the file.
 
-Run: `cd backend && uv run pytest -q`
+Run: `cd backend && uv run --extra dev pytest -q`
 Expected: all tests pass.
 
 - [ ] **Step 2: Write `bin/release`**
@@ -188,7 +188,7 @@ cargo metadata --manifest-path app/src-tauri/Cargo.toml --format-version 1 >/dev
 git add CHANGELOG.md app/src-tauri/tauri.conf.json app/src-tauri/Cargo.toml app/src-tauri/Cargo.lock \
   app/package.json app/package-lock.json backend/pyproject.toml backend/uv.lock
 git commit -m "release: v$VERSION"
-git tag "v$VERSION"
+git tag -m "TodoHub v$VERSION" "v$VERSION"
 git push origin HEAD
 git push origin "v$VERSION"
 
@@ -891,6 +891,16 @@ A local build with `install-app.sh` does not make update files, so it does not n
   1. Delete the tag: `git push origin :refs/tags/v0.3.0` and `git tag -d v0.3.0`. If a release page exists for it on GitHub, delete it too.
   2. Fix the cause in a pull request and merge it.
   3. Change the changelog heading to the next patch version and run `bin/release 0.3.1`.
+
+## When bin/release stops after its commit
+
+If the tag or the push fails (for example, no network), the release commit is already on `main`. Finish by hand:
+
+```bash
+git tag -m "TodoHub v0.3.0" v0.3.0
+git push origin HEAD
+git push origin v0.3.0
+```
 ````
 
 - [ ] **Step 5: Commit**
