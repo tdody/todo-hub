@@ -1,0 +1,72 @@
+#!/bin/sh
+# Cut a release. Refuses unless CHANGELOG.md opens with a non-empty `## vX.Y.Z` section: the notes
+# that the app's update panel shows. Then sets the version of the app and the backend, syncs their
+# lockfiles, commits them with the changelog, tags `vX.Y.Z` and pushes. The pushed tag starts
+# .github/workflows/release.yml, which builds TodoHub and publishes the GitHub release.
+#
+#   bin/release 0.2.0
+set -eu
+
+VERSION="${1:-}"
+if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "usage: $0 X.Y.Z" >&2
+  exit 1
+fi
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO"
+
+if [ "$(git rev-parse --abbrev-ref HEAD)" != main ]; then
+  echo "releases are cut from main" >&2
+  exit 1
+fi
+git fetch --quiet --tags origin
+if ! git merge-base --is-ancestor origin/main HEAD; then
+  echo "main is behind origin/main: pull first" >&2
+  exit 1
+fi
+
+# CHANGELOG.md is the one file that can have changes: its new section is written just before.
+if ! git diff-index --quiet HEAD -- . ':(exclude)CHANGELOG.md'; then
+  echo "other files have changes: commit or stash them first" >&2
+  exit 1
+fi
+
+LAST="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+if [ -n "$LAST" ]; then
+  if [ "$(printf '%s\nv%s\n' "$LAST" "$VERSION" | sort -V | tail -1)" != "v$VERSION" ] || [ "$LAST" = "v$VERSION" ]; then
+    echo "v$VERSION is not newer than $LAST" >&2
+    exit 1
+  fi
+  if [ "$(git rev-list --count "$LAST..HEAD")" -eq 0 ]; then
+    echo "nothing to release: no commits since $LAST" >&2
+    exit 1
+  fi
+fi
+
+if [ -z "$("$REPO/bin/release-notes" "$VERSION" | tr -d '[:space:]')" ]; then
+  echo "CHANGELOG.md must open with a non-empty '## v$VERSION' section: what changed, in prose." >&2
+  echo "Commits since ${LAST:-the beginning}, as raw material:" >&2
+  git log --no-merges --format='  - %s' "${LAST:+$LAST..}HEAD" | head -100 >&2
+  exit 1
+fi
+
+sed -i '' -E "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" app/src-tauri/tauri.conf.json
+sed -i '' -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" app/src-tauri/Cargo.toml backend/pyproject.toml
+(cd app && npm version "$VERSION" --no-git-tag-version >/dev/null)
+
+# Each lockfile holds its own package's version too.
+cargo metadata --manifest-path app/src-tauri/Cargo.toml --format-version 1 >/dev/null
+(cd backend && uv lock --quiet)
+
+git add CHANGELOG.md app/src-tauri/tauri.conf.json app/src-tauri/Cargo.toml app/src-tauri/Cargo.lock \
+  app/package.json app/package-lock.json backend/pyproject.toml backend/uv.lock
+git commit -m "release: v$VERSION"
+git tag -m "TodoHub v$VERSION" "v$VERSION"
+git push origin HEAD
+git push origin "v$VERSION"
+
+echo
+echo "Tagged v$VERSION and pushed. The release build (about 10 minutes):"
+echo "  https://github.com/tdody/todo-hub/actions/workflows/release.yml"
+echo "Installed apps offer the update at their next hourly check after the build."
