@@ -927,27 +927,28 @@
     "breakpoints": [
       {
         "name": "stack-panels",
-        "value": "760px"
+        "value": "496px",
+        "purpose": "Page width (a container query on main)."
       },
       {
         "name": "sidebar-icons",
-        "value": "820px"
+        "value": "820px",
+        "purpose": "Window width: the sidebar is always the icon column."
       },
       {
         "name": "settings-narrow",
-        "value": "860px"
-      },
-      {
-        "name": "row-columns",
-        "value": "900px"
+        "value": "596px",
+        "purpose": "Page width (a container query on main)."
       },
       {
         "name": "pane-under-list",
-        "value": "1000px"
+        "value": "720px",
+        "purpose": "Page width (a container query on main)."
       },
       {
         "name": "inbox-why-line",
-        "value": "1280px"
+        "value": "1000px",
+        "purpose": "Page width (a container query on main)."
       }
     ],
     "themes": {
