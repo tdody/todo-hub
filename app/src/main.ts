@@ -15,6 +15,7 @@ import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues
 import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
 import { closePeriscope, dismissPeriscope, forgetPeriscope, isPeriscopeOpen, periscopeItem, periscopePopover, setupPeriscope } from "./periscope";
 import { renderMarkdown } from "./markdown";
+import { installUpdate, RELEASES_URL, update, watchForUpdates } from "./update";
 
 applyTheme();
 import type { AgendaEvent, BalanceStats, Brief, Candidate, Checkin, DecidedItem, Handled, SourceOverview, Slip, Slips, CandidateEdit, DropReason, Issue, MuteKey, MuteRule, IssueEdit, IssuePreview, Meta, Run, Source, Subtask, TodayItem } from "./api";
@@ -78,6 +79,7 @@ const state = {
   listSel: { client: null, dev: null } as Record<"client" | "dev", string | null>,   // Client/Dev: the issue in the reading pane
   highlight: new Set<string>(),       // identifiers to point out on the Client/Dev tab (from the digest)
   sourcesOpen: false,
+  updateOpen: false,
   balanceOpen: false,                 // Today: the "behind this week" popover under a section's balance line
   planRiseAt: 0,                      // when the sunrise started (ms), so a re-render mid-way doesn't restart it
   todaySel: null as string | null,    // Today: the issue in the reading pane
@@ -3180,6 +3182,27 @@ function shortWhen(iso: string | null | undefined): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+/** Above the sweep status, when a newer release exists: "↑ Update to v0.3.0". It opens the release's
+ *  notes and Update and restart. */
+function updateLine(): HTMLElement | "" {
+  const ready = update.ready;
+  if (!ready) return "";
+  const busy = update.progress !== null;
+  const label = update.progress === 100 ? "Installing…" : busy ? `Downloading… ${update.progress}%` : "Update and restart";
+  return h("div", { class: "update" },
+    h("details", { class: "drop-menu update-menu", open: state.updateOpen,
+      ontoggle: (e: Event) => { state.updateOpen = (e.currentTarget as HTMLDetailsElement).open; } },
+      h("summary", { class: "update-line", title: `TodoHub v${ready.version} is ready`, "aria-label": `Update to v${ready.version}` },
+        h("span", { "aria-hidden": "true" }, "↑"), h("span", { class: "update-line-text" }, `Update to v${ready.version}`)),
+      h("div", { class: "menu update-pop", role: "dialog", "aria-label": `TodoHub v${ready.version}` },
+        h("b", {}, `TodoHub v${ready.version}`),
+        ready.body?.trim() ? h("div", { class: "update-notes md" }, ...renderMarkdown(ready.body)) : "",
+        update.error ? h("p", { class: "update-err" }, `The update failed: ${update.error}`) : "",
+        h("div", { class: "update-pop-foot" },
+          h("button", { class: "primary small-btn", disabled: busy, onclick: () => void installUpdate(ready) }, label),
+          link("All releases", RELEASES_URL, "link-btn")))));
+}
+
 /** Bottom of the sidebar: one line for the sources (a green dot and "next 12pm", a red dot and
  *  "1 error", or "Sweeping…"), then theme and help. The line opens a popover with each source, when it last
  *  worked, ↻ to check just that one, Run all and the sweep history. */
@@ -3337,6 +3360,7 @@ function renderHeader() {
         class: "client-link more", onclick: () => { state.allProjects = !state.allProjects; renderHeader(); },
       }, state.allProjects ? "Show fewer" : `+ ${projects.length - SIDEBAR_CLIENTS} more`)) : "",
     h("div", { class: "side-fill" }),
+    updateLine(),
     sweepStatus(),
   );
 }
@@ -3747,6 +3771,7 @@ async function start() {
   }).catch(() => undefined);
   onDesktopEvent("capture", () => { forgetPeriscope(); state.tab = "inbox"; render(); captureInput.focus(); });
   onDesktopEvent("run-now", () => void runNow());
+  watchForUpdates(() => { renderHeader(); settingsCtx.rerender(); });
   await refresh(true);
   void loadPulls();                  // for the sidebar's count
   pollWhileRunning();
