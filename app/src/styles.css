@@ -1278,9 +1278,9 @@ button.ref:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--bor
 .src-pop-foot { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--border); margin-top: 6px; padding: 8px 2px 0; }
 .src-pop-foot .link-btn { font-size: 12px; }
 .src-menu .src-pop button.link-btn { padding: 0; }
-.src-menu .src-pop button.primary { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent);
+.src-menu .src-pop button.primary, .update-menu .update-pop button.primary { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent);
   padding: 4px 12px; border-radius: 6px; font-weight: 600; }
-.src-menu .src-pop button.primary:disabled { opacity: .6; cursor: default; }
+.src-menu .src-pop button.primary:disabled, .update-menu .update-pop button.primary:disabled { opacity: .6; cursor: default; }
 .src-menu .src-pop button.src-act { width: 20px; height: 20px; padding: 0; justify-content: center; border: 1px solid transparent;
   border-radius: 5px; background: transparent; color: var(--muted); }
 .src-menu .src-pop .src-row:hover button.src-act { background: var(--surface); border-color: var(--border); color: var(--accent); }
@@ -1289,6 +1289,27 @@ button.ref:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--bor
 #app.side-icons .src-line { flex: none; justify-content: center; }
 #app.side-icons .src-menu .menu.src-pop { position: fixed; left: calc(var(--side) + 8px); right: auto; bottom: 16px; width: 260px; }
 #app.side-icons .theme-menu .menu { position: fixed; left: calc(var(--side) + 8px); right: auto; bottom: 16px; width: 220px; }
+
+/* ---- An update: one line above the sweep status, a popover with the release's notes -------------- */
+.update { position: relative; padding: 0 0 4px; }
+.drop-menu.update-menu { position: static; display: flex; }
+.update-line { cursor: pointer; display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0;
+  padding: 5px 8px; border-radius: 7px; font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.update-line:hover, .update-menu[open] > .update-line { background: var(--surface-2); }
+.update-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.update-menu .menu.update-pop { left: -8px; right: -8px; bottom: calc(100% + 8px); min-width: 0; padding: 10px 12px; gap: 8px;
+  border-radius: 12px; box-shadow: 0 14px 34px rgba(0, 0, 0, .16); font-size: 12px; color: var(--ink); }
+.update-pop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.update-pop-head b { font-size: 13px; }
+.update-notes { max-height: 50vh; overflow: auto; line-height: 1.45; }
+.update-notes > :first-child { margin-top: 0; }
+.update-notes > :last-child { margin-bottom: 0; }
+.update-err { margin: 0; color: var(--bad); }
+.update-pop-foot { border-top: 1px solid var(--border); padding-top: 8px; }
+.update-pop-foot button { white-space: nowrap; }
+#app.side-icons .update-line-text { display: none; }
+#app.side-icons .update-line { flex: none; justify-content: center; }
+#app.side-icons .update-menu .menu.update-pop { position: fixed; left: calc(var(--side) + 8px); right: auto; bottom: 16px; width: 300px; }
 
 /* ---- Quiet empty fields: an unset date, priority, client or project shows nothing; a set date
    shows as text. The control appears on hover of its row or card, on focus, or in the Today pane. */

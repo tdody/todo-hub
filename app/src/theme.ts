@@ -2,6 +2,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { daylightLabel, daylightShort, startDaylight, stopDaylight } from "./daylight";
 import { loadPref, savePref } from "./dom";
+import { inTauri } from "./desktop";
 
 export type ThemeChoice = "system" | "light" | "dark" | "daylight";
 const KEY = "todohub.theme";
@@ -19,7 +20,7 @@ export function currentTheme(): ThemeChoice {
 function titleBar(theme: "light" | "dark" | null) {
   // Match the native title bar too (no-op outside the Tauri app).
   try {
-    if ("__TAURI_INTERNALS__" in window) void getCurrentWindow().setTheme(theme).catch(() => undefined);
+    if (inTauri()) void getCurrentWindow().setTheme(theme).catch(() => undefined);
   } catch {
     /* the page theme is what matters; never let the title bar break startup */
   }
