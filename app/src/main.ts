@@ -3232,7 +3232,7 @@ function sweepStatus(): HTMLElement {
       h("span", { class: "src-time" }, timeText),
       busy ? h("span", { class: "src-act" }, h("span", { class: "spinner" }))
         : h("button", {
-            class: "src-act", disabled: running, "aria-label": `Check ${name} now`,
+            class: "src-act", disabled: running, "aria-label": `Check ${name} now`, "data-focus": `source:${o.source}`,
             title: `Check ${name} now${o.last_ok_at ? `: reads what's new since ${shortWhen(o.last_ok_at)}` : ""}${o.source === "github" ? " (no Claude run)" : ""}`,
             onclick: () => void runNow(o.source),
           }, "↻"));
@@ -3249,7 +3249,8 @@ function sweepStatus(): HTMLElement {
   const label = running ? "Sweep running" : errors ? `${plural(errors, "source")} with an error` : "All sources OK";
   const menu = h("details", { class: "drop-menu src-menu", open: state.sourcesOpen,
     ontoggle: (e: Event) => { state.sourcesOpen = (e.currentTarget as HTMLDetailsElement).open; } },
-    h("summary", { class: "src-line", title: `${label}. Click for each source (r)`, "aria-label": `${label}: show sources` }, ...line),
+    h("summary", { class: "src-line", title: `${label}. Click for each source (r)`, "aria-label": `${label}: show sources`,
+      "data-focus": "sources" }, ...line),
     h("div", { class: "menu src-pop", role: "dialog", "aria-label": "Sources" },
       h("div", { class: "src-pop-head" }, h("b", {}, "Sources"),
         h("span", { class: "muted small", title: nextTip },
@@ -3257,9 +3258,9 @@ function sweepStatus(): HTMLElement {
       overview.length ? h("div", { class: "src-list" }, ...overview.map(row))
         : h("p", { class: "muted small" }, "No sweeps yet."),
       h("div", { class: "src-pop-foot" },
-        h("button", { class: "primary small-btn", disabled: running, title: "Sweep every source now", onclick: () => void runNow() },
-          running && !r.scope ? "Sweeping…" : "Run all"),
-        h("button", { class: "link-btn", onclick: () => {
+        h("button", { class: "primary small-btn", disabled: running, title: "Sweep every source now", "data-focus": "run-all",
+          onclick: () => void runNow() }, running && !r.scope ? "Sweeping…" : "Run all"),
+        h("button", { class: "link-btn", "data-focus": "sweep-history", onclick: () => {
           state.sourcesOpen = false;
           renderHeader();
           void showSweepHistory();
@@ -3268,7 +3269,8 @@ function sweepStatus(): HTMLElement {
     h("div", { class: "sweep-actions" },
       menu,
       themeButton(),
-      h("button", { class: "icon help", title: "Keyboard shortcuts (?)", "aria-label": "Keyboard shortcuts", onclick: showShortcuts }, "?")),
+      h("button", { class: "icon help", title: "Keyboard shortcuts (?)", "aria-label": "Keyboard shortcuts", "data-focus": "help",
+        onclick: showShortcuts }, "?")),
   );
 }
 
@@ -3276,14 +3278,15 @@ function sweepStatus(): HTMLElement {
 function themeButton(): HTMLElement {
   const { choice, label } = themeLabel();
   const menu = h("details", { class: "drop-menu theme-menu" },
-    h("summary", { class: `theme tm-face tm-${choice}`, title: `${label} (or press t to cycle)`, "aria-label": label }, themeIcon(choice)),
+    h("summary", { class: `theme tm-face tm-${choice}`, title: `${label} (or press t to cycle)`, "aria-label": label,
+      "data-focus": "theme" }, themeIcon(choice)),
     h("div", { class: "menu", role: "menu" }, ...themeOptions().map((o) => h("button", {
       type: "button", role: "menuitemradio", "aria-checked": String(o.choice === choice),
       class: o.choice === choice ? "on" : "",
       onclick: (e: Event) => {
         e.preventDefault();
-        (menu as HTMLDetailsElement).open = false;
-        if (o.choice !== choice) { setTheme(o.choice); renderHeader(); }
+        if (o.choice !== choice) setTheme(o.choice);
+        renderHeader();                      // closes the menu
       },
     }, h("span", { class: `tm-ico tm-${o.choice}` }, themeIcon(o.choice)),
       h("span", { class: "tm-text" }, h("span", { class: "tm-name" }, o.name),
@@ -3294,11 +3297,13 @@ function themeButton(): HTMLElement {
 const SIDEBAR_CLIENTS = 6;
 
 /** The left sidebar: sections, clients that need you, and the sweep. (Named for the top bar it
- *  replaced; everything that changes a count calls it.) A sidebar control with data-focus keeps the focus. */
+ *  replaced; everything that changes a count calls it.) A sidebar control with data-focus keeps the focus.
+ *  When it is gone, disabled or in a closed menu, the button of its menu gets the focus. */
 function renderHeader() {
   const side = document.querySelector("aside.sidebar");
   if (!side) return;
-  const focus = (document.activeElement as HTMLElement | null)?.dataset.focus;
+  const a = document.activeElement as HTMLElement | null;
+  const focusKeys = [a?.dataset.focus, a?.closest("details")?.querySelector<HTMLElement>("summary")?.dataset.focus];
   if (state.issuesLoaded) ensureBrief();     // for "meeting at 2:30" next to a client
   const counts: Record<Tab, number> = {
     inbox: state.candidates.length,
@@ -3315,7 +3320,7 @@ function renderHeader() {
     const on = state.tab === id && !((id === "client" || id === "dev") && state.pickedClient);
     return h("button", {
       class: `nav${on ? " active" : ""}`, title: `${label} (⌘${key})`, "aria-current": on ? "page" : undefined,
-      onclick: () => goTab(id),
+      "data-focus": `nav-${id}`, onclick: () => goTab(id),
     }, navIcon(id), h("span", { class: "nav-label" }, label),
       showCount && h("span", { class: `count${id === "inbox" && counts.inbox > 0 ? " hot" : ""}` }, String(counts[id])));
   };
@@ -3340,32 +3345,38 @@ function renderHeader() {
       ...shown.map((c) => h("button", {
         class: `client-link${state.tab === "client" && state.pickedClient === c.name ? " active" : ""}`,
         title: `${c.name}: ${c.open} open${c.late ? `, ${c.late} overdue` : ""}${c.meeting ? `, meeting at ${c.meeting}` : ""}`,
-        onclick: () => pickClient(c.name),
+        "data-focus": `client:${c.name}`, onclick: () => pickClient(c.name),
       }, clientLogo(c.name), h("span", { class: "client-name" }, c.name),
         c.late ? h("span", { class: "client-hint late" }, `${c.late} late`)
           : c.meeting ? h("span", { class: "client-hint" }, c.meeting)
           : h("span", { class: "client-hint" }, String(c.open)))),
       clients.length > SIDEBAR_CLIENTS && h("button", {
-        class: "client-link more", onclick: () => { state.allClients = !state.allClients; renderHeader(); },
+        class: "client-link more", "data-focus": "more-clients", onclick: () => { state.allClients = !state.allClients; renderHeader(); },
       }, state.allClients ? "Show fewer" : `+ ${clients.length - SIDEBAR_CLIENTS} more`)) : "",
     projects.length > 0 ? h("div", { class: "side-group" }, "Projects") : "",
     projects.length > 0 ? h("div", { class: "side-clients" },
       ...shownProjects.map((p) => h("button", {
         class: `client-link${state.tab === "dev" && state.pickedClient === p.name ? " active" : ""}`,
         title: `${p.name}: ${p.open} open${p.late ? `, ${p.late} overdue` : ""}`,
-        onclick: () => pickProject(p.name),
+        "data-focus": `project:${p.name}`, onclick: () => pickProject(p.name),
       }, h("span", { class: "proj-mark", "aria-hidden": "true" }, p.name.slice(0, 1).toUpperCase()),
         h("span", { class: "client-name" }, p.name),
         p.late ? h("span", { class: "client-hint late" }, `${p.late} late`)
           : h("span", { class: "client-hint" }, String(p.open)))),
       projects.length > SIDEBAR_CLIENTS && h("button", {
-        class: "client-link more", onclick: () => { state.allProjects = !state.allProjects; renderHeader(); },
+        class: "client-link more", "data-focus": "more-projects", onclick: () => { state.allProjects = !state.allProjects; renderHeader(); },
       }, state.allProjects ? "Show fewer" : `+ ${projects.length - SIDEBAR_CLIENTS} more`)) : "",
     h("div", { class: "side-fill" }),
     updateLine(),
     sweepStatus(),
   );
-  if (focus) side.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
+  for (const k of focusKeys) {
+    const el = k ? side.querySelector<HTMLElement>(`[data-focus="${CSS.escape(k)}"]`) : null;
+    if (el && !el.matches(":disabled") && !el.closest("details:not([open]) > :not(summary)")) {
+      el.focus({ preventScroll: true });
+      break;
+    }
+  }
 }
 
 // ---- due-date slips -------------------------------------------------------------------------------

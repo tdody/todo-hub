@@ -95,6 +95,7 @@ async function start(i: Issue) {
     if (popover === p) closePeriscope();
     ctx.toast(r.mode === "existing" ? `${i.identifier} is already open in periscope` : `Started ${i.identifier} in periscope`,
       { label: "Show", run: () => void api.showInPeriscope(r.pid).catch(ctx.fail) });
+    for (const w of r.warnings) ctx.fail(w);
   } catch (e) {
     p.starting = false;
     if (popover === p) ctx.render();
