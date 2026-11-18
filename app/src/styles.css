@@ -108,9 +108,9 @@ body {
 button, input, select { font: inherit; color: inherit; }
 
 /* App frame: sidebar on the left, the page on the right. sidebar.ts sets --side-w (the dragged width) and
-   .side-icons (the icon column). --side caps the sidebar, so the page keeps 600px of the window. */
+   .side-icons (the icon column). --side is the shown width: capped so the page keeps 600px of the window, and 60px in the icon column. */
 #app { --side: min(var(--side-w, 224px), 100vw - 600px); display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
-#app.side-icons { grid-template-columns: 60px minmax(0, 1fr); }
+#app.side-icons { --side: 60px; }
 .sidebar {
   position: sticky; top: 0; height: 100vh; overflow-y: auto; box-sizing: border-box; z-index: 5;
   display: flex; flex-direction: column; gap: 2px; padding: 14px 10px 12px;
@@ -118,6 +118,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .side-brand { display: flex; align-items: center; gap: 8px; padding: 2px 8px 12px; font-size: 15px; }
 .side-brand .brand-logo { width: 24px; height: 24px; }
+.side-brand .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-brand .add { margin-left: auto; width: 26px; height: 26px; padding: 0; font-size: 17px; color: var(--ink);
   border: 1px solid var(--border); background: var(--surface); border-radius: 7px; }
 .side-brand .add:hover { color: var(--accent); background: var(--surface-2); }
@@ -1287,7 +1288,8 @@ button.ref:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--bor
 .src-menu .src-pop .src-row.bad button.src-act { color: var(--bad); }
 #app.side-icons .src-line-text { display: none; }
 #app.side-icons .src-line { flex: none; justify-content: center; }
-#app.side-icons .src-menu .menu.src-pop { position: fixed; left: 68px; right: auto; bottom: 16px; width: 260px; }
+#app.side-icons .src-menu .menu.src-pop { position: fixed; left: calc(var(--side) + 8px); right: auto; bottom: 16px; width: 260px; }
+#app.side-icons .theme-menu .menu { position: fixed; left: calc(var(--side) + 8px); right: auto; bottom: 16px; width: 220px; }
 
 /* ---- Quiet empty fields: an unset date, priority, client or project shows nothing; a set date
    shows as text. The control appears on hover of its row or card, on focus, or in the Today pane. */
