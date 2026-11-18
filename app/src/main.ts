@@ -3272,10 +3272,11 @@ function themeButton(): HTMLElement {
 const SIDEBAR_CLIENTS = 6;
 
 /** The left sidebar: sections, clients that need you, and the sweep. (Named for the top bar it
- *  replaced; everything that changes a count calls it.) */
+ *  replaced; everything that changes a count calls it.) A sidebar control with data-focus keeps the focus. */
 function renderHeader() {
   const side = document.querySelector("aside.sidebar");
   if (!side) return;
+  const focus = (document.activeElement as HTMLElement | null)?.dataset.focus;
   if (state.issuesLoaded) ensureBrief();     // for "meeting at 2:30" next to a client
   const counts: Record<Tab, number> = {
     inbox: state.candidates.length,
@@ -3341,6 +3342,7 @@ function renderHeader() {
     h("div", { class: "side-fill" }),
     sweepStatus(),
   );
+  if (focus) side.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
 }
 
 // ---- due-date slips -------------------------------------------------------------------------------
