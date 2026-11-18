@@ -1289,12 +1289,14 @@ button.ref:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--bor
 .update-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .update-menu .menu.update-pop { left: -8px; right: -8px; bottom: calc(100% + 8px); min-width: 0; padding: 10px 12px; gap: 8px;
   border-radius: 12px; box-shadow: 0 14px 34px rgba(0, 0, 0, .16); font-size: 12px; color: var(--ink); }
-.update-pop b { font-size: 13px; }
+.update-pop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.update-pop-head b { font-size: 13px; }
 .update-notes { max-height: 50vh; overflow: auto; line-height: 1.45; }
 .update-notes > :first-child { margin-top: 0; }
 .update-notes > :last-child { margin-bottom: 0; }
 .update-err { margin: 0; color: var(--bad); }
-.update-pop-foot { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
+.update-pop-foot { border-top: 1px solid var(--border); padding-top: 8px; }
+.update-pop-foot button { white-space: nowrap; }
 @media (max-width: 820px) {
   .update-line-text { display: none; }
   .update-line { flex: none; justify-content: center; }
