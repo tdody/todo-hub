@@ -562,6 +562,23 @@ account. If a Claude is already on that branch, it reports that pane and
 starts nothing.
 ```
 
+In `README.md`, "Agents talk back", after the paragraph that ends "it's how a finished task lands in READY with a reason attached.", add:
+
+```markdown
+Every Claude that periscope spawns (a `spawn_claude` worker, a review pane, a
+Linear start) starts with `--session-id <uuid>`, so periscope knows its Claude
+session from the first moment. The command lands in the pane's shell history,
+and Claude refuses one session ID twice: after the Claude exits, Up+Enter fails
+with "Session ID … is already in use". Run `claude --resume <uuid>` to continue
+that conversation, or `claude` to start a new one.
+```
+
+In `periscope/channels.py`, `spawn_claude_with_prompt`, above `tmux("send-keys", "-t", target, claude_cmd, "Enter")`, add:
+
+```python
+    # The command lands in the shell history, where a re-run fails: Claude refuses one --session-id twice.
+```
+
 - [ ] **Step 2: `docs/tmux-persistence.md`**
 
 After the paragraph that ends "`periscope.activity` would drag in the Anthropic SDK.", add:
@@ -578,8 +595,8 @@ rewrite reads the flag as `--resume <uuid>` everywhere it reads a captured
 - [ ] **Step 3: Commit**
 
 ```bash
-git add README.md docs/tmux-persistence.md
-git commit -m "docs: /api/linear/start's session_id and email; resurrect's --session-id rule" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add README.md docs/tmux-persistence.md periscope/channels.py
+git commit -m "docs: /api/linear/start's session_id and email; the --session-id rules for resurrect and shell history" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task 8: Check periscope and open its PR
@@ -620,6 +637,10 @@ gh pr create --repo tomplex/periscope --base main --title "linear: /api/linear/s
 - `store.account_email` reads the email from the account's `.claude.json`.
 - `/api/linear/start` answers mode "spawned" with `session_id` and `email`. todo-hub writes them to the Linear issue.
 - resurrect reads a captured `--session-id` as `--resume`. Claude refuses a `--session-id` that is already in use, so a row-less pane would come back with no Claude.
+
+## Behavior change
+- The spawn's `claude … --session-id <uuid>` command goes into the pane's shell history. After that Claude exits, Up+Enter fails with "Session ID … is already in use". `claude --resume <uuid>` continues the conversation. The README says so.
+- The alternative was to read the ID after the spawn from Claude's session file, with no flag. That keeps history re-runs working, but the ID can be missing when Claude starts slowly.
 
 ## Assumptions
 - Claude Code accepts `--session-id <uuid>` in interactive mode.

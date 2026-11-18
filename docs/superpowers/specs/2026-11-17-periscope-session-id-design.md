@@ -39,12 +39,12 @@ todo-hub adds the comment only when periscope answers mode "spawned" with a `ses
 ## periscope (one PR to the periscope repo)
 
 1. `config.build_agent_command` gets a `session_id` argument. For `claude`, it adds `--session-id <id>`, the same way that `resume_id` adds `--resume <id>`. Codex ignores it, as it ignores `effort`.
-2. `channels.spawn_claude_with_prompt` makes a new `uuid4` for each spawn and passes it to `build_agent_command`. All 3 callers get this: the `spawn_claude` MCP tool, `/api/reviews/prepare` and `/api/linear/start`. A Claude started without the flag gets a random ID anyway, so no caller changes behavior.
+2. `channels.spawn_claude_with_prompt` makes a new `uuid4` for each spawn and passes it to `build_agent_command`. All 3 callers get this: the `spawn_claude` MCP tool, `/api/reviews/prepare` and `/api/linear/start`. One behavior changes for all 3: periscope types the command into the pane's shell, so the command goes into the shell history. After the Claude exits, a re-run from history (Up+Enter) fails, because Claude refuses one `--session-id` twice. `claude --resume <id>` continues the conversation, and `claude` starts a new one. You chose to accept this cost for all spawns, instead of only Linear start or reading the ID after the spawn.
 3. `channels.Spawned` gets `session_id` and `account` (the account ID from `usage.choose_launch`).
 4. New `store.account_email(account_id) -> str | None` reads `oauthAccount.emailAddress` from the account's `.claude.json`: `~/.claude.json` for the default account (`config_dir` is `""`), else `<config_dir>/.claude.json`. It returns `None` when the file is missing or not valid JSON, or when it has no email. An account that is not logged in has no email.
 5. `/api/linear/start` answers mode "spawned" with `{mode, pid, path, reused, session_id, email}`. Mode "existing" stays `{mode, pid}`.
 6. `resurrect` reads a captured `--session-id <uuid>` as `--resume <uuid>`. Claude refuses to start a second time with the same `--session-id` ("Session ID … is already in use"). Without this, a pane that has no `pane_sessions` row keeps its captured command, and after a reboot its Claude does not start. With it, the pane resumes its session, as a captured `--resume` does today. A demoted duplicate loses the flag, as it loses `--resume`.
-7. The `/api/linear/start` section of periscope's README names the 2 new fields. `docs/tmux-persistence.md` says that a captured `--session-id` counts as `--resume`.
+7. The `/api/linear/start` section of periscope's README names the 2 new fields. The README also says that each spawn starts with `--session-id`, and that a re-run from shell history fails. `docs/tmux-persistence.md` says that a captured `--session-id` counts as `--resume`.
 
 Tests:
 
