@@ -1,0 +1,12 @@
+#!/bin/sh
+# Print the body of one version's section in CHANGELOG.md: the notes that bin/release refuses to
+# release without, and the text of the GitHub release, which the app's update panel shows. Prints
+# nothing unless that section is the FIRST `## ` heading, because the newest release is at the top.
+#
+#   bin/release-notes 0.2.0
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+awk -v h="## v$1" '
+  /^## / { if (seen || ($0 != h && index($0, h " ") != 1)) exit; seen = 1; next }
+  seen { print }
+' "$REPO/CHANGELOG.md"

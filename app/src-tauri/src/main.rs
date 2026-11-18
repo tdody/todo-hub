@@ -13,6 +13,9 @@ use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItem, MenuItemBui
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
+/// The argument that Open at Login adds: start in the menu bar, with no window.
+const HIDDEN: &str = "--hidden";
+
 /// The running backend. It sits behind a lock because View → Reload restarts it.
 struct Backend(Mutex<BackendState>);
 
@@ -159,6 +162,17 @@ fn set_tray_count(app: tauri::AppHandle, count: u32) {
         let _ = tray.set_title(if count > 0 { Some(count.to_string()) } else { None });
         let _ = tray.set_tooltip(Some(format!("TodoHub: {count} to review")));
     }
+}
+
+/// Update and restart: open the new app with its window, also when login started this one with --hidden.
+#[tauri::command]
+fn restart_shown(app: tauri::AppHandle) {
+    let mut env = app.env();
+    env.args_os.retain(|a| a != HIDDEN);
+    // The restart exits without RunEvent::Exit, so stop the backend here.
+    stop_backend(&mut app.state::<Backend>().0.lock().unwrap());
+    app.cleanup_before_exit();
+    tauri::process::restart(&env);
 }
 
 fn show_main(app: &tauri::AppHandle) {
@@ -335,10 +349,11 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--hidden"]),
+            Some(vec![HIDDEN]),
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(start_backend())
-        .invoke_handler(tauri::generate_handler![backend_info, set_tray_count])
+        .invoke_handler(tauri::generate_handler![backend_info, set_tray_count, restart_shown])
         .setup(|app| {
             #[cfg(desktop)]
             first_run_login_item(app.handle());
@@ -347,7 +362,7 @@ fn main() {
             #[cfg(desktop)]
             register_capture_shortcut(app)?;
             // Started at login: stay in the menu bar. Otherwise open the window.
-            if !std::env::args().any(|a| a == "--hidden") {
+            if !std::env::args().any(|a| a == HIDDEN) {
                 show_main(app.handle());
             }
             Ok(())
