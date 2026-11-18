@@ -312,18 +312,19 @@ function periscopeSection(ctx: SettingsCtx): HTMLElement {
     "Start in periscope (⋯ or p on an issue) sends this prompt to the new Claude. {identifier}, {title} and {url} become the issue's.",
     "", box, h("div", { class: "set-row-inline" }, saveBtn, reset));
 }
-
 // ---- updates ------------------------------------------------------------------------------------
-let checkResult = "";                // what the last Check for updates found
+let upToDate = false;                // the last Check for updates found no newer release
+let checkError = "";                 // or why it failed
 
 async function checkNow(ctx: SettingsCtx) {
   busy = "updates";
+  upToDate = false;
+  checkError = "";
   ctx.rerender();
   try {
-    const found = await checkForUpdate();
-    checkResult = found ? `v${found.version} is ready: see the bottom of the sidebar.` : "You have the latest version.";
+    upToDate = !(await checkForUpdate());
   } catch (e) {
-    checkResult = `Couldn't check: ${e instanceof Error ? e.message : String(e)}`;
+    checkError = `Couldn't check: ${e instanceof Error ? e.message : String(e)}`;
   } finally {
     busy = "";
     ctx.rerender();
@@ -331,16 +332,18 @@ async function checkNow(ctx: SettingsCtx) {
 }
 
 function updatesSection(ctx: SettingsCtx): HTMLElement {
+  const version = h("span", {}, update.version ? `TodoHub ${update.version}` : "TodoHub");
   if (!updatesOn) {
-    return card("updates", "Updates", "Updates are off in the dev app.", "",
-      h("p", { class: "set-row-inline" }, `TodoHub ${update.version}`));
+    return card("updates", "Updates", "Updates are off in the dev app.", "", h("div", { class: "set-row-inline" }, version));
   }
+  const result = update.ready ? `v${update.ready.version} is ready: see the bottom of the sidebar.`
+    : checkError || (upToDate ? "You have the latest version." : "");
   return card("updates", "Updates",
     "TodoHub checks for a new release at launch and every hour, and shows it at the bottom of the sidebar.", "",
     h("div", { class: "set-row-inline" },
-      h("span", {}, `TodoHub ${update.version}`),
+      version,
       h("button", { type: "button", class: "ghost small-btn", disabled: busy === "updates", onclick: () => void checkNow(ctx) },
         busy === "updates" ? "Checking…" : "Check for updates"),
       link("All releases", RELEASES_URL)),
-    checkResult ? h("p", { class: "set-hint" }, checkResult) : "");
+    result ? h("p", { class: "set-hint" }, result) : "");
 }
