@@ -48,7 +48,7 @@ Out:
 
 ### Keys
 
-- The shortcuts sheet (**?**) gets a row: **⌃⌘S**, "Hide or show the sidebar".
+- The shortcuts sheet (**?**) gets a row: **⌃⌘S**, "Hide the sidebar to icons, or show it again (drag its edge to resize it)".
 
 ## Changes
 
@@ -57,8 +57,10 @@ Out:
 Today a media query at 820px sets the icon column (`styles.css`, two blocks). It becomes the class `side-icons` on `#app`, so one set of rules serves both cases.
 
 - A new module, `app/src/sidebar.ts`, owns the sidebar's frame, as `theme.ts` owns the theme: the saved width, the saved choice, the `side-icons` class, the drag edge and the hide button. `main.ts` keeps what is inside the sidebar.
-- It sets `side-icons` when the sidebar is hidden or the window is 820px or narrower (`matchMedia("(max-width: 820px)")`). It also sets `--side-w` on `#app` from the saved width. It does this at start, after the hide button or **⌃⌘S**, and when the media query changes.
-- `#app` sets `--side: min(var(--side-w, 224px), 100vw - 600px)` and uses `grid-template-columns: var(--side) minmax(0, 1fr)`. `#app.side-icons` uses `60px minmax(0, 1fr)`.
+- It sets `side-icons` when the sidebar is hidden or the window is 820px or narrower (`matchMedia("(max-width: 820px)")`): at start, after the hide button or **⌃⌘S**, and when the media query changes. At start it also sets `--side-w` on `#app` from the saved width.
+- `--side` is the shown width. `#app` sets it to `min(var(--side-w, 224px), 100vw - 600px)`, and `#app.side-icons` sets it to `60px`. The grid uses `grid-template-columns: var(--side) minmax(0, 1fr)`.
+- The Sources popover and the theme menu open beside the icon column (`position: fixed`, `left: calc(var(--side) + 8px)`). The theme menu was 42px wide in the icon column; the hide button makes that column a normal state, so it gets the same fix as the Sources popover.
+- The brand name gets an ellipsis, so the brand row never overflows at 200px (a sidebar scrollbar takes about 15px with "Always show scrollbars").
 - The rules move from the two `@media (max-width: 820px)` blocks to `#app.side-icons` selectors. The selectors for classes that no code makes any more (`.sweep-line`, `.sweep-sources`, `.sweep-actions .secondary`, `.src-head`, `.sweep-next`) are not carried over. The `.src-list` rules are not carried over either: one hid the list in the sidebar and the other showed it again in the popover, which is the only place it is.
 - `renderHeader()` puts the hide button from `sidebar.ts` in the brand row. After the button or **⌃⌘S**, `sidebar.ts` calls `renderHeader()` again, so the label follows.
 
@@ -67,7 +69,7 @@ Today a media query at 820px sets the icon column (`styles.css`, two blocks). It
 - The edge is a `div.side-edge` in `#app`, beside the sidebar, not inside it. `renderHeader()` replaces the sidebar's children often, and that must not stop a drag.
 - It is `position: fixed`, full height, at `left: calc(var(--side) - 3px)`.
 - `pointerdown` captures the pointer. `pointermove` sets `--side-w` to the pointer's x, kept between 200px and 400px. When the pointer releases, the width is saved. A drag does not call `render()`.
-- It has `role="separator"`, `aria-orientation="vertical"` and `aria-label="Resize the sidebar"`.
+- It has `aria-hidden="true"`. It cannot take keyboard focus, so it must not claim to be a resize control. The hide button and **⌃⌘S** are the keyboard path.
 
 ### Width rules on the page
 
@@ -117,7 +119,8 @@ The app has no frontend tests, and CI runs `tsc` only.
    - At an 821px window with a 400px sidebar, the sidebar is 221px.
    - At windows of 760, 821, 1120, 1400 and 1700px, with the sidebar at 200, 224 and 400px and as the icon column: the Pull requests header line fits, the columns fold at the page widths above, the Inbox "why" line shows at a 1000px page, and the Inbox, Today and Client panes stack at a 720px page. With the 224px sidebar, page width = window − 280px, so each fold is at the same window width as on `main`.
    - The icon column looks the same as on `main` (a screenshot of each at 800px).
-   - The Snooze menu and the Sources popover open in their usual places.
+   - The Snooze menu, the Sources popover and the theme menu open in their usual places. In the icon column, the Sources popover and the theme menu open beside the column.
+   - While you drag, the cursor stays `col-resize` and no text gets selected.
 
 ## Assumptions
 

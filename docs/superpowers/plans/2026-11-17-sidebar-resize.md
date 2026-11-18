@@ -12,6 +12,8 @@
 
 **Worktree:** `/Users/thibaultdody/dev/worktrees/todo-hub/main`, branch `sidebar-resize`. Run every command from there (Task 0 sets it up).
 
+Review fixes changed the code after Tasks 1 and 2 were written: `showIcons` is `applyIconColumn`, `sidebarToggle` is `hideButton`, `setupSidebar` takes `{ rerender }`, the edge is `aria-hidden`, `#app.side-icons` sets `--side: 60px`, the theme menu opens beside the icon column, and the brand name gets an ellipsis. The code is the source of truth.
+
 ---
 
 ## Conventions
@@ -773,7 +775,10 @@ async (page) => {
     return t.right <= side.right - 8;
   });
   await page.mouse.move(600, 400, { steps: 5 }); r.max = await w();
-  await page.mouse.move(300, 400, { steps: 5 }); await page.mouse.up(); r.dragged = await w();
+  r.cursorAtMax = await page.evaluate(() => getComputedStyle(document.elementFromPoint(600, 400)).cursor);
+  await page.mouse.move(300, 400, { steps: 5 });
+  r.noSelection = await page.evaluate(() => getSelection().toString() === "");
+  await page.mouse.up(); r.dragged = await w();
   r.saved = await page.evaluate(() => localStorage.getItem("todohub.sidebarWidth"));
   await page.reload(); await page.waitForSelector("aside.sidebar .nav"); r.afterReload = await w();
   await page.mouse.dblclick(300, 400); r.dblclick = await w();
@@ -782,7 +787,7 @@ async (page) => {
 }
 ```
 
-Expected: `{ start: 224, min: 200, brandFits: true, max: 400, dragged: 300, saved: "300", afterReload: 300, dblclick: 224, savedAfterDbl: "224" }`. Take a screenshot while you hover the edge (`page.mouse.move(224, 300)`): the 2px accent line shows over the hairline.
+Expected: `{ start: 224, min: 200, brandFits: true, max: 400, cursorAtMax: …, noSelection: true, dragged: 300, saved: "300", afterReload: 300, dblclick: 224, savedAfterDbl: "224" }`. `cursorAtMax` is the CSS cursor of the element under the pointer past the clamp: report it. `col-resize` or `auto` is fine (`body.side-drag` sets it, and Chromium keeps the capture target's cursor); `pointer` means a button under the pointer wins, and the real app needs a look by hand. Take a screenshot while you hover the edge (`page.mouse.move(224, 300)`): the 2px accent line shows over the hairline.
 
 - [ ] **Step 5: The hide button, ⌃⌘S and a reload**
 
@@ -898,6 +903,7 @@ Read both PNGs. Expected: the same icons, counts and bottom buttons in the same 
 Go back to the branch: `page.setViewportSize({ width: 1120, height: 800 })`, then `page.goto("http://localhost:1430/")`. Click `.side-toggle` to hide the sidebar. Then:
 
 - Press **r**: the Sources popover opens to the right of the icon column (its left edge at 68px). Press **r** again to close it.
+- Click the theme button (`.theme-menu > summary`): the menu opens to the right of the icon column (left edge at 68px, 220px wide), and its options do not overflow. Press Escape.
 - On the Inbox, click a card, then press **s**: the Snooze menu opens under the card's Snooze button. Press Escape.
 - Click `.side-toggle` again, then press **t** until the theme is Dark, hover the edge, and take a screenshot: the accent line shows clearly.
 
