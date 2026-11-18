@@ -10,8 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-17-release-and-update-design.md`.
 
-
-> **After the reviews:** where the reviews and the merge of `main` changed the code, the code is the reference. The changes: the popover layout, the `editing()` guard in the `watchForUpdates` call, and the `#app.side-icons` rules in place of the `@media (max-width: 820px)` rules.
+> **After the reviews:** where the reviews and the merge of `main` changed the code, the code is the reference. The changes: the popover layout, the `editing()` guard in the `watchForUpdates` call, the `#app.side-icons` rules in place of the `@media (max-width: 820px)` rules, and the `HIDDEN` constant in `main.rs`.
 
 ---
 
@@ -736,7 +735,7 @@ Add at the end of `settings.ts`:
 // ---- updates ------------------------------------------------------------------------------------
 let checkResult = "";                // what the last Check for updates found
 
-async function checkNow(ctx: SettingsCtx) {
+async function checkForUpdatesNow(ctx: SettingsCtx) {
   busy = "updates";
   ctx.rerender();
   try {
@@ -759,7 +758,7 @@ function updatesSection(ctx: SettingsCtx): HTMLElement {
     "TodoHub checks for a new release at launch and every hour, and shows it at the bottom of the sidebar.", "",
     h("div", { class: "set-row-inline" },
       h("span", {}, `TodoHub ${update.version}`),
-      h("button", { type: "button", class: "ghost small-btn", disabled: busy === "updates", onclick: () => void checkNow(ctx) },
+      h("button", { type: "button", class: "ghost small-btn", disabled: busy === "updates", onclick: () => void checkForUpdatesNow(ctx) },
         busy === "updates" ? "Checking…" : "Check for updates"),
       link("All releases", RELEASES_URL)),
     checkResult ? h("p", { class: "set-hint" }, checkResult) : "");

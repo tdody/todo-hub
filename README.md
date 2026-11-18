@@ -171,6 +171,7 @@ When Anthropic's connector service is down, the connector sources a sweep couldn
    $todohub cli set-linear-key    # Linear personal API key (hidden input, saved in Keychain)
    $todohub cli check             # Linear, Claude Code, gh, schedule, settings
    ```
+
 5. Open TodoHub. In **Settings → Schedule**, click **Set it up**.
 
 You also need Claude Code (`claude`), signed in, and `gh`, signed in, for GitHub reviews and the Pull requests tab.
