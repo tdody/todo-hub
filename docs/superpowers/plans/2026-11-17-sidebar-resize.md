@@ -12,7 +12,7 @@
 
 **Worktree:** `/Users/thibaultdody/dev/worktrees/todo-hub/main`, branch `sidebar-resize`. Run every command from there (Task 0 sets it up).
 
-Review fixes changed the code after Tasks 1 and 2 were written: `showIcons` is `applyIconColumn`, `sidebarToggle` is `hideButton`, `setupSidebar` takes `{ rerender }`, the edge is `aria-hidden`, `#app.side-icons` sets `--side: 60px`, the theme menu opens beside the icon column, and the brand name gets an ellipsis. The code is the source of truth.
+Review fixes changed the code after Tasks 1 and 2 were written: `showIcons` is `applyIconColumn`, `sidebarToggle` is `hideButton`, `setupSidebar` takes `{ rerender }`, the edge is `aria-hidden`, `#app.side-icons` sets `--side: 60px`, the theme menu opens beside the icon column, and the brand name gets an ellipsis. Later fixes: the brand row's buttons are `flex: none`; the drag cursor is `body.side-drag, body.side-drag * { cursor: col-resize !important; }`; the Sources popover's names get an ellipsis (`.src-n`); the hidden state is `hidden` with the pref `todohub.sidebarHidden` (`HIDDEN_PREF`, `WIDTH_PREF`); `--side-w` has no CSS fallback. The code is the source of truth.
 
 ---
 
@@ -752,7 +752,7 @@ async (page) => {
   });
   await page.setViewportSize({ width: 1120, height: 800 });
   await page.goto("http://localhost:1430/");
-  await page.evaluate(() => { localStorage.removeItem("todohub.sidebarWidth"); localStorage.removeItem("todohub.sidebarCollapsed"); });
+  await page.evaluate(() => { localStorage.removeItem("todohub.sidebarWidth"); localStorage.removeItem("todohub.sidebarHidden"); });
   await page.reload();
   await page.waitForSelector("aside.sidebar .nav");
   return await page.evaluate(() => document.querySelector("aside.sidebar").getBoundingClientRect().width);
@@ -821,7 +821,7 @@ async (page) => {
   r.noButton = await page.evaluate(() => getComputedStyle(document.querySelector(".side-toggle")).display === "none");
   r.noEdge = await page.evaluate(() => getComputedStyle(document.querySelector(".side-edge")).display === "none");
   await page.keyboard.press("Control+Meta+KeyS");
-  r.prefAfterKey = await page.evaluate(() => localStorage.getItem("todohub.sidebarCollapsed"));
+  r.prefAfterKey = await page.evaluate(() => localStorage.getItem("todohub.sidebarHidden"));
   await page.setViewportSize({ width: 1120, height: 800 }); r.wideAgain = await w();
   await page.evaluate(() => localStorage.setItem("todohub.sidebarWidth", "400"));
   await page.reload(); await page.waitForSelector("aside.sidebar .nav");
