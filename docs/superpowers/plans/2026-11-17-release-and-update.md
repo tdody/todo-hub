@@ -10,6 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-17-release-and-update-design.md`.
 
+
+> **After the reviews:** where the reviews and the merge of `main` changed the code, the code is the reference. The changes: the popover layout, the `editing()` guard in the `watchForUpdates` call, and the `#app.side-icons` rules in place of the `@media (max-width: 820px)` rules.
+
 ---
 
 ## Before you start
@@ -429,7 +432,7 @@ The public key is safe to commit. Do not add any other `"version"` key to this f
   "identifier": "default",
   "description": "Main window: core APIs, opening links in the browser, notifications, and updates",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-theme", "opener:default", "notification:default", "updater:default"]
+  "permissions": ["core:default", "core:window:allow-set-theme", "opener:default", "notification:default", "updater:allow-check", "updater:allow-download-and-install"]
 }
 ```
 
@@ -749,7 +752,7 @@ async function checkNow(ctx: SettingsCtx) {
 
 function updatesSection(ctx: SettingsCtx): HTMLElement {
   if (!updatesOn) {
-    return card("updates", "Updates", "Updates are off in the dev app.", "",
+    return card("updates", "Updates", "Updates are off outside the installed app.", "",
       h("p", { class: "set-row-inline" }, `TodoHub ${update.version}`));
   }
   return card("updates", "Updates",

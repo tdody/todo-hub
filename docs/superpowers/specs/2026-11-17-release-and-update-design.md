@@ -133,7 +133,7 @@ A last card, "Updates":
 
 - "TodoHub 0.2.0", from `getVersion()`;
 - a **Check for updates** button. A manual check shows its result under the button: "You have the latest version", "v0.3.0 is ready: see the bottom of the sidebar.", or "Couldn't check: <error>";
-- in the dev app: "Updates are off in the dev app", and no button.
+- outside the installed app (the dev app or a browser): "Updates are off outside the installed app.", and no button.
 
 ### After the restart
 
@@ -153,7 +153,7 @@ A colleague:
 1. downloads the `.dmg` from `https://github.com/tdody/todo-hub/releases/latest`;
 2. opens it and drags TodoHub to Applications;
 3. runs `xattr -dr com.apple.quarantine /Applications/TodoHub.app` one time. Without it, macOS says that the app "is damaged";
-4. sets up with the CLI in the app (`/Applications/TodoHub.app/Contents/MacOS/todohub-backend cli …`): `init`, `set-linear-key`, `linear.team_key` in `config.toml`, then `check`;
+4. sets up with the CLI in the app (`/Applications/TodoHub.app/Contents/MacOS/todohub-backend cli …`): `init`, `linear.team_key` in `config.toml`, `set-linear-key` (it needs the team key), then `check`;
 5. opens TodoHub, and installs the sweep schedule from Settings.
 
 Updates that the app downloads do not get the quarantine mark, so step 3 is needed only one time.
@@ -163,7 +163,7 @@ Updates that the app downloads do not get the quarantine mark, so step 3 is need
 - **New:** `CHANGELOG.md`, `bin/release`, `bin/release-notes`, `.github/workflows/release.yml`, `app/src-tauri/tauri.release.conf.json`, `app/src/update.ts`, `docs/releasing.md`.
 - **`app/src-tauri/Cargo.toml` and `main.rs`:** add and register `tauri-plugin-updater`. `main.rs` also adds the command `restart_shown`.
 - **`app/src-tauri/tauri.conf.json`:** `plugins.updater.pubkey`, `plugins.updater.endpoints`, `bundle.macOS.signingIdentity: "-"`, `bundle.macOS.hardenedRuntime: false`.
-- **`app/src-tauri/capabilities/default.json`:** add `updater:default`.
+- **`app/src-tauri/capabilities/default.json`:** add `updater:allow-check` and `updater:allow-download-and-install`.
 - **`app/package.json`:** add `@tauri-apps/plugin-updater`.
 - **`app/src/desktop.ts`:** export `inTauri`, so `update.ts` uses the same test.
 - **`app/src/update.ts`:** the check, the hourly timer, the install with its progress, and the state that the sidebar and Settings read.
@@ -194,7 +194,7 @@ Updates that the app downloads do not get the quarantine mark, so step 3 is need
 ## Assumptions
 
 - Updates that the app downloads do not get the quarantine mark. The v0.2.1 test proves this.
-- Colleagues can write to `/Applications`, as admin users can. If they cannot, the update fails, and the panel shows the error and the releases link.
+- Colleagues can write to `/Applications`, as admin users can. If they cannot, the updater asks macOS for an admin password. If they cancel, the update fails, and the panel shows the error and the releases link.
 - After each update, macOS asks again whether `todohub-backend` can use the Keychain, because an ad-hoc signature changes at each build. Choose **Always Allow**. The README says this.
 - Ad-hoc signing works on the PyInstaller backend file. A local build proves that the backend starts (`--help`). The first release proves the same for the release build.
 - The panel shows only the newest notes. The **All releases** link shows the older notes.

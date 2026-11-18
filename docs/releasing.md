@@ -66,6 +66,7 @@ A local build with `install-app.sh` does not make update files, so it does not n
 ## When bin/release stops halfway
 
 - **Before its commit** (for example, `uv lock` or `cargo metadata` has no network): the version files have changes. Put them back with `git restore --source=HEAD --staged --worktree app backend`, fix the cause, and run `bin/release 0.3.0` again. `CHANGELOG.md` keeps your section.
+- **At the tag** (for example, the tag signature timed out): the release commit exists. Make the tag and push: `git tag -m "TodoHub v0.3.0" v0.3.0`, then `git push --atomic origin HEAD v0.3.0`.
 - **At the push** (for example, no network): the release commit and the tag exist on your Mac only. The push sends both or neither, so run it again: `git push --atomic origin HEAD v0.3.0`.
 - **GitHub refuses `main`** because someone pushed first: put your release commit on top, then tag it again.
 

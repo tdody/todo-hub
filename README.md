@@ -163,10 +163,14 @@ When Anthropic's connector service is down, the connector sources a sweep couldn
    ```bash
    todohub=/Applications/TodoHub.app/Contents/MacOS/todohub-backend
    $todohub cli init              # creates ~/Library/Application Support/TodoHub
-   $todohub cli set-linear-key    # Linear personal API key (hidden input, saved in Keychain)
    ```
 
-   Set `team_key` (for example `"ENG"`) under `[linear]` in `config.toml`, then run `$todohub cli check`.
+   In `config.toml` there, set `team_key` (for example `"ENG"`) under `[linear]`. Then:
+
+   ```bash
+   $todohub cli set-linear-key    # Linear personal API key (hidden input, saved in Keychain)
+   $todohub cli check             # Linear, Claude Code, gh, schedule, settings
+   ```
 5. Open TodoHub. In **Settings → Schedule**, click **Set it up**.
 
 You also need Claude Code (`claude`), signed in, and `gh`, signed in, for GitHub reviews and the Pull requests tab.
@@ -188,6 +192,11 @@ cd backend
 uv sync --extra dev
 uv run pytest -q                 # optional: run the test suite
 uv run todohub init              # creates ~/Library/Application Support/TodoHub
+```
+
+In `config.toml` there, set `team_key` (for example `"ENG"`) under `[linear]`. Then:
+
+```bash
 uv run todohub set-linear-key    # Linear personal API key (hidden input, saved in Keychain)
 uv run todohub check             # Linear, Claude Code, gh, schedule, settings
 ```
