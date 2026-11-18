@@ -28,7 +28,8 @@
   "bundle": {
     "active": true,
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     },
     "targets": [
       "app",
