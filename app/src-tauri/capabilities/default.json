@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Main window: core APIs, page zoom, opening links in the browser, notifications, and updates",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-theme", "core:webview:allow-set-webview-zoom", "opener:default", "notification:default", "updater:default"]
+  "permissions": ["core:default", "core:window:allow-set-theme", "core:webview:allow-set-webview-zoom", "opener:default", "notification:default", "updater:allow-check", "updater:allow-download-and-install"]
 }

@@ -312,11 +312,12 @@ function periscopeSection(ctx: SettingsCtx): HTMLElement {
     "Start in periscope (⋯ or p on an issue) sends this prompt to the new Claude. {identifier}, {title} and {url} become the issue's.",
     "", box, h("div", { class: "set-row-inline" }, saveBtn, reset));
 }
+
 // ---- updates ------------------------------------------------------------------------------------
 let upToDate = false;                // the last Check for updates found no newer release
 let checkError = "";                 // or why it failed
 
-async function checkNow(ctx: SettingsCtx) {
+async function checkForUpdatesNow(ctx: SettingsCtx) {
   busy = "updates";
   upToDate = false;
   checkError = "";
@@ -334,7 +335,7 @@ async function checkNow(ctx: SettingsCtx) {
 function updatesSection(ctx: SettingsCtx): HTMLElement {
   const version = h("span", {}, update.version ? `TodoHub ${update.version}` : "TodoHub");
   if (!updatesOn) {
-    return card("updates", "Updates", "Updates are off in the dev app.", "", h("div", { class: "set-row-inline" }, version));
+    return card("updates", "Updates", "Updates are off outside the installed app.", "", h("div", { class: "set-row-inline" }, version));
   }
   const result = update.ready ? `v${update.ready.version} is ready: see the bottom of the sidebar.`
     : checkError || (upToDate ? "You have the latest version." : "");
@@ -342,7 +343,7 @@ function updatesSection(ctx: SettingsCtx): HTMLElement {
     "TodoHub checks for a new release at launch and every hour, and shows it at the bottom of the sidebar.", "",
     h("div", { class: "set-row-inline" },
       version,
-      h("button", { type: "button", class: "ghost small-btn", disabled: busy === "updates", onclick: () => void checkNow(ctx) },
+      h("button", { type: "button", class: "ghost small-btn", disabled: busy === "updates", onclick: () => void checkForUpdatesNow(ctx) },
         busy === "updates" ? "Checking…" : "Check for updates"),
       link("All releases", RELEASES_URL)),
     result ? h("p", { class: "set-hint" }, result) : "");
