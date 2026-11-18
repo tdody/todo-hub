@@ -56,7 +56,7 @@ A local build with `install-app.sh` does not make update files, so it does not n
 
 ## When the release workflow fails
 
-- Installed apps keep seeing the last release, because `latest.json` changes only when a release is published.
+- Installed apps do not update until a release with `latest.json` exists. If the workflow fails after it made the release page, that page has no `latest.json`, and the update check fails. Delete that release page to fix this.
 - A temporary failure (for example, a network error): re-run the job from the Actions page.
 - A failure that needs a code change:
   1. Delete the tag: `git push origin :refs/tags/v0.3.0` and `git tag -d v0.3.0`. If a release page exists for it on GitHub, delete it too.
@@ -65,7 +65,7 @@ A local build with `install-app.sh` does not make update files, so it does not n
 
 ## When bin/release stops halfway
 
-- **Before its commit** (for example, `uv lock` or `cargo metadata` has no network): the version files have changes. Put them back with `git checkout -- app backend`, fix the cause, and run `bin/release 0.3.0` again. `CHANGELOG.md` keeps your section.
+- **Before its commit** (for example, `uv lock` or `cargo metadata` has no network): the version files have changes. Put them back with `git restore --source=HEAD --staged --worktree app backend`, fix the cause, and run `bin/release 0.3.0` again. `CHANGELOG.md` keeps your section.
 - **At the push** (for example, no network): the release commit and the tag exist on your Mac only. The push sends both or neither, so run it again: `git push --atomic origin HEAD v0.3.0`.
 - **GitHub refuses `main`** because someone pushed first: put your release commit on top, then tag it again.
 
