@@ -222,7 +222,7 @@ body.side-drag { cursor: col-resize; }
 /* Approved and dropped cards swipe off the window's edge; don't let that add a horizontal scrollbar. */
 html, body { overflow-x: clip; }
 /* Width rules use container queries on main, so they measure the page and hold at any sidebar width.
-   Page width = window − sidebar − side padding (2 × 28px on wide pages, 2 × 20px on Insights and Settings). */
+   Page width = window − sidebar − side padding (2 × 28px on wide pages, 2 × 20px on Insights and Settings), up to main's max-width. */
 main { width: 100%; box-sizing: border-box; max-width: 1020px; margin: 0 auto; padding: 16px 20px 80px; container-type: inline-size; }
 /* Inbox and Today are a list plus a reading pane: they use a wide window instead of leaving it empty. */
 main.wide { max-width: 1560px; padding-left: 28px; padding-right: 28px; }
@@ -1390,7 +1390,7 @@ details.more[open] > summary { margin-bottom: 10px; }
 .ib-chip.dup { background: var(--warn-bg); color: var(--warn-ink); font-weight: 600; }
 .ib-chip.ok { background: color-mix(in srgb, var(--good) 14%, var(--surface)); color: var(--good); font-weight: 600; }
 .ib-meta .chip.kind { font-size: 11px; padding: 1px 7px; }
-/* With room to spare, each row adds one clipped line of why (hidden on narrower windows). */
+/* With room to spare, each row adds one clipped line of why (hidden on narrower pages). */
 .ib-why { display: none; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @container (min-width: 1000px) { .ib-why { display: block; } }
 /* The padding keeps the selected card's accent ring inside the scroll box, so its corners aren't clipped. */
