@@ -6,6 +6,7 @@ import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { loadPulls, pullsCount, pullsKey, pullsView, setupPulls } from "./pulls";
 import { notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
+import { setupSidebar, sidebarEdge, sidebarToggle, toggleSidebar } from "./sidebar";
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
 import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";
@@ -3306,7 +3307,8 @@ function renderHeader() {
       h("button", {
         class: "icon add", title: "Capture a task (c)", "aria-label": "Capture a task",
         onclick: () => { goTab("inbox"); captureInput.focus(); },
-      }, "+")),
+      }, "+"),
+      sidebarToggle()),
     h("nav", { class: "side-nav", "aria-label": "Sections" },
       item("inbox", "Inbox", 1), item("today", "Today", 2), item("client", "Client", 3), item("dev", "Dev", 4),
       item("pulls", "Pull requests", 5), item("insights", "Insights", 6), h("div", { class: "nav-gap" }), item("settings", "Settings", 7)),
@@ -3505,6 +3507,7 @@ const SHORTCUTS: [string, string][] = [
   ["c", "Capture a task"],
   ["/", "Filter"],
   ["⌘1 – ⌘7", "Inbox, Today, Client, Dev, Pull requests, Insights, Settings (also ⌘,)"],
+  ["⌃⌘S", "Hide the sidebar to icons, or show it again (drag its edge to resize it)"],
   ["⌥⌘T", "Capture from anywhere (when TodoHub is running)"],
   ["⌘+ · ⌘− · ⌘0", "Zoom in · zoom out · back to 100%"],
   ["⌘↵ · m · b", "Today: mark done · move to tomorrow's list · block time"],
@@ -3606,6 +3609,11 @@ document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ",") {          // the Mac's usual Settings shortcut
     e.preventDefault();
     goTab("settings");
+    return;
+  }
+  if (e.metaKey && e.ctrlKey && e.key.toLowerCase() === "s") {   // the Mac's usual Show/Hide Sidebar
+    e.preventDefault();
+    toggleSidebar();
     return;
   }
   if ((e.metaKey || e.ctrlKey) && /^[1-7]$/.test(e.key)) {
@@ -3731,7 +3739,9 @@ document.addEventListener("keydown", (e) => {
 
 // ---- start ----------------------------------------------------------------------------------
 async function start() {
-  document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), h("main", {}), h("div", { class: "toasts", role: "status" }));
+  document.querySelector("#app")!.replaceChildren(h("aside", { class: "sidebar" }), sidebarEdge(), h("main", {}),
+    h("div", { class: "toasts", role: "status" }));
+  setupSidebar(renderHeader);
   render();
   try {
     await waitForBackend();
