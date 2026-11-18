@@ -152,7 +152,7 @@ A colleague:
 
 1. downloads the `.dmg` from `https://github.com/tdody/todo-hub/releases/latest`;
 2. opens it and drags TodoHub to Applications;
-3. runs `xattr -dr com.apple.quarantine /Applications/TodoHub.app` one time. Without it, macOS says that the app "is damaged";
+3. runs `xattr -dr com.apple.quarantine /Applications/TodoHub.app` one time, before the first open. Without it, macOS says that Apple "could not verify that TodoHub is free of malware", or that the app "is damaged";
 4. sets up with the CLI in the app (`/Applications/TodoHub.app/Contents/MacOS/todohub-backend cli …`): `init`, `linear.team_key` in `config.toml`, `set-linear-key` (it needs the team key), then `check`;
 5. opens TodoHub, and installs the sweep schedule from Settings.
 
