@@ -3193,14 +3193,16 @@ function updateLine(): HTMLElement | "" {
   return h("div", { class: "update" },
     h("details", { class: "drop-menu update-menu", open: state.updateOpen,
       ontoggle: (e: Event) => { state.updateOpen = (e.currentTarget as HTMLDetailsElement).open; } },
-      h("summary", { class: "update-line", title: `TodoHub v${ready.version} is ready`, "aria-label": `Update to v${ready.version}` },
+      h("summary", { class: "update-line", title: `TodoHub v${ready.version} is ready`, "aria-label": `Update to v${ready.version}`,
+        "data-focus": "update" },
         h("span", { "aria-hidden": "true" }, "↑"), h("span", { class: "update-line-text" }, `Update to v${ready.version}`)),
       h("div", { class: "menu update-pop", role: "dialog", "aria-label": `TodoHub v${ready.version}` },
         h("div", { class: "update-pop-head" }, h("b", {}, `TodoHub v${ready.version}`), link("All releases", RELEASES_URL)),
         ready.body?.trim() ? h("div", { class: "update-notes md" }, ...renderMarkdown(ready.body)) : "",
         update.error ? h("p", { class: "update-err" }, `The update failed: ${update.error}`) : "",
         h("div", { class: "update-pop-foot" },
-          h("button", { class: "primary small-btn", disabled: busy, onclick: () => void installUpdate(ready) }, label)))));
+          h("button", { class: "primary small-btn", disabled: busy, "data-focus": "update-install",
+            onclick: () => void installUpdate(ready) }, label)))));
 }
 
 /** Bottom of the sidebar: one line for the sources (a green dot and "next 12pm", a red dot and
