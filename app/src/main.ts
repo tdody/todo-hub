@@ -6,7 +6,7 @@ import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { loadPulls, pullsCount, pullsKey, pullsView, setupPulls } from "./pulls";
 import { notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
-import { setupSidebar, sidebarEdge, hideButton, toggleSidebar } from "./sidebar";
+import { hideButton, setupSidebar, sidebarEdge, toggleSidebar } from "./sidebar";
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
 import { currentSchedule, loadSettings, settingsView } from "./settings";
 import type { SettingsCtx } from "./settings";

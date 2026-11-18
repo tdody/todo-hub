@@ -119,11 +119,11 @@ button, input, select { font: inherit; color: inherit; }
 .side-brand { display: flex; align-items: center; gap: 8px; padding: 2px 8px 12px; font-size: 15px; }
 .side-brand .brand-logo { width: 24px; height: 24px; }
 .side-brand .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-brand .add { margin-left: auto; width: 26px; height: 26px; padding: 0; font-size: 17px; color: var(--ink);
+.side-brand .add { flex: none; margin-left: auto; width: 26px; height: 26px; padding: 0; font-size: 17px; color: var(--ink);
   border: 1px solid var(--border); background: var(--surface); border-radius: 7px; }
 .side-brand .add:hover { color: var(--accent); background: var(--surface-2); }
 /* The hide button: a quiet icon right after +. */
-.side-brand .side-toggle { width: 26px; height: 26px; padding: 0; margin-left: -4px; display: inline-flex; align-items: center;
+.side-brand .side-toggle { flex: none; width: 26px; height: 26px; padding: 0; margin-left: -4px; display: inline-flex; align-items: center;
   justify-content: center; border-radius: 7px; }
 .side-brand .side-toggle:hover { color: var(--ink); background: var(--surface-2); }
 /* The drag edge: 6px over the sidebar's hairline, with a 2px accent line on hover and while dragging. */
