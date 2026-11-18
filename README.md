@@ -153,11 +153,13 @@ When Anthropic's connector service is down, the connector sources a sweep couldn
 
 1. Download the `.dmg` from the [newest release](https://github.com/tdody/todo-hub/releases/latest).
 2. Open it and drag **TodoHub** to **Applications**.
-3. Apple did not sign TodoHub, so macOS says that it "is damaged". Run this one time in Terminal:
+3. Apple did not sign TodoHub. Before you open it the first time, run this one time in Terminal:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/TodoHub.app
    ```
+
+   Without it, macOS says that Apple "could not verify that TodoHub is free of malware", or that the app "is damaged". If you already saw that message, run the command, then open TodoHub again.
 
 4. Set up with the command line inside the app:
 
