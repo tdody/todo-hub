@@ -2,6 +2,10 @@
 
 What changed in each TodoHub release, newest first. The app's update panel shows the newest section, and anyone can read this file.
 
+## v0.2.1
+
+- **Install:** step 3 of the README now names the message that macOS shows before the first open: Apple "could not verify that TodoHub is free of malware". Run the `xattr` command in that step before you open TodoHub the first time.
+
 ## v0.2.0
 
 The first release that you can install from GitHub. Install it from the `.dmg`, then follow **Install** in the README. Later releases come to you in the app.
