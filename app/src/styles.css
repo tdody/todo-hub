@@ -131,7 +131,7 @@ button, input, select { font: inherit; color: inherit; }
 .side-edge::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: var(--accent);
   opacity: 0; transition: opacity .12s; }
 .side-edge:hover::after, body.side-drag .side-edge::after { opacity: 1; }
-body.side-drag { cursor: col-resize; }
+body.side-drag, body.side-drag * { cursor: col-resize !important; }    /* past the 200–400px limits too */
 .side-nav { display: flex; flex-direction: column; gap: 2px; }
 .nav {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
