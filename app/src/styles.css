@@ -974,9 +974,10 @@ summary.pill:hover { filter: brightness(0.97); box-shadow: 0 0 0 1px color-mix(i
 .src-act {
   width: 20px; height: 20px; flex: none; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 5px; border: 1px solid transparent; background: transparent; color: var(--muted);
-  font-size: 12px; padding: 0; cursor: pointer; visibility: hidden;
+  font-size: 12px; padding: 0; cursor: pointer;
 }
-.src-row:hover .src-act, .src-row.bad .src-act, .src-row.busy .src-act, .src-act:focus-visible { visibility: visible; }
+/* A working source shows ↻ on hover or keyboard focus. Transparent, not hidden: Tab cannot reach a hidden button. */
+.src-row:not(:hover, .bad, .busy) .src-act:not(:focus-visible) { opacity: 0; }
 .src-row:hover button.src-act { background: var(--surface); border-color: var(--border); color: var(--accent); }
 .src-row.bad button.src-act { color: var(--bad); }
 button.src-act:disabled { opacity: .4; cursor: default; }

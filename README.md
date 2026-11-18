@@ -132,6 +132,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
   If a Claude is already on that branch, periscope starts nothing.
 - Before the start, Haiku names the new Claude on periscope's rail: the issue's ID and up to three words, for example `eng-123-grade-rebin`. This adds 2 to 5 seconds. Periscope pins the name, so it does not rename the Claude. If the title has no words, for example only a link, or Claude Code fails, the name is the ID alone.
 - The toast's **Show** selects that Claude in periscope. When `app.periscope_app_id` is set, **Show** also brings the app to the front.
+- When periscope starts a new Claude, todo-hub adds a comment to the issue: the start time, the email of the Claude account and the Claude session ID. To open that conversation again, run `claude --resume <id>` in the issue's worktree, or use `resume_session` in periscope. With a Claude already on the branch, or a periscope that sends no session ID, todo-hub adds no comment. If Linear refuses the comment, the start still counts, and an error toast says so.
 - Periscope must be running. It must answer `POST /api/linear/start` and `POST /api/select`. A periscope that does not know the `name` field starts Claude without it.
 
 ## Safety model
