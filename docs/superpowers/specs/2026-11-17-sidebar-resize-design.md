@@ -28,6 +28,7 @@ Out:
 - A 6px drag edge sits on the right edge of the sidebar, over the hairline. On hover and while you drag, the cursor is `col-resize` and the edge shows a 2px accent line.
 - While you drag, the whole window keeps the `col-resize` cursor and no text gets selected.
 - The width stays between 200px and 400px. At 200px the brand row (logo, TodoHub, **+**, the hide button) still fits.
+- In the Sources popover, a source name gets an ellipsis, so a long time ("Wed 12:45 PM") never paints over it in a narrow sidebar.
 - The sidebar always leaves at least 600px of the window for the page. In a window narrower than the width + 600px, the sidebar gets narrower; at an 821px window it is 221px. So the page is never narrower than today's narrowest page (about 540px). The saved width comes back when the window gets wider.
 - A double-click on the edge sets the width back to 224px.
 - The app remembers the width on this Mac, in `todohub.sidebarWidth`. The default is 224px.
@@ -39,7 +40,7 @@ Out:
 - A click shrinks the sidebar to the icon column. In the icon column, the button is under **+**, and a click shows the full sidebar again.
 - The button's tooltip says "Hide sidebar (⌃⌘S)" or "Show sidebar (⌃⌘S)". Its `aria-label` says "Hide sidebar" or "Show sidebar".
 - **⌃⌘S** does the same as the button, also from a text field, as the other ⌘ keys do. It is the Mac's usual key for Show/Hide Sidebar.
-- The app remembers the choice on this Mac, in `todohub.sidebarCollapsed`. The default is the full sidebar.
+- The app remembers the choice on this Mac, in `todohub.sidebarHidden`. The default is the full sidebar.
 
 ### A narrow window
 
@@ -125,7 +126,7 @@ The app has no frontend tests, and CI runs `tsc` only.
 ## Assumptions
 
 - WKWebView supports container queries. Safari has supported them since version 16 (2022).
-- `container-type: inline-size` does not move anything that is positioned inside `main`. The only `position: fixed` elements (the dialog overlay, the toasts and the narrow Sources popover) are outside `main`. The Playwright check confirms this.
+- `container-type: inline-size` does not move anything that is positioned inside `main`. The only `position: fixed` elements (the dialog overlay, the toasts, the drag edge, and the Sources popover and theme menu in the icon column) are outside `main`. The Playwright check confirms this.
 - A container query measures the content box of `main`, so the thresholds subtract its padding. The Playwright check confirms each fold point.
 - 200px is wide enough for the brand row. The Playwright check confirms it.
 - `100vw` is the window width. macOS shows overlay scrollbars by default, so a scrollbar takes no width. With "Always show scrollbars", the cap and the page widths are off by the scrollbar's 15px at most.
