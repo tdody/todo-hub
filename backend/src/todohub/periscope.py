@@ -63,8 +63,9 @@ class Periscope:
         return self._call("GET", "/api/open/catalog")
 
     def start(self, *, repo: str, branch: str, ticket: str, title: str, prompt: str, name: str) -> dict:
-        """{mode: "spawned", pid, path, reused}, or {mode: "existing", pid} when a Claude is already on the branch.
-        Periscope gives a spawned Claude ``name`` on its rail and pins it."""
+        """{mode: "spawned", pid, path, reused, session_id, email}, or {mode: "existing", pid} when a Claude is
+        already on the branch. Periscope gives a spawned Claude ``name`` on its rail and pins it. ``email`` is None
+        when periscope finds no email for the account, and an older periscope sends neither field."""
         return self._call("POST", "/api/linear/start",
                           {"repo": repo, "branch": branch, "ticket": ticket, "title": title, "prompt": prompt,
                            "name": name},

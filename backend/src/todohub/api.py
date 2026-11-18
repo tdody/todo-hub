@@ -977,7 +977,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.post("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
         """Ask periscope to start Claude on the branch with the prompt and a name from Haiku, then remember the
-        repo for the issue's project (or client). A Claude already on the branch is answered as mode "existing"."""
+        repo for the issue's project (or client). A Claude already on the branch is answered as mode "existing".
+        A new Claude's session goes into a comment on the issue; a comment that fails is a warning."""
         branch = body.branch.strip()
         if not branch:
             raise HTTPException(400, "The branch is empty")
@@ -992,7 +993,19 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 raise HTTPException(409, f"Periscope is already starting {issue['identifier']}.")
             raise
         remember_repo(db, issue, body.repo)
-        return result
+        warnings: list[str] = []
+        if result.get("session_id"):
+            comment = (f"- Started: {datetime.now(stats.TZ).replace(microsecond=0).isoformat()}\n"
+                       f"- Claude account: {result.get('email') or 'unknown'}\n"
+                       f"- Claude session: `{result['session_id']}`")
+            client = linear_factory()
+            try:
+                client.create_comment(issue["id"], comment)
+            except LinearError as exc:
+                warnings.append(f"The Claude session was not added to {issue['identifier']}: {exc}")
+            finally:
+                client.close()
+        return {**result, "warnings": warnings}
 
     @app.post("/api/periscope/show", dependencies=periscope_auth)
     def periscope_show(body: PeriscopeShowIn) -> dict:
