@@ -326,6 +326,7 @@ export interface PeriscopeOptions {
 export interface PeriscopeStart {
   mode: "spawned" | "existing";                 // existing: a Claude was already on the branch
   pid: string;                                  // periscope always gives the pane's id
+  warnings: string[];                           // why the session comment was not added; usually empty
 }
 
 export interface RateCell {
