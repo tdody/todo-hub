@@ -337,6 +337,8 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(start_backend())
         .invoke_handler(tauri::generate_handler![backend_info, set_tray_count])
         .setup(|app| {

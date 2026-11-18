@@ -26,6 +26,9 @@
   },
   "bundle": {
     "active": true,
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "targets": [
       "app",
       "dmg"
@@ -37,5 +40,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNBNDgwQjdFODRGQkNCNTMKUldSVHkvdUVmZ3RJT29HVjBLelVMVFh0SDNtZXQrbEdJaWI4ZFJGQWp1NmhURDNMOVl2RytPTkkK",
+      "endpoints": ["https://github.com/tdody/todo-hub/releases/latest/download/latest.json"]
+    }
   }
 }
