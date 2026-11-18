@@ -3506,6 +3506,7 @@ const SHORTCUTS: [string, string][] = [
   ["/", "Filter"],
   ["⌘1 – ⌘7", "Inbox, Today, Client, Dev, Pull requests, Insights, Settings (also ⌘,)"],
   ["⌥⌘T", "Capture from anywhere (when TodoHub is running)"],
+  ["⌘+ · ⌘− · ⌘0", "Zoom in · zoom out · back to 100%"],
   ["⌘↵ · m · b", "Today: mark done · move to tomorrow's list · block time"],
   ["n · d · a · o", "Today: copy the nudge or message · Claude's due date · add to Today · open in Linear"],
   ["x · ↵", "Today, in the morning: check a suggestion · start the day"],
