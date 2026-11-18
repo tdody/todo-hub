@@ -4,7 +4,7 @@ import { h, link, loadPref, modal, pageHead, savePref, svg } from "./dom";
 import type { Child } from "./dom";
 import { insightsView, invalidateInsights, showSweepHistory } from "./insights";
 import { loadPulls, pullsCount, pullsKey, pullsView, setupPulls } from "./pulls";
-import { notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
+import { inTauri, notifyOnce, notifySweep, onDesktopEvent, setTrayCount } from "./desktop";
 import { applyTheme, currentTheme, nextTheme, onDaylightPhase, setTheme, themeIcon, themeLabel, themeOptions } from "./theme";
 import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
 import { currentSchedule, loadSettings, settingsView } from "./settings";
@@ -3580,7 +3580,6 @@ document.addEventListener("pointerdown", (e) => {
   });
 }, true);
 
-const inApp = "__TAURI_INTERNALS__" in window;
 
 function isTextField(el: Element | null): boolean {
   return !!el && (el.tagName === "TEXTAREA"
@@ -3623,7 +3622,7 @@ document.addEventListener("keydown", (e) => {
   // ⌘Z undoes the last action, except in a text field, where it undoes typing as usual (or the post
   // that just emptied it). In the app, Edit → Undo owns ⌘Z and calls todohubUndo(); this is for a plain browser.
   if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z"
-      && !inApp && !document.querySelector(".overlay")) {
+      && !inTauri() && !document.querySelector(".overlay")) {
     const post = postToUndoIn(target);
     if (post || !isTextField(target)) {
       e.preventDefault();

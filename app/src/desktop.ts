@@ -6,7 +6,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import type { Candidate, Run } from "./api";
 import { isoDay } from "./issues";
 
-const inTauri = () => "__TAURI_INTERNALS__" in window;
+export const inTauri = () => "__TAURI_INTERNALS__" in window;
 
 export function setTrayCount(count: number) {
   if (inTauri()) void invoke("set_tray_count", { count }).catch(() => undefined);
