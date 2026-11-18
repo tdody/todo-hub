@@ -42,6 +42,7 @@ export async function checkForUpdate(): Promise<Update | null> {
   }
   void update.ready?.close();
   update.ready = found;
+  update.error = "";
   changed();
   return found;
 }
