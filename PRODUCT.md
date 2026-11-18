@@ -27,7 +27,7 @@ A read-only Claude sweep reads every channel on a schedule and turns asks and co
 
 ## Operating Context
 
-- **macOS desktop app** (Tauri shell, web UI). It lives in the menu bar, opens at login, and captures from any app with ⌥⌘T. The window defaults to 1120×800 with a 760×520 minimum. In a narrow window the sidebar shrinks to icons and the reading pane moves under the list.
+- **macOS desktop app** (Tauri shell, web UI). It lives in the menu bar, opens at login, and captures from any app with ⌥⌘T. The window defaults to 1120×800 with a 760×520 minimum. You can drag the sidebar wider or narrower, or hide it to icons; in a narrow window it is always icons. On a narrow page the reading pane moves under the list.
 - **Rhythm of the day:** sweeps on weekdays every 2 hours (set on the Settings page), plus Run now and per-source checks. The first morning sweep writes the day's plan and the first sweep from 3pm writes the wrap-up. Mac notifications arrive at 8am and 5pm, and after a sweep adds tasks. Linear is re-read every minute and when the window comes back to the front.
 - **Rituals it feeds:** the weekly mission check-in (pasted into the /mission-checkin skill), a Slack update copied from the weekly digest, weekly client summaries, follow-up nudges and reply drafts copied for pasting.
 - **Model runs cost time and money:** a re-plan or wrap-up redo takes about a minute and a few cents, and the UI says so. Insights tracks sweep cost.
