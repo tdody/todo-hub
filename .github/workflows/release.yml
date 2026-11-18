@@ -2,6 +2,7 @@ name: release
 
 # A pushed `vX.Y.Z` tag (see bin/release) builds TodoHub for Apple Silicon and publishes a GitHub
 # release: the .dmg for a first install, and the signed update and latest.json that installed apps read.
+# Each action is pinned to a commit, because this job holds the update signing key.
 on:
   push:
     tags:
@@ -13,16 +14,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3   # this action publishes no moving major tag
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2   # v10.3.3
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: app/package-lock.json
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0   # v2.9.3
         with:
           workspaces: app/src-tauri
 
@@ -44,7 +45,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and publish the release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5   # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
