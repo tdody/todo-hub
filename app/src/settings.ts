@@ -8,6 +8,7 @@ import { daylightLocation, setDaylightLocation, sunTimes } from "./daylight";
 import { h, link, pageHead } from "./dom";
 import { applyTheme, currentTheme, setTheme, themeIcon } from "./theme";
 import type { ThemeChoice } from "./theme";
+import { checkForUpdate, RELEASES_URL, update, updatesOn } from "./update";
 
 export interface SettingsCtx {
   rerender: () => void;              // this page
@@ -73,6 +74,7 @@ export function settingsView(ctx: SettingsCtx): HTMLElement {
     ["sources", "Sources", () => sources(data!, ctx)],
     ["schedule", "Schedule", () => scheduleSection(data!.schedule, ctx)],
     ...(data.periscope.enabled ? [["periscope", "Periscope", () => periscopeSection(ctx)] as [string, string, () => HTMLElement]] : []),
+    ["updates", "Updates", () => updatesSection(ctx)],
   ];
   const toc = h("nav", { class: "set-toc", "aria-label": "Settings sections" },
     ...sections.map(([id, label]) => h("button", {
@@ -90,7 +92,8 @@ export function settingsView(ctx: SettingsCtx): HTMLElement {
 
 function sectionIcon(id: string): Node {
   if (id === "appearance") return themeIcon("system");     // not the sun: that's Today
-  return h("span", { class: "set-ico", "aria-hidden": "true" }, id === "sources" ? "⇄" : id === "periscope" ? "↗" : "◷");
+  return h("span", { class: "set-ico", "aria-hidden": "true" },
+    id === "sources" ? "⇄" : id === "periscope" ? "↗" : id === "updates" ? "↑" : "◷");
 }
 
 function card(id: string, title: string, hint: string, right: Node | "", ...body: (Node | string)[]): HTMLElement {
@@ -308,4 +311,36 @@ function periscopeSection(ctx: SettingsCtx): HTMLElement {
   return card("periscope", "Periscope",
     "Start in periscope (⋯ or p on an issue) sends this prompt to the new Claude. {identifier}, {title} and {url} become the issue's.",
     "", box, h("div", { class: "set-row-inline" }, saveBtn, reset));
+}
+
+// ---- updates ------------------------------------------------------------------------------------
+let checkResult = "";                // what the last Check for updates found
+
+async function checkNow(ctx: SettingsCtx) {
+  busy = "updates";
+  ctx.rerender();
+  try {
+    const found = await checkForUpdate();
+    checkResult = found ? `v${found.version} is ready: see the bottom of the sidebar.` : "You have the latest version.";
+  } catch (e) {
+    checkResult = `Couldn't check: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    busy = "";
+    ctx.rerender();
+  }
+}
+
+function updatesSection(ctx: SettingsCtx): HTMLElement {
+  if (!updatesOn) {
+    return card("updates", "Updates", "Updates are off in the dev app.", "",
+      h("p", { class: "set-row-inline" }, `TodoHub ${update.version}`));
+  }
+  return card("updates", "Updates",
+    "TodoHub checks for a new release at launch and every hour, and shows it at the bottom of the sidebar.", "",
+    h("div", { class: "set-row-inline" },
+      h("span", {}, `TodoHub ${update.version}`),
+      h("button", { type: "button", class: "ghost small-btn", disabled: busy === "updates", onclick: () => void checkNow(ctx) },
+        busy === "updates" ? "Checking…" : "Check for updates"),
+      link("All releases", RELEASES_URL)),
+    checkResult ? h("p", { class: "set-hint" }, checkResult) : "");
 }
