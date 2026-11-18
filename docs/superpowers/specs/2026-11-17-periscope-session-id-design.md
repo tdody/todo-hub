@@ -43,7 +43,8 @@ todo-hub adds the comment only when periscope answers mode "spawned" with a `ses
 3. `channels.Spawned` gets `session_id` and `account` (the account ID from `usage.choose_launch`).
 4. New `store.account_email(account_id) -> str | None` reads `oauthAccount.emailAddress` from the account's `.claude.json`: `~/.claude.json` for the default account (`config_dir` is `""`), else `<config_dir>/.claude.json`. It returns `None` when the file is missing or not valid JSON, or when it has no email. An account that is not logged in has no email.
 5. `/api/linear/start` answers mode "spawned" with `{mode, pid, path, reused, session_id, email}`. Mode "existing" stays `{mode, pid}`.
-6. The `/api/linear/start` section of periscope's README names the 2 new fields.
+6. `resurrect` reads a captured `--session-id <uuid>` as `--resume <uuid>`. Claude refuses to start a second time with the same `--session-id` ("Session ID … is already in use"). Without this, a pane that has no `pane_sessions` row keeps its captured command, and after a reboot its Claude does not start. With it, the pane resumes its session, as a captured `--resume` does today. A demoted duplicate loses the flag, as it loses `--resume`.
+7. The `/api/linear/start` section of periscope's README names the 2 new fields. `docs/tmux-persistence.md` says that a captured `--session-id` counts as `--resume`.
 
 Tests:
 
@@ -51,6 +52,7 @@ Tests:
 - `spawn_claude_with_prompt` returns `session_id` and `account`, and the `claude` command line it sends has `--session-id` with that ID.
 - `account_email`: the default account, an account with a `config_dir`, a file with no `oauthAccount`, and a missing file.
 - `/api/linear/start` mode "spawned" answers with `session_id` and `email`.
+- `resurrect`: a captured `--session-id` with no row becomes `--resume`; a row still wins; a demoted line loses the flag; `_line_session` groups the line by that ID.
 
 ## todo-hub
 
@@ -76,6 +78,7 @@ The 2 PRs can merge in any order. todo-hub with an older periscope adds no comme
 ## Assumptions
 
 - Claude Code accepts `--session-id <uuid>` in interactive mode. `claude --help` lists it.
+- Claude Code refuses a `--session-id` that a transcript already uses: "Error: Session ID … is already in use." Checked with 2 runs of `claude -p` and one ID.
 - The default account keeps its email in `~/.claude.json` under `oauthAccount.emailAddress`. An account with a `config_dir` keeps it in `<config_dir>/.claude.json`. Checked on one Mac with 2 accounts: the logged-in default account has the email. The second account is not logged in and has none.
 - A new `uuid4` never matches an existing session, so `--session-id` never collides.
 - The Linear comment is written with your Linear key, so it shows you as the author.
