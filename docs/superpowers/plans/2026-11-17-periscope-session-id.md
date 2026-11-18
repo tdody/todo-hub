@@ -432,19 +432,10 @@ In `tests/test_resurrect.py`:
 
 ```python
 def test_captured_session_id_resumes_without_a_row():
-    # A spawn starts Claude with --session-id, which Claude refuses once the session exists.
     line = _pane_line("s", "1", "1", f"claude --session-id {SID} --effort high")
     out, changed = resurrect._rewrite_line(line, {"s:1.1": "%56"}, {})
     assert changed
     assert out.split("\t")[10] == f":claude --resume {SID} --effort high"
-
-
-def test_captured_session_id_gives_way_to_the_row():
-    pane_map, sess_map = _maps()
-    cmd = f"claude --session-id {OLD_SID} --dangerously-load-development-channels server:periscope"
-    out, changed = resurrect._rewrite_line(_pane_line("s", "1", "1", cmd), pane_map, sess_map)
-    assert changed
-    assert out.split("\t")[10] == f":claude --resume {SID} --dangerously-load-development-channels server:periscope"
 
 
 def test_demoted_line_loses_its_session_id():
@@ -459,27 +450,30 @@ def test_a_captured_session_id_counts_as_a_resume_for_duplicates():
         _pane_line("p", "1", "0", f"claude --resume {SID}"),
         _pane_line("p", "2", "0", f"claude --session-id {SID}"),
     ]
-    assert len(resurrect._duplicate_resumes(lines, {}, {}, {})) == 1
+    assert resurrect._duplicate_resumes(lines, {}, {}, {}) == {1}
 ```
 
 - [ ] **Step 2: Run the tests to see them fail**
 
 Run: `uv run pytest -q tests/test_resurrect.py`
-Expected: the 4 new tests and the 2 new parametrize cases FAIL (for example, `assert changed` fails because the line comes back unchanged).
+Expected: the 3 new tests FAIL (for example, `assert changed` fails because the line comes back unchanged).
 
-- [ ] **Step 3: Add the regex and one reader of the captured command**
+- [ ] **Step 3: Add the regex and the rewrite**
 
 In `periscope/resurrect.py`, after the `_RESUME_ARG_RE` line:
 
 ```python
-# A periscope spawn starts Claude with `--session-id <uuid>`, which Claude refuses once that session
-# exists ("Session ID … is already in use"). Restored, it must resume the session instead.
+# A periscope spawn starts Claude with `--session-id <uuid>`, which Claude refuses once that Claude
+# session exists ("Session ID … is already in use"). Restored, it must resume that Claude session instead.
 _SESSION_ID_ARG_RE = re.compile(r"--session-id[= ]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b")
+```
 
+Above `_line_session`:
 
-def _captured_command(parts: list[str]) -> str:
-    """The pane line's captured command, its `--session-id <uuid>` read as `--resume <uuid>`."""
-    return _SESSION_ID_ARG_RE.sub(r"--resume \1", parts[10][1:])
+```python
+def _session_id_as_resume(cmd: str) -> str:
+    """`cmd` with its `--session-id <uuid>` read as `--resume <uuid>`."""
+    return _SESSION_ID_ARG_RE.sub(r"--resume \1", cmd)
 ```
 
 - [ ] **Step 4: Use it in `_line_session` and `_rewrite_line`**
@@ -493,7 +487,7 @@ In `_line_session`, replace:
 with:
 
 ```python
-    m = _RESUME_ARG_RE.search(_captured_command(parts))
+    m = _RESUME_ARG_RE.search(_session_id_as_resume(parts[10]))
 ```
 
 In `_rewrite_line`, replace:
@@ -506,25 +500,13 @@ In `_rewrite_line`, replace:
 with:
 
 ```python
-    captured = _captured_command(parts)
-    cmd = _RESUME_ARG_RE.sub("", captured) if demote else captured
+    captured = parts[10][1:]
+    cmd = _session_id_as_resume(captured)
+    if demote:
+        cmd = _RESUME_ARG_RE.sub("", cmd)
 ```
 
-and replace the early return:
-
-```python
-    if not uuid and not cfg and not prof and not model and cmd == captured:
-        return line, False
-```
-
-with:
-
-```python
-    if not uuid and not cfg and not prof and not model and cmd == parts[10][1:]:
-        return line, False
-```
-
-The early return now compares with the line as saved, so a `--session-id` read as `--resume` counts as a change.
+The early return (`cmd == captured`) does not change. `captured` stays the command as saved, so a `--session-id` read as `--resume` counts as a change. Update the `_line_session` docstring and the `_rewrite_line` comment that say the captured command is "kept whole".
 
 - [ ] **Step 5: Run the resurrect tests**
 
@@ -557,21 +539,24 @@ with:
 
 ```markdown
 starts Claude, sends it the prompt and links the issue to the card. It
-answers with the new Claude's session ID and the email of its Claude
-account. If a Claude is already on that branch, it reports that pane and
-starts nothing.
+answers with the new Claude's `session_id` and its account's `email` (null
+when periscope cannot read it). If a Claude is already on that branch, it
+reports that pane and starts nothing.
 ```
 
 In `README.md`, "Agents talk back", after the paragraph that ends "it's how a finished task lands in READY with a reason attached.", add:
 
 ```markdown
-Every Claude that periscope spawns (a `spawn_claude` worker, a review pane, a
-Linear start) starts with `--session-id <uuid>`, so periscope knows its Claude
-session from the first moment. The command lands in the pane's shell history,
-and Claude refuses one session ID twice: after the Claude exits, Up+Enter fails
-with "Session ID … is already in use". Run `claude --resume <uuid>` to continue
-that conversation, or `claude` to start a new one.
+A Claude that periscope starts with a prompt (a `spawn_claude` worker, a
+review pane, a Linear start) starts with `--session-id <uuid>`, so periscope
+knows its Claude session from the first moment. The command lands in the
+pane's shell history, and Claude refuses one `--session-id` twice: after the
+Claude exits, Up+Enter fails with "Session ID … is already in use". Run
+`claude --resume <uuid>` to continue that conversation, or `claude` to start a
+new one.
 ```
+
+The + New tab launcher and the resume path do not pass `--session-id`, so the README does not say "every Claude".
 
 In `periscope/channels.py`, `spawn_claude_with_prompt`, above `tmux("send-keys", "-t", target, claude_cmd, "Enter")`, add:
 
@@ -584,10 +569,11 @@ In `periscope/channels.py`, `spawn_claude_with_prompt`, above `tmux("send-keys",
 After the paragraph that ends "`periscope.activity` would drag in the Anthropic SDK.", add:
 
 ```markdown
-**A captured `--session-id` restores as `--resume`.** Periscope's spawns start
-Claude with `--session-id <uuid>`, and Claude refuses to start twice with one
-ID ("Session ID … is already in use"). A pane with no `pane_sessions` row keeps
-its captured command, so without this it would come back with no Claude. The
+**A captured `--session-id` restores as `--resume`.** A Claude that periscope
+starts with a prompt (`channels.spawn_claude_with_prompt`) gets
+`--session-id <uuid>`, and Claude refuses to start twice with one ID ("Session
+ID … is already in use"). A pane with no `pane_sessions` row keeps its
+captured command, so without this it would come back with no Claude. The
 rewrite reads the flag as `--resume <uuid>` everywhere it reads a captured
 `--resume`: the duplicate grouping, the row-less line and the demoted line.
 ```
