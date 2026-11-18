@@ -132,7 +132,7 @@ When a step fails, the panel shows "The update failed: <error>" and the **All re
 A last card, "Updates":
 
 - "TodoHub 0.2.0", from `getVersion()`;
-- a **Check for updates** button. A manual check shows its result under the button: "You have the latest version", "v0.3.0 is ready: see the sidebar", or "Couldn't check: <error>";
+- a **Check for updates** button. A manual check shows its result under the button: "You have the latest version", "v0.3.0 is ready: see the bottom of the sidebar.", or "Couldn't check: <error>";
 - in the dev app: "Updates are off in the dev app", and no button.
 
 ### After the restart
