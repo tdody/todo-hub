@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ from todohub import periscope
 from todohub.api import create_app
 from todohub.config import load_settings
 from todohub.db import DB
+from todohub.linear import LinearError
 from todohub.periscope import (LAST_REPO_KEY, REPOS_KEY, Periscope, PeriscopeError, default_repo, fill_prompt,
                                pane_name, remember_repo)
 from conftest import FakeLinear
@@ -205,11 +207,16 @@ def settings_on(app_id=APP_ID):
 
 
 @pytest.fixture
-def env(peri):
+def linear():
+    return FakeLinear()
+
+
+@pytest.fixture
+def env(peri, linear):
     settings = settings_on()
     db = DB(settings.db_path)
     fronted = []
-    app = create_app(settings, db, linear_factory=FakeLinear,
+    app = create_app(settings, db, linear_factory=lambda: linear,
                      periscope_factory=lambda: Periscope(URL, transport=peri.transport),
                      front_fn=fronted.append, name_fn=lambda issue: f"{issue['identifier'].lower()}-rebin")
     return TestClient(app), db, fronted
@@ -231,23 +238,65 @@ def test_options_fill_the_popover(env):
     }
 
 
-def test_start_sends_the_issue_and_its_name_and_remembers_the_repo(env, peri):
+def test_start_sends_the_issue_and_its_name_and_remembers_the_repo(env, peri, linear):
     client, db, _ = env
     r = client.post("/api/issues/id-ENG-1/periscope", json=START)
-    assert r.status_code == 200 and r.json() == SPAWNED
+    assert r.status_code == 200 and r.json() == {**SPAWNED, "warnings": []}
     assert peri.calls[-1] == ("POST", "/api/linear/start", {
         "repo": "/dev/api", "branch": "me/eng-1", "ticket": "ENG-1", "title": "Rebin Globex grades",
         "prompt": "Read ENG-1.", "name": "eng-1-rebin"})
     assert db.get_meta(REPOS_KEY) == {"client:Globex": "/dev/api"}
     assert db.get_meta(LAST_REPO_KEY) == "/dev/api"
+    assert linear.comments == []
 
 
-def test_a_claude_already_on_the_branch_is_answered_and_the_repo_remembered(env, peri):
+def test_a_claude_already_on_the_branch_is_answered_and_the_repo_remembered(env, peri, linear):
     client, db, _ = env
     peri.answer = httpx.Response(200, json={"mode": "existing", "pid": "p1"})
     r = client.post("/api/issues/id-ENG-2/periscope", json=START)
-    assert r.json() == {"mode": "existing", "pid": "p1"}
+    assert r.json() == {"mode": "existing", "pid": "p1", "warnings": []}
     assert db.get_meta(REPOS_KEY) is None and db.get_meta(LAST_REPO_KEY) == "/dev/api"
+    assert linear.comments == []
+
+
+SID = "3f2a9c1e-5b7d-4e2a-9f10-2c4d6e8a0b1c"
+WITH_SESSION = {**SPAWNED, "session_id": SID, "email": "you@example.com"}
+STARTED = re.compile(r"- Started: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}")
+
+
+def test_a_new_claude_session_goes_into_a_comment(env, peri, linear):
+    client, _, _ = env
+    peri.answer = httpx.Response(200, json=WITH_SESSION)
+    r = client.post("/api/issues/id-ENG-1/periscope", json=START)
+    assert r.status_code == 200 and r.json() == {**WITH_SESSION, "warnings": []}
+    [(issue_id, body)] = linear.comments
+    started, account, session = body.split("\n")
+    assert issue_id == "id-ENG-1"
+    assert STARTED.fullmatch(started)
+    assert account == "- Claude account: you@example.com"
+    assert session == f"- Claude session: `{SID}`"
+
+
+def test_a_session_without_an_email_says_unknown(env, peri, linear):
+    client, _, _ = env
+    peri.answer = httpx.Response(200, json={**WITH_SESSION, "email": None})
+    client.post("/api/issues/id-ENG-1/periscope", json=START)
+    assert "- Claude account: unknown" in linear.comments[0][1].split("\n")
+
+
+def test_a_comment_that_fails_is_a_warning_not_an_error(env, peri, linear):
+    # Claude is already running, so the start still succeeds.
+    client, db, _ = env
+    peri.answer = httpx.Response(200, json=WITH_SESSION)
+
+    def refuse(issue_id, body):
+        raise LinearError("Can't reach Linear")
+
+    linear.create_comment = refuse
+    r = client.post("/api/issues/id-ENG-1/periscope", json=START)
+    assert r.status_code == 200
+    assert r.json()["warnings"] == ["The Claude session was not added to ENG-1: Can't reach Linear"]
+    assert db.get_meta(LAST_REPO_KEY) == "/dev/api"
 
 
 def test_a_start_periscope_refuses_says_it_is_already_starting(env, peri):
