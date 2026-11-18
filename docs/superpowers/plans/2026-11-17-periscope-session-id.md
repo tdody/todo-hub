@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-17-periscope-session-id-design.md`
 
+> **After the reviews:** the review fixes changed some details after this plan was written. For example, the tests use account `"b"`, `account_email` logs a warning when it finds no email, and some test names, test data and wording are different. Where this plan and the code differ, the code is correct.
+
 ---
 
 ## File map
@@ -56,10 +58,10 @@ cd ~/github/tomplex/periscope
 git fetch origin
 git worktree add .claude/worktrees/linear-start-session-id -b thibaultdody/linear-start-session-id origin/main
 cd .claude/worktrees/linear-start-session-id
-uv sync
+uv sync --python 3.14
 ```
 
-Expected: `Preparing worktree (new branch 'thibaultdody/linear-start-session-id')`, then `uv sync` ends with no error.
+Expected: `Preparing worktree (new branch 'thibaultdody/linear-start-session-id')`, then `uv sync` ends with no error. Give `--python 3.14`: a plain `uv sync` can pick Python 3.15, and `rpds-py` does not build for it yet.
 
 - [ ] **Step 2: Run the suite once, to know the starting state**
 
@@ -622,6 +624,7 @@ gh pr create --repo tomplex/periscope --base main --title "linear: /api/linear/s
 - Each spawned Claude starts with `--session-id <uuid4>`. `Spawned` reports `session_id` and `account`.
 - `store.account_email` reads the email from the account's `.claude.json`.
 - `/api/linear/start` answers mode "spawned" with `session_id` and `email`. todo-hub writes them to the Linear issue.
+- `/api/reviews/prepare` returns `**spawned`, so its answer also gains `session_id` and `account`. Nothing reads them yet.
 - resurrect reads a captured `--session-id` as `--resume`. Claude refuses a `--session-id` that is already in use, so a row-less pane would come back with no Claude.
 
 ## Behavior change
@@ -631,7 +634,7 @@ gh pr create --repo tomplex/periscope --base main --title "linear: /api/linear/s
 ## Assumptions
 - Claude Code accepts `--session-id <uuid>` in interactive mode.
 - Claude Code refuses a reused `--session-id` ("Session ID … is already in use"). Checked with 2 runs of `claude -p` and one ID.
-- The email is `oauthAccount.emailAddress` in `~/.claude.json` (default account) or `<config_dir>/.claude.json`. An account that is not logged in has none, and the answer sends `null`.
+- The email is `oauthAccount.emailAddress` in `~/.claude.json` (default account) or `<config_dir>/.claude.json`. When periscope cannot read an email (for example, the account is not logged in), the answer sends `null`.
 
 ## Test plan
 - [x] `uv run pytest -q`
@@ -965,7 +968,7 @@ gh pr create --base main --title "Start in periscope adds the Claude session to 
 - Needs the periscope PR that adds `session_id` and `email` to `/api/linear/start`. Without it, todo-hub adds no comment.
 
 ## Assumptions
-- Periscope answers mode "spawned" with `session_id` and `email` (`email` is `null` when the account is not logged in).
+- Periscope answers mode "spawned" with `session_id` and `email` (`email` is `null` when periscope cannot read it).
 - The time is todo-hub's time when periscope answers, in America/New_York, as the plans and wrap-ups use.
 
 ## Test plan
