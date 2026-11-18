@@ -49,7 +49,8 @@ export function toggleSidebar() {
 /** The hide button: in the brand row after +, and under + in the icon column. */
 export function hideButton(): HTMLElement {
   const label = hidden ? "Show sidebar" : "Hide sidebar";
-  return h("button", { class: "icon side-toggle", title: `${label} (⌃⌘S)`, "aria-label": label, onclick: toggleSidebar },
+  return h("button", { class: "icon side-toggle", title: `${label} (⌃⌘S)`, "aria-label": label, "data-focus": "side-toggle",
+    onclick: toggleSidebar },
     svg("svg", { viewBox: "0 0 20 20", width: 18, height: 18, fill: "none", stroke: "currentColor",
       "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" },
       svg("path", { d: SIDEBAR_ICON })));
