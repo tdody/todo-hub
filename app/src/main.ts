@@ -3205,7 +3205,7 @@ function sweepStatus(): HTMLElement {
       : o.last_ok_at ? `${name}: last checked ${shortWhen(o.last_ok_at)}.` : `${name}: not checked yet.`;
     return h("div", { class: `src-row${failed ? " bad" : ""}${busy ? " busy" : ""}`, title: tip },
       h("span", { class: `src-dot${o.ok === null ? " none" : ""}` }),
-      h("span", { class: "src-name" }, name,
+      h("span", { class: "src-name" }, h("span", { class: "src-n" }, name),
         failed && o.detail ? h("span", { class: "src-why" }, o.detail) : ""),
       h("span", { class: "src-time" }, timeText),
       busy ? h("span", { class: "src-act" }, h("span", { class: "spinner" }))
