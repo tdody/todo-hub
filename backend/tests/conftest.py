@@ -16,6 +16,13 @@ def tmp_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_claude_desktop(monkeypatch):
+    """Claude Desktop is not installed, unless a test says so: no test runs osascript."""
+    from todohub import claude_desktop
+    monkeypatch.setattr(claude_desktop, "is_installed", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def isolated_git(tmp_path, monkeypatch):
     """git reads a test config only: a test identity, no signing, no hooks. Nothing from this Mac."""
     config = tmp_path / "gitconfig"
