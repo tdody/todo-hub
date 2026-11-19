@@ -943,7 +943,7 @@ The repo is public. Run:
 
 ```bash
 git diff main --stat
-git diff main | grep -n -i -E "@[a-z0-9-]+\.(com|ai|io)|/Users/" | grep -v -i "example\.com\|noreply@anthropic\.com"
+git diff main | grep -n -i -E "<company name>|@[a-z0-9-]+\.(com|ai|io)|/Users/" | grep -v -i "example\.com\|noreply@anthropic\.com"
 ```
 
 Expected: the second command prints nothing. If it prints a line, remove that data before the push.
