@@ -182,10 +182,10 @@ def test_open_script_failure(monkeypatch, tmp_path):
 
 
 def fake_claude(tmp_path, stdout: str) -> str:
-    """An executable ``claude`` that prints ``stdout`` and the arguments it got on stderr."""
+    """An executable ``claude`` that prints ``stdout`` only when it gets ``auth status --json``."""
     path = tmp_path / "bin" / "claude"
     path.parent.mkdir(exist_ok=True)
-    path.write_text(f"#!/bin/sh\necho \"$@\" >&2\nprintf %s '{stdout}'\n")
+    path.write_text(f"#!/bin/sh\n[ \"$*\" = \"auth status --json\" ] || exit 2\nprintf %s '{stdout}'\n")
     path.chmod(0o755)
     return str(path)
 
