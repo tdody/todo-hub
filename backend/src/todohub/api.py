@@ -33,8 +33,8 @@ from .config import (DEFAULT_PERISCOPE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SC
                      write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
-from .periscope import (Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, pane_name,
-                        remember_repo)
+from .periscope import Periscope, PeriscopeError, bring_to_front
+from .start import claude_name, default_repo, fill_prompt, remember_repo, session_comment
 from .selfcmd import self_command
 from .sources import SourceError
 from .sweep import _env, next_working_day
@@ -220,7 +220,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     linear_factory = linear_factory or (lambda: Linear(get_linear_key()))
     periscope_factory = periscope_factory or (lambda: Periscope(settings.periscope_url))
     front = front_fn or bring_to_front
-    name_claude = name_fn or (lambda issue: pane_name(settings, issue))
+    name_claude = name_fn or (lambda issue: claude_name(settings, issue))
     token = os.environ.get("TODOHUB_TOKEN")
 
     def default_launcher(args: list[str]) -> None:
@@ -279,6 +279,18 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             raise HTTPException(exc.status, str(exc))
         finally:
             client.close()
+
+    def add_session_comment(issue: dict, email: str | None, session_id: str) -> list[str]:
+        """Record a new Claude session on the issue. A comment that Linear refuses is a warning, not an error:
+        Claude already runs."""
+        client = linear_factory()
+        try:
+            client.create_comment(issue["id"], session_comment(datetime.now(stats.TZ), email, session_id))
+        except LinearError as exc:
+            return [f"The Claude session was not added to {issue['identifier']}: {exc}"]
+        finally:
+            client.close()
+        return []
 
     def team_meta(refresh: bool = False) -> TeamMeta:
         with lock:
@@ -993,18 +1005,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 raise HTTPException(409, f"Periscope is already starting {issue['identifier']}.")
             raise
         remember_repo(db, issue, body.repo)
-        warnings: list[str] = []
-        if result.get("session_id"):
-            comment = (f"- Started: {datetime.now(stats.TZ).replace(microsecond=0).isoformat()}\n"
-                       f"- Claude account: {result.get('email') or 'unknown'}\n"
-                       f"- Claude session: `{result['session_id']}`")
-            client = linear_factory()
-            try:
-                client.create_comment(issue["id"], comment)
-            except LinearError as exc:
-                warnings.append(f"The Claude session was not added to {issue['identifier']}: {exc}")
-            finally:
-                client.close()
+        warnings = add_session_comment(issue, result.get("email"), result["session_id"]) \
+            if result.get("session_id") else []
         return {**result, "warnings": warnings}
 
     @app.post("/api/periscope/show", dependencies=periscope_auth)
