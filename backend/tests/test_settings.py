@@ -130,12 +130,15 @@ def test_install_keeps_the_program_of_an_existing_schedule(tmp_path, monkeypatch
     assert any("bootstrap" in a[0] for a in calls)
 
 
-def test_periscope_prompt_from_the_settings_page():
-    assert load_settings().periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
-    config.write_overrides({"periscope": {"prompt": "Read {identifier}."}})
-    assert load_settings().periscope_prompt == "Read {identifier}."
-    config.write_overrides({"periscope": {"prompt": "   "}})
-    assert load_settings().periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
+def test_start_settings_from_the_settings_page():
+    s = load_settings()
+    assert (s.code_prompt, s.chat_prompt, s.repos) == (config.DEFAULT_CODE_PROMPT, config.DEFAULT_CHAT_PROMPT, [])
+    assert not s.claude_code_on
+    config.write_overrides({"start": {"repos": ["/code/api", 7], "code_prompt": "Read {identifier}.",
+                                      "chat_prompt": "   "}})
+    s = load_settings()
+    assert s.repos == ["/code/api"] and s.claude_code_on
+    assert s.code_prompt == "Read {identifier}." and s.chat_prompt == config.DEFAULT_CHAT_PROMPT
 
 
 def test_periscope_is_off_by_default():
@@ -153,10 +156,47 @@ def test_periscope_url_and_app_id_from_config_toml(tmp_home):
     assert s.periscope_app_id == "com.example.periscope"
 
 
-def test_settings_api_periscope_prompt():
+def test_settings_api_prompts():
     client, _, _ = client_for()
-    default = {"enabled": False, "prompt": config.DEFAULT_PERISCOPE_PROMPT, "default_prompt": config.DEFAULT_PERISCOPE_PROMPT}
-    assert client.get("/api/settings").json()["periscope"] == default
-    r = client.put("/api/settings/periscope", json={"prompt": "Read {identifier}."})
-    assert r.status_code == 200 and r.json()["periscope"]["prompt"] == "Read {identifier}."
-    assert client.put("/api/settings/periscope", json={"prompt": ""}).json()["periscope"] == default
+    start = client.get("/api/settings").json()["start"]
+    assert start["code_prompt"] == start["default_code_prompt"] == config.DEFAULT_CODE_PROMPT
+    assert start["chat_prompt"] == start["default_chat_prompt"] == config.DEFAULT_CHAT_PROMPT
+    r = client.put("/api/settings/prompts/chat", json={"prompt": " Help with {identifier}. "})
+    assert r.status_code == 200 and r.json()["start"]["chat_prompt"] == "Help with {identifier}."
+    r = client.put("/api/settings/prompts/code", json={"prompt": "Read {identifier}."})
+    assert r.json()["start"]["code_prompt"] == "Read {identifier}."
+    assert r.json()["start"]["chat_prompt"] == "Help with {identifier}."        # one save keeps the other
+    r = client.put("/api/settings/prompts/chat", json={"prompt": ""})
+    assert r.json()["start"]["chat_prompt"] == config.DEFAULT_CHAT_PROMPT
+    assert client.put("/api/settings/prompts/other", json={"prompt": "x"}).status_code == 422
+
+
+def test_a_chat_prompt_that_starts_with_a_slash_is_refused():
+    client, _, _ = client_for()
+    r = client.put("/api/settings/prompts/chat", json={"prompt": " /review {identifier}"})
+    assert r.status_code == 400 and r.json() == {"error": "The chat prompt cannot start with /."}
+    assert client.put("/api/settings/prompts/code", json={"prompt": "/review {identifier}"}).status_code == 200
+
+
+def test_settings_api_repos(git_repo, monkeypatch):
+    monkeypatch.setenv("HOME", str(git_repo.parent))
+    client, settings, _ = client_for()
+    assert client.get("/api/settings").json()["start"]["repos"] == []
+    (git_repo / "src").mkdir()
+    r = client.post("/api/settings/repos", json={"path": " ~/api/src "})
+    assert r.status_code == 200 and r.json()["start"]["repos"] == [{"repo": str(git_repo), "label": "~/api"}]
+    assert settings.repos == [str(git_repo)] and settings.claude_code_on
+    r = client.post("/api/settings/repos", json={"path": str(git_repo)})
+    assert r.json()["start"]["repos"] == [{"repo": str(git_repo), "label": "~/api"}]      # no second copy
+    r = client.post("/api/settings/repos", json={"path": "~/nothing"})
+    assert r.status_code == 400 and r.json() == {"error": "Not a git repo: ~/nothing"}
+    r = client.delete("/api/settings/repos", params={"repo": str(git_repo)})
+    assert r.json()["start"]["repos"] == [] and not settings.claude_code_on
+
+
+def test_a_blank_repo_path_is_not_the_folder_the_backend_runs_in(git_repo, monkeypatch):
+    monkeypatch.chdir(git_repo)
+    client, settings, _ = client_for()
+    r = client.post("/api/settings/repos", json={"path": "   "})
+    assert r.status_code == 400 and r.json() == {"error": "Not a git repo: "}
+    assert settings.repos == []

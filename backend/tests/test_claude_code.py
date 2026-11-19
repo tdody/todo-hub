@@ -42,6 +42,13 @@ def test_repo_top_is_none_outside_a_repo(tmp_path):
     assert claude_code.repo_top(str(tmp_path / "nothing")) is None
 
 
+def test_repo_top_is_none_for_a_path_that_is_not_absolute(git_repo, monkeypatch):
+    monkeypatch.chdir(git_repo.parent)
+    assert claude_code.repo_top("api") is None
+    monkeypatch.chdir(git_repo)
+    assert claude_code.repo_top("") is None and claude_code.repo_top(".") is None
+
+
 def test_worktrees_lists_each_branch_and_its_folder(git_repo):
     other = git_repo.parent / "other"
     git("worktree", "add", "-q", "-b", "me/eng-1", str(other), cwd=git_repo)

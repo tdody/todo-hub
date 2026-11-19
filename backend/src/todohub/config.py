@@ -5,7 +5,7 @@ Everything lives in one folder, ``~/Library/Application Support/TodoHub`` on mac
 
     config.toml      settings you can edit
     settings.json    what the app's Settings page changed (sources, schedule, Daylight place,
-                     the periscope prompt);
+                     the Start Claude repos and prompts);
                      it wins over config.toml for those keys
     todohub.db       SQLite: candidate queue, runs, source status
     sweep/           the folder Claude Code runs in (so no repo .mcp.json is picked up)
@@ -121,10 +121,15 @@ def home() -> Path:
     return Path.home() / ".todohub"
 
 
-# Start in periscope: what the new Claude is told. {identifier}, {title} and {url} become the issue's.
-DEFAULT_PERISCOPE_PROMPT = (
+# What Start in periscope and Start in Claude Code tell the new Claude, and what Start in Claude Desktop puts in a
+# new chat. {identifier}, {title} and {url} become the issue's.
+DEFAULT_CODE_PROMPT = (
     "Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. "
     "Sum up the ask, then propose a plan. Do not change code until I agree."
+)
+DEFAULT_CHAT_PROMPT = (
+    "Read Linear ticket {identifier} ({url}) and its comments with the Linear connector. "
+    "Sum up the ask, then help me with it."
 )
 
 
@@ -164,7 +169,9 @@ class Settings:
     daylight_longitude: float | None = None
     periscope_url: str = ""
     periscope_app_id: str = ""
-    periscope_prompt: str = DEFAULT_PERISCOPE_PROMPT
+    code_prompt: str = DEFAULT_CODE_PROMPT
+    chat_prompt: str = DEFAULT_CHAT_PROMPT
+    repos: list[str] = field(default_factory=list)     # Start in Claude Code's repos: absolute top folders
     # Settings page: each source's state ("on", "paused", "removed"); a source not listed follows
     # config.toml. And when the sweep runs on its own.
     source_states: dict[str, str] = field(default_factory=dict)
@@ -218,6 +225,10 @@ class Settings:
     @property
     def periscope_on(self) -> bool:
         return bool(self.periscope_url)
+
+    @property
+    def claude_code_on(self) -> bool:
+        return bool(self.repos)
 
     def enabled_sources(self) -> list[str]:
         return [
@@ -353,9 +364,13 @@ def apply_overrides(s: Settings, data: dict) -> None:
         s.daylight_place = str(day.get("place") or "")[:80]
         s.daylight_latitude = _coord(day.get("latitude"), 90)
         s.daylight_longitude = _coord(day.get("longitude"), 180)
-    peri = data.get("periscope")
-    if isinstance(peri, dict) and isinstance(peri.get("prompt"), str) and peri["prompt"].strip():
-        s.periscope_prompt = peri["prompt"]
+    start = data.get("start")
+    if isinstance(start, dict):
+        if isinstance(start.get("repos"), list):
+            s.repos = [r for r in start["repos"] if isinstance(r, str)]
+        for key in ("code_prompt", "chat_prompt"):
+            if isinstance(start.get(key), str) and start[key].strip():
+                setattr(s, key, start[key])
 
 
 def source_state(s: Settings, key: str) -> str:

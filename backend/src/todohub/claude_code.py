@@ -34,8 +34,12 @@ def _git(repo: str, *args: str, timeout: int = QUICK_SECONDS) -> subprocess.Comp
 
 
 def repo_top(path: str) -> str | None:
-    """The absolute top folder of the git repo that ``path`` (``~`` allowed) is in, or None."""
-    proc = _git(str(Path(path).expanduser()), "rev-parse", "--show-toplevel")
+    """The absolute top folder of the git repo that ``path`` (``~`` allowed) is in, or None.
+    A path that is not absolute gives None: it would mean the folder the backend runs in."""
+    folder = Path(path).expanduser()
+    if not folder.is_absolute():
+        return None
+    proc = _git(str(folder), "rev-parse", "--show-toplevel")
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 

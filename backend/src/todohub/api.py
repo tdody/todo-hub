@@ -26,9 +26,10 @@ from pydantic import BaseModel, Field
 
 from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
-from . import logos, mutes, pulls, schedule, stats, summary, tools
+from . import claude_code, logos, mutes, pulls, schedule, stats, summary, tools
 from .categories import categorize
-from .config import (DEFAULT_PERISCOPE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST,
+from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST,
+                     SCHEDULE_LAST,
                      SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides, source_state,
                      write_overrides)
 from .db import DB
@@ -107,8 +108,12 @@ class DaylightIn(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
-class PeriscopePromptIn(BaseModel):
+class PromptIn(BaseModel):
     prompt: str = Field(max_length=8000)       # empty: back to the default
+
+
+class RepoIn(BaseModel):
+    path: str = Field(min_length=1, max_length=500)       # a folder in a git repo; ~ is allowed
 
 
 class PeriscopeStartIn(BaseModel):
@@ -402,6 +407,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         write_overrides(data)
         reload_settings()
 
+    def repo_labels() -> list[dict]:
+        return [{"repo": r, "label": claude_code.tilde(r)} for r in settings.repos]
+
     def settings_body() -> dict:
         status = {o["source"]: o for o in db.source_overview([k for k, *_ in SOURCE_INFO])}
         return {
@@ -410,8 +418,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "schedule": schedule.describe(settings, scheduler.installed()) | {"supported": scheduler.supported()},
             "daylight": {"place": settings.daylight_place, "latitude": settings.daylight_latitude,
                          "longitude": settings.daylight_longitude},
-            "periscope": {"enabled": settings.periscope_on, "prompt": settings.periscope_prompt,
-                          "default_prompt": DEFAULT_PERISCOPE_PROMPT},
+            "start": {"repos": repo_labels(), "code_prompt": settings.code_prompt, "chat_prompt": settings.chat_prompt,
+                      "default_code_prompt": DEFAULT_CODE_PROMPT, "default_chat_prompt": DEFAULT_CHAT_PROMPT},
         }
 
     @app.get("/api/settings", dependencies=auth)
@@ -458,10 +466,32 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         save_override("daylight", body.model_dump())
         return settings_body()
 
-    @app.put("/api/settings/periscope", dependencies=auth)
-    def set_periscope(body: PeriscopePromptIn) -> dict:
-        """The prompt Start in periscope sends; an empty one goes back to the default."""
-        save_override("periscope", {"prompt": body.prompt.strip()})
+    def save_start(**changes) -> None:
+        save_override("start", {**(read_overrides().get("start") or {}), **changes})
+
+    @app.put("/api/settings/prompts/{kind}", dependencies=auth)
+    def set_prompt(kind: Literal["code", "chat"], body: PromptIn) -> dict:
+        """The code prompt (periscope and Claude Code) or the chat prompt (Claude Desktop); empty is the default."""
+        prompt = body.prompt.strip()
+        if kind == "chat" and prompt.startswith("/"):
+            raise HTTPException(400, "The chat prompt cannot start with /.")    # Claude Desktop refuses that link
+        save_start(**{f"{kind}_prompt": prompt})
+        return settings_body()
+
+    @app.post("/api/settings/repos", dependencies=auth)
+    def add_repo(body: RepoIn) -> dict:
+        """Add the top folder of the git repo that ``path`` is in to Start in Claude Code's repos."""
+        path = body.path.strip()
+        top = claude_code.repo_top(path)
+        if top is None:
+            raise HTTPException(400, f"Not a git repo: {path}")
+        if top not in settings.repos:
+            save_start(repos=[*settings.repos, top])
+        return settings_body()
+
+    @app.delete("/api/settings/repos", dependencies=auth)
+    def remove_repo(repo: str) -> dict:
+        save_start(repos=[r for r in settings.repos if r != repo])
         return settings_body()
 
     # ---- review queue -----------------------------------------------------------------
@@ -986,7 +1016,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return {
             "repos": repos, "repo": repo, "hint": hint, "branch": branch,
             "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"] if w["branch"] == branch}),
-            "prompt": fill_prompt(settings.periscope_prompt, issue),
+            "prompt": fill_prompt(settings.code_prompt, issue),
         }
 
     @app.post("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
