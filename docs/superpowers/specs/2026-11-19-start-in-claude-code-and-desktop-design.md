@@ -65,7 +65,7 @@ It is the Start in periscope popover, with these differences:
 1. **The worktree.** todo-hub runs `git worktree prune`, then reads `git worktree list --porcelain`. If a worktree is on the branch, todo-hub uses it. Else it runs `git fetch origin` and adds a worktree in `<repo>-worktrees/<branch>`, with each `/` in the branch changed to `-`:
    - on the local branch, if it exists;
    - else on a new local branch that tracks `origin/<branch>`, if that exists;
-   - else on a new branch from `origin/HEAD`, with `--no-track`. Without it, git sets `origin/main` as the upstream, and a push could go to the default branch.
+   - else on a new branch from `origin/HEAD`, with `--no-track`. Without it, git sets `origin/main` as the upstream, and a push could go to the default branch. With no `origin/HEAD`, the branch starts from `HEAD`, also with `--no-track`.
 
    Example: `~/code/api` and `thibaultdody/eng-9512-retry-stuck-uploads` give `~/code/api-worktrees/thibaultdody-eng-9512-retry-stuck-uploads`.
 2. **The name.** Haiku names the Claude, as for periscope: `eng-9512-retry-stuck-uploads`. This adds 2 to 5 seconds.
@@ -137,7 +137,7 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 | A Settings repo is gone, or is no longer a git repo | "Not a git repo: ~/code/api" |
 | `git fetch origin` fails or takes more than 30 s | Warning: "Could not fetch origin. The worktree uses the local branches." |
 | The repo has no `origin/HEAD` | Warning: "~/code/api has no origin/HEAD. The new branch starts from HEAD." |
-| `git worktree add` fails or takes more than 60 s | Git's own message, or "git worktree add took more than 60 s." |
+| `git worktree add` fails or takes more than 60 s | Git's own message, or "git worktree add took more than 60 s. It may still finish." |
 | `open` fails on the script | "Could not open the start script: …" |
 | `claude auth status` fails | The comment says "Claude account: unknown", as with periscope. |
 | Linear refuses the comment | Warning, as now: "The Claude session was not added to ENG-9512: …" |

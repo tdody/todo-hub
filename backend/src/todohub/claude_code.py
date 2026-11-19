@@ -34,14 +34,15 @@ def repo_top(path: str) -> str | None:
 
 def worktrees(repo: str) -> dict[str, str]:
     """{branch: path} for the repo's worktrees that are on a branch. A repo that is gone gives {}."""
-    _git(repo, "worktree", "prune")          # a worktree folder deleted by hand still holds its branch
     found: dict[str, str] = {}
-    path = ""
-    for line in _git(repo, "worktree", "list", "--porcelain").stdout.splitlines():
-        if line.startswith("worktree "):
-            path = line.removeprefix("worktree ")
-        elif line.startswith("branch refs/heads/"):
-            found[line.removeprefix("branch refs/heads/")] = path
+    for block in _git(repo, "worktree", "list", "--porcelain").stdout.split("\n\n"):
+        lines = block.splitlines()
+        if any(line.startswith("prunable") for line in lines):     # its folder was deleted by hand
+            continue
+        path = next((line.removeprefix("worktree ") for line in lines if line.startswith("worktree ")), "")
+        for line in lines:
+            if line.startswith("branch refs/heads/"):
+                found[line.removeprefix("branch refs/heads/")] = path
     return found
 
 
@@ -54,6 +55,7 @@ def worktree_for(repo: str, branch: str) -> tuple[str, bool, list[str]]:
     ``<repo>-worktrees/<branch with - for />``. Also the warnings for the toast."""
     if repo_top(repo) is None:
         raise StartError(f"Not a git repo: {tilde(repo)}")
+    _git(repo, "worktree", "prune")          # a worktree folder deleted by hand blocks the add
     if branch in (checked_out := worktrees(repo)):
         return checked_out[branch], True, []
     warnings: list[str] = []

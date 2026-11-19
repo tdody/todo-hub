@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -20,10 +21,10 @@ def isolated_git(tmp_path, monkeypatch):
     config = tmp_path / "gitconfig"
     config.write_text("[user]\n\tname = Test\n\temail = test@example.com\n"
                       "[commit]\n\tgpgsign = false\n[core]\n\thooksPath = /dev/null\n")
+    for name in [name for name in os.environ if name.startswith("GIT_")]:
+        monkeypatch.delenv(name)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-        monkeypatch.delenv(name, raising=False)
 
 
 def git(*args: str, cwd: Path) -> str:

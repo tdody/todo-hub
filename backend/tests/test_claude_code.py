@@ -50,6 +50,7 @@ def test_worktrees_leaves_out_a_folder_deleted_by_hand(git_repo):
     git("worktree", "add", "-q", "-b", "me/eng-1", str(gone), cwd=git_repo)
     shutil.rmtree(gone)
     assert claude_code.worktrees(str(git_repo)) == {"main": str(git_repo)}
+    assert "gone" in git("worktree", "list", cwd=git_repo)      # worktrees() does not prune
 
 
 def test_a_worktree_already_on_the_branch_is_used(git_repo):
