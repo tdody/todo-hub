@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from todohub import claude_desktop
 from todohub.linear import TeamMeta
 
 
@@ -18,7 +19,6 @@ def tmp_home(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def no_claude_desktop(monkeypatch):
     """Claude Desktop is not installed, unless a test says so: no test runs osascript."""
-    from todohub import claude_desktop
     monkeypatch.setattr(claude_desktop, "is_installed", lambda: False)
 
 

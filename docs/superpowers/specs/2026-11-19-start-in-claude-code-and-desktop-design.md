@@ -173,7 +173,7 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 
 - `BUNDLE_ID = "com.anthropic.claudefordesktop"`.
 - `is_installed() -> bool`: the Launch Services check.
-- `chat_url(prompt)` and `open_chat(prompt)`: runs `open "claude://claude.ai/new?q=…"`.
+- `open_chat(prompt)`: runs `open "claude://claude.ai/new?q=…"`, with the prompt percent-encoded.
 
 **`backend/src/todohub/config.py`**
 
