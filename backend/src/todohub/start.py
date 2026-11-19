@@ -1,12 +1,11 @@
-"""What every start item shares: the prompt filled in for an issue, the name Haiku gives the new Claude, the
-repo remembered for each project, and the comment that records a new Claude session on the issue."""
+"""What the Start actions in an issue's ⋯ menu share: the prompt filled in for an issue, the name Haiku gives
+the new Claude, and the repo remembered for each project or client."""
 
 from __future__ import annotations
 
 import logging
 import re
 import unicodedata
-from datetime import datetime
 
 from .calendar_block import safe_title
 from .config import Settings
@@ -68,7 +67,7 @@ def _memory_key(issue: dict) -> tuple[str, str] | None:
 
 
 def default_repo(db: DB, issue: dict, repos: list[str]) -> tuple[str | None, str]:
-    """The repo the popover selects first, from ``repos`` (the item's own list), and the hint that says why."""
+    """The repo the popover selects first from ``repos``, and the hint that says why."""
     key = _memory_key(issue)
     remembered = db.get_meta(REPOS_KEY, {}) or {}
     if key and remembered.get(key[0]) in repos:
@@ -85,9 +84,3 @@ def remember_repo(db: DB, issue: dict, repo: str) -> None:
         db.set_meta(REPOS_KEY, {**(db.get_meta(REPOS_KEY, {}) or {}), key[0]: repo})
     db.set_meta(LAST_REPO_KEY, repo)
 
-
-def session_comment(started: datetime, email: str | None, session_id: str) -> str:
-    """The comment that records a new Claude session on the issue."""
-    return (f"- Started: {started.replace(microsecond=0).isoformat()}\n"
-            f"- Claude account: {email or 'unknown'}\n"
-            f"- Claude session: `{session_id}`")

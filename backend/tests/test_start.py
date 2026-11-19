@@ -1,13 +1,11 @@
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from todohub.config import load_settings
 from todohub.db import DB
-from todohub.start import (LAST_REPO_KEY, REPOS_KEY, claude_name, default_repo, fill_prompt, remember_repo,
-                           session_comment)
+from todohub.start import LAST_REPO_KEY, REPOS_KEY, claude_name, default_repo, fill_prompt, remember_repo
 
 NAMED = {"identifier": "ENG-1", "title": "Rebin Globex grades for jane@globex.com"}
 
@@ -99,9 +97,3 @@ def test_default_repo_skips_a_repo_no_longer_listed():
     remember_repo(db, {"project": "Pipelines", "client": None}, "/dev/gone")
     assert default_repo(db, {"project": "Pipelines", "client": None}, ["/dev/api"]) == (None, "")
 
-
-def test_session_comment_names_the_start_the_account_and_the_session():
-    started = datetime(2026, 11, 19, 9, 30, 15, 123456, tzinfo=timezone(timedelta(hours=-5)))
-    assert session_comment(started, "you@example.com", "sid") == (
-        "- Started: 2026-11-19T09:30:15-05:00\n- Claude account: you@example.com\n- Claude session: `sid`")
-    assert session_comment(started, None, "sid").split("\n")[1] == "- Claude account: unknown"

@@ -34,9 +34,9 @@ from .config import (DEFAULT_PERISCOPE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SC
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
 from .periscope import Periscope, PeriscopeError, bring_to_front
-from .start import claude_name, default_repo, fill_prompt, remember_repo, session_comment
 from .selfcmd import self_command
 from .sources import SourceError
+from .start import claude_name, default_repo, fill_prompt, remember_repo
 from .sweep import _env, next_working_day
 from .tools import ToolError
 
@@ -283,9 +283,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     def add_session_comment(issue: dict, email: str | None, session_id: str) -> list[str]:
         """Record a new Claude session on the issue. A comment that Linear refuses is a warning, not an error:
         Claude already runs."""
+        comment = (f"- Started: {datetime.now(stats.TZ).replace(microsecond=0).isoformat()}\n"
+                   f"- Claude account: {email or 'unknown'}\n"
+                   f"- Claude session: `{session_id}`")
         client = linear_factory()
         try:
-            client.create_comment(issue["id"], session_comment(datetime.now(stats.TZ), email, session_id))
+            client.create_comment(issue["id"], comment)
         except LinearError as exc:
             return [f"The Claude session was not added to {issue['identifier']}: {exc}"]
         finally:
