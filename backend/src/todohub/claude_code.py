@@ -3,11 +3,18 @@ Mac's default app for ``.command`` files runs. The script starts Claude Code in 
 
 from __future__ import annotations
 
+import json
+import logging
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
+from .config import Settings
 from .start import StartError
 from .sweep import _env
+
+log = logging.getLogger("todohub.claude_code")
 
 QUICK_SECONDS = 15
 FETCH_SECONDS = 30
@@ -82,3 +89,41 @@ def worktree_for(repo: str, branch: str) -> tuple[str, bool, list[str]]:
     if proc.returncode != 0:
         raise StartError(proc.stderr.strip() or "git worktree add failed.")
     return path, False, warnings
+
+
+def start_command(settings: Settings, name: str, session_id: str, prompt: str) -> list[str]:
+    """``claude`` by the absolute path that the sweeps use, so the terminal's PATH does not matter. ``--`` ends
+    the options, so a prompt that starts with ``-`` stays the prompt."""
+    claude = shutil.which(settings.claude_path, path=_env()["PATH"]) or settings.claude_path
+    return [claude, "--name", name, "--session-id", session_id, "--", prompt]
+
+
+def write_script(folder: Path, identifier: str, worktree: str, command: list[str]) -> Path:
+    """``<folder>/<identifier>.command``: it goes to the worktree, deletes itself, then runs ``command``. Each
+    value is quoted, so a title from Linear stays text."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{identifier}.command"
+    path.write_text(f'#!/bin/sh\ncd {shlex.quote(worktree)} || exit 1\nrm -f -- "$0"\nexec {shlex.join(command)}\n')
+    path.chmod(0o700)
+    return path
+
+
+def open_script(path: Path) -> None:
+    """Run the script in the Mac's default app for ``.command`` files (Terminal, unless you changed it)."""
+    try:
+        subprocess.run(["open", str(path)], check=True, capture_output=True, text=True, timeout=QUICK_SECONDS)
+    except subprocess.CalledProcessError as exc:
+        raise StartError(f"Could not open the start script: {(exc.stderr or '').strip() or exc}") from None
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise StartError(f"Could not open the start script: {exc}") from None
+
+
+def account_email(settings: Settings) -> str | None:
+    """The signed-in Claude account's email, from ``claude auth status --json``; None when it gives none."""
+    try:
+        proc = subprocess.run([settings.claude_path, "auth", "status", "--json"], env=_env(), capture_output=True,
+                              text=True, timeout=QUICK_SECONDS)
+        return json.loads(proc.stdout).get("email") or None
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        log.warning("No Claude account email: %s", exc)
+        return None
