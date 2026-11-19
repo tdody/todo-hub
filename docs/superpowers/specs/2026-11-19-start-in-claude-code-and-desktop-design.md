@@ -75,7 +75,7 @@ It is the Start in periscope popover, with these differences:
    - goes to the worktree;
    - runs `claude --name <name> --session-id <uuid> "<prompt>"`.
 
-   `claude` is the absolute path that todo-hub uses for the sweeps, so the terminal's PATH does not matter. `shlex.quote` quotes each value, because the title comes from Linear. A `--` comes before the prompt, so a prompt that starts with `-` is not read as an option. (Checked on 2026-11-19: `claude -p -- "-reply with only the word OK"` answers "OK".)
+   todo-hub finds `claude` on the PATH that the sweeps use. If it is not there, the terminal's PATH must find it. `shlex.quote` quotes each value, because the title comes from Linear. A `--` comes before the prompt, so a prompt that starts with `-` is not read as an option. (Checked on 2026-11-19: `claude -p -- "-reply with only the word OK"` answers "OK".)
 5. **The comment.** todo-hub reads the account email from `claude auth status --json` and adds the comment that Start in periscope adds: the start time, the Claude account and the Claude session ID.
 6. **The memory.** todo-hub remembers the repo for the issue's project (or client label) and as the last repo picked.
 7. **The toast.** The popover closes, and a toast says "Started ENG-9512 in Claude Code". Each warning is an error toast, as for periscope.

@@ -710,7 +710,7 @@ from conftest import git
 Append:
 
 ```python
-TRICKY = "Fix 'quotes', \"doubles\", $(touch pwned) and `touch ticks`\nsecond line; rm -rf ~ -- --name x"
+TRICKY = "Fix 'quotes', \"doubles\", $(touch pwned) and `touch ticks`\nsecond line; touch semi -- --name x"
 
 
 def test_the_script_runs_in_the_worktree_keeps_the_prompt_as_text_and_deletes_itself(tmp_path):

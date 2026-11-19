@@ -1,5 +1,5 @@
 import json
-import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -185,7 +185,7 @@ def fake_claude(tmp_path, stdout: str) -> str:
     """An executable ``claude`` that prints ``stdout`` only when it gets ``auth status --json``."""
     path = tmp_path / "bin" / "claude"
     path.parent.mkdir(exist_ok=True)
-    path.write_text(f"#!/bin/sh\n[ \"$*\" = \"auth status --json\" ] || exit 2\nprintf %s '{stdout}'\n")
+    path.write_text(f"#!/bin/sh\n[ \"$*\" = \"auth status --json\" ] || exit 2\nprintf %s {shlex.quote(stdout)}\n")
     path.chmod(0o755)
     return str(path)
 
