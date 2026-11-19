@@ -71,8 +71,8 @@ It is the Start in periscope popover, with these differences:
 2. **The name.** Haiku names the Claude, as for periscope: `eng-9512-retry-stuck-uploads`. This adds 2 to 5 seconds.
 3. **The session ID.** todo-hub makes a new UUID.
 4. **The script.** todo-hub writes `<TodoHub folder>/start/<identifier>.command`, makes it executable, and runs `open` on it. The script:
-   - goes to the worktree;
    - deletes itself;
+   - goes to the worktree;
    - runs `claude --name <name> --session-id <uuid> "<prompt>"`.
 
    `claude` is the absolute path that todo-hub uses for the sweeps, so the terminal's PATH does not matter. `shlex.quote` quotes each value, because the title comes from Linear. A `--` comes before the prompt, so a prompt that starts with `-` is not read as an option. (Checked on 2026-11-19: `claude -p -- "-reply with only the word OK"` answers "OK".)

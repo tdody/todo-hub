@@ -130,7 +130,7 @@ def test_a_git_worktree_add_error_carries_gits_message(git_repo):
         claude_code.worktree_for(str(git_repo), "me/eng-5")
 
 
-TRICKY = "Fix 'quotes', \"doubles\", $(touch pwned) and `touch ticks`\nsecond line; rm -rf ~ -- --name x"
+TRICKY = "Fix 'quotes', \"doubles\", $(touch pwned) and `touch ticks`\nsecond line; touch semi -- --name x"
 
 
 def test_the_script_runs_in_the_worktree_keeps_the_prompt_as_text_and_deletes_itself(tmp_path):
@@ -138,11 +138,12 @@ def test_the_script_runs_in_the_worktree_keeps_the_prompt_as_text_and_deletes_it
     worktree.mkdir()
     command = ["sh", "-c", 'pwd -P; printf %s "$1"', "sh", TRICKY]
     script = claude_code.write_script(tmp_path / "start", "ENG-1", str(worktree), command)
-    assert script == tmp_path / "start" / "ENG-1.command" and os.access(script, os.X_OK)
+    assert script == tmp_path / "start" / "ENG-1.command" and script.stat().st_mode & 0o777 == 0o700
     out = subprocess.run([str(script)], capture_output=True, text=True, check=True).stdout
     assert out == f"{worktree.resolve()}\n{TRICKY}"
     assert not script.exists()
     assert not (worktree / "pwned").exists() and not (worktree / "ticks").exists()
+    assert not (worktree / "semi").exists()
 
 
 def test_the_command_runs_claude_by_its_path_and_ends_the_options_before_the_prompt(tmp_path, monkeypatch):
@@ -154,6 +155,14 @@ def test_the_command_runs_claude_by_its_path_and_ends_the_options_before_the_pro
     monkeypatch.setenv("PATH", str(bin_dir))
     assert claude_code.start_command(load_settings(), "eng-1-fix", "sid", "-p hi") == [
         str(claude), "--name", "eng-1-fix", "--session-id", "sid", "--", "-p hi"]
+
+
+def test_the_command_keeps_the_configured_claude_when_the_path_has_none(tmp_path, monkeypatch):
+    (tmp_path / "bin").mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    settings = load_settings()
+    settings.claude_path = "claude-not-installed"
+    assert claude_code.start_command(settings, "n", "sid", "hi")[0] == "claude-not-installed"
 
 
 def test_open_script_opens_it_with_the_default_app(monkeypatch, tmp_path):
@@ -172,26 +181,37 @@ def test_open_script_failure(monkeypatch, tmp_path):
         claude_code.open_script(tmp_path / "ENG-1.command")
 
 
-def test_account_email_reads_claude_auth_status(monkeypatch):
-    ran = []
+def fake_claude(tmp_path, stdout: str) -> str:
+    """An executable ``claude`` that prints ``stdout`` and the arguments it got on stderr."""
+    path = tmp_path / "bin" / "claude"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(f"#!/bin/sh\necho \"$@\" >&2\nprintf %s '{stdout}'\n")
+    path.chmod(0o755)
+    return str(path)
 
+
+def test_account_email_reads_claude_auth_status(tmp_path):
+    settings = load_settings()
+    settings.claude_path = fake_claude(tmp_path, json.dumps({"loggedIn": True, "email": "you@example.com"}))
+    assert claude_code.account_email(settings) == "you@example.com"
+
+
+@pytest.mark.parametrize("stdout", ["not json", json.dumps({"loggedIn": False})])
+def test_account_email_is_none_when_claude_gives_none(tmp_path, stdout):
+    settings = load_settings()
+    settings.claude_path = fake_claude(tmp_path, stdout)
+    assert claude_code.account_email(settings) is None
+
+
+def test_account_email_is_none_when_claude_is_missing(tmp_path):
+    settings = load_settings()
+    settings.claude_path = str(tmp_path / "nothing")
+    assert claude_code.account_email(settings) is None
+
+
+def test_account_email_is_none_when_claude_is_slow(monkeypatch):
     def run(cmd, **kw):
-        ran.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"loggedIn": True, "email": "you@example.com"}),
-                                           stderr="")
-
-    monkeypatch.setattr(subprocess, "run", run)
-    assert claude_code.account_email(load_settings()) == "you@example.com"
-    assert ran[0][1:] == ["auth", "status", "--json"]
-
-
-@pytest.mark.parametrize("answer", [FileNotFoundError(), subprocess.TimeoutExpired("claude", 15), "not json",
-                                    json.dumps({"loggedIn": False})])
-def test_account_email_is_none_when_claude_gives_none(monkeypatch, answer):
-    def run(cmd, **kw):
-        if isinstance(answer, Exception):
-            raise answer
-        return subprocess.CompletedProcess(cmd, 1, stdout=answer, stderr="")
+        raise subprocess.TimeoutExpired("claude", 15)
 
     monkeypatch.setattr(subprocess, "run", run)
     assert claude_code.account_email(load_settings()) is None

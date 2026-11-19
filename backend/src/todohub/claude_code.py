@@ -92,18 +92,18 @@ def worktree_for(repo: str, branch: str) -> tuple[str, bool, list[str]]:
 
 
 def start_command(settings: Settings, name: str, session_id: str, prompt: str) -> list[str]:
-    """``claude`` by the absolute path that the sweeps use, so the terminal's PATH does not matter. ``--`` ends
-    the options, so a prompt that starts with ``-`` stays the prompt."""
+    """Finds ``claude`` on the PATH that the sweeps use. If it is not there, the terminal's PATH must find it.
+    ``--`` ends the options, so a prompt that starts with ``-`` stays the prompt."""
     claude = shutil.which(settings.claude_path, path=_env()["PATH"]) or settings.claude_path
     return [claude, "--name", name, "--session-id", session_id, "--", prompt]
 
 
 def write_script(folder: Path, identifier: str, worktree: str, command: list[str]) -> Path:
-    """``<folder>/<identifier>.command``: it goes to the worktree, deletes itself, then runs ``command``. Each
-    value is quoted, so a title from Linear stays text."""
+    """``<folder>/<identifier>.command``: it deletes itself, goes to the worktree, then runs ``command``.
+    ``shlex`` quotes each value, so text from Linear stays text."""
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{identifier}.command"
-    path.write_text(f'#!/bin/sh\ncd {shlex.quote(worktree)} || exit 1\nrm -f -- "$0"\nexec {shlex.join(command)}\n')
+    path.write_text(f'#!/bin/sh\nrm -f -- "$0"\ncd {shlex.quote(worktree)} || exit 1\nexec {shlex.join(command)}\n')
     path.chmod(0o700)
     return path
 
@@ -114,7 +114,7 @@ def open_script(path: Path) -> None:
         subprocess.run(["open", str(path)], check=True, capture_output=True, text=True, timeout=QUICK_SECONDS)
     except subprocess.CalledProcessError as exc:
         raise StartError(f"Could not open the start script: {(exc.stderr or '').strip() or exc}") from None
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
         raise StartError(f"Could not open the start script: {exc}") from None
 
 
