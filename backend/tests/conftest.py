@@ -1,4 +1,3 @@
-import os
 import subprocess
 from pathlib import Path
 
@@ -15,20 +14,26 @@ def tmp_home(tmp_path, monkeypatch):
     return tmp_path / "home"
 
 
-GIT_ENV = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
-           "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
+@pytest.fixture(autouse=True)
+def isolated_git(tmp_path, monkeypatch):
+    """git reads a test config only: a test identity, no signing, no hooks. Nothing from this Mac."""
+    config = tmp_path / "gitconfig"
+    config.write_text("[user]\n\tname = Test\n\temail = test@example.com\n"
+                      "[commit]\n\tgpgsign = false\n[core]\n\thooksPath = /dev/null\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def git(*args: str, cwd: Path) -> str:
-    """git with a test identity, and with no signing or hooks from the user's global config."""
-    return subprocess.run(["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
-                          cwd=cwd, check=True, capture_output=True, text=True, env={**os.environ, **GIT_ENV}).stdout
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
 
 
 @pytest.fixture
 def git_repo(tmp_path) -> Path:
     """``<tmp>/api``, a clone of a bare ``origin.git``. Origin has ``main`` and ``me/eng-2``; the clone has only
-    ``main`` as a local branch. Hooks are off in the clone, so todo-hub's own git calls run none."""
+    ``main`` as a local branch."""
     seed = tmp_path / "seed"
     seed.mkdir()
     git("init", "-q", "-b", "main", cwd=seed)
@@ -36,7 +41,6 @@ def git_repo(tmp_path) -> Path:
     git("branch", "me/eng-2", cwd=seed)
     git("clone", "-q", "--bare", str(seed), str(tmp_path / "origin.git"), cwd=tmp_path)
     git("clone", "-q", str(tmp_path / "origin.git"), str(tmp_path / "api"), cwd=tmp_path)
-    git("config", "core.hooksPath", "/dev/null", cwd=tmp_path / "api")
     return (tmp_path / "api").resolve()
 
 

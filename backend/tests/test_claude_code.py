@@ -45,6 +45,13 @@ def test_worktrees_lists_each_branch_and_its_folder(git_repo):
     assert claude_code.worktrees(str(git_repo)) == {"main": str(git_repo), "me/eng-1": str(other)}
 
 
+def test_worktrees_leaves_out_a_folder_deleted_by_hand(git_repo):
+    gone = git_repo.parent / "gone"
+    git("worktree", "add", "-q", "-b", "me/eng-1", str(gone), cwd=git_repo)
+    shutil.rmtree(gone)
+    assert claude_code.worktrees(str(git_repo)) == {"main": str(git_repo)}
+
+
 def test_a_worktree_already_on_the_branch_is_used(git_repo):
     other = git_repo.parent / "other"
     git("worktree", "add", "-q", "-b", "me/eng-1", str(other), cwd=git_repo)
@@ -64,9 +71,26 @@ def test_a_branch_only_origin_has_gets_a_local_branch_that_tracks_it(git_repo):
 
 
 def test_a_new_branch_starts_from_origin_head_with_no_upstream(git_repo):
+    git("commit", "-q", "--allow-empty", "-m", "local", cwd=git_repo)
     path, _, warnings = claude_code.worktree_for(str(git_repo), "me/eng-3")
     assert warnings == [] and branch_of(path) == "me/eng-3"
-    assert upstream(path) is None            # so a push cannot go to main
+    assert upstream(path) is None            # so a push cannot go to the default branch
+    assert git("rev-parse", "HEAD", cwd=Path(path)) == git("rev-parse", "origin/HEAD", cwd=git_repo)
+
+
+def test_a_branch_from_head_has_no_upstream_either(git_repo):
+    git("remote", "set-head", "origin", "-d", cwd=git_repo)
+    git("config", "remote.origin.followRemoteHEAD", "never", cwd=git_repo)   # a fetch must not bring it back
+    git("config", "branch.autoSetupMerge", "inherit", cwd=git_repo)
+    path, _, warnings = claude_code.worktree_for(str(git_repo), "me/eng-3")
+    assert warnings == [f"{claude_code.tilde(str(git_repo))} has no origin/HEAD. The new branch starts from HEAD."]
+    assert upstream(path) is None
+
+
+def test_the_fetch_finds_a_branch_origin_got_after_the_clone(git_repo):
+    git("branch", "me/eng-6", "main", cwd=git_repo.parent / "origin.git")
+    path, _, warnings = claude_code.worktree_for(str(git_repo), "me/eng-6")
+    assert warnings == [] and upstream(path) == "origin/me/eng-6"
 
 
 def test_a_worktree_folder_deleted_by_hand_is_pruned_first(git_repo):
@@ -82,7 +106,6 @@ def test_a_repo_with_no_origin_warns_and_starts_from_head(tmp_path):
     lone.mkdir()
     git("init", "-q", "-b", "main", cwd=lone)
     git("commit", "-q", "--allow-empty", "-m", "one", cwd=lone)
-    git("config", "core.hooksPath", "/dev/null", cwd=lone)
     lone = lone.resolve()
     path, _, warnings = claude_code.worktree_for(str(lone), "me/eng-4")
     assert branch_of(path) == "me/eng-4"
