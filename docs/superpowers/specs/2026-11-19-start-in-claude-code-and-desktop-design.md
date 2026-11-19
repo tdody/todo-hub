@@ -39,7 +39,7 @@ The ⋯ menu of the Today pane and of the Client and Dev pane has these items, i
 4. **Start in Claude Desktop**, when Claude Desktop is installed
 5. Remove from Today, Delete… (as now)
 
-The app reads `periscope`, `claude_code` and `claude_desktop` from `GET /api/meta`. It reads meta at most every 10 minutes and on ⌘R. So after you install Claude Desktop, or add the first repo on the Settings page, ⌘R shows the item.
+The app reads `periscope`, `claude_code` and `claude_desktop` from `GET /api/meta`. It reads meta at most every 10 minutes and on ⌘R. When you add or remove a repo on the Settings page, the app reads meta again, so Start in Claude Code shows or goes at once. After you install Claude Desktop, ⌘R shows its item.
 
 ### Start in Claude Code: the popover
 
@@ -65,7 +65,7 @@ It is the Start in periscope popover, with these differences:
 1. **The worktree.** todo-hub runs `git worktree prune`, then reads `git worktree list --porcelain`. If a worktree is on the branch, todo-hub uses it. Else it runs `git fetch origin` and adds a worktree in `<repo>-worktrees/<branch>`, with each `/` in the branch changed to `-`:
    - on the local branch, if it exists;
    - else on a new local branch that tracks `origin/<branch>`, if that exists;
-   - else on a new branch from `origin/HEAD`.
+   - else on a new branch from `origin/HEAD`, with `--no-track`. Without it, git sets `origin/main` as the upstream, and a push could go to the default branch.
 
    Example: `~/code/api` and `thibaultdody/eng-9512-retry-stuck-uploads` give `~/code/api-worktrees/thibaultdody-eng-9512-retry-stuck-uploads`.
 2. **The name.** Haiku names the Claude, as for periscope: `eng-9512-retry-stuck-uploads`. This adds 2 to 5 seconds.
@@ -75,7 +75,7 @@ It is the Start in periscope popover, with these differences:
    - deletes itself;
    - runs `claude --name <name> --session-id <uuid> "<prompt>"`.
 
-   `claude` is the absolute path that todo-hub uses for the sweeps, so the terminal's PATH does not matter. `shlex.quote` quotes each value, because the title comes from Linear.
+   `claude` is the absolute path that todo-hub uses for the sweeps, so the terminal's PATH does not matter. `shlex.quote` quotes each value, because the title comes from Linear. A `--` comes before the prompt, so a prompt that starts with `-` is not read as an option. (Checked on 2026-11-19: `claude -p -- "-reply with only the word OK"` answers "OK".)
 5. **The comment.** todo-hub reads the account email from `claude auth status --json` and adds the comment that Start in periscope adds: the start time, the Claude account and the Claude session ID.
 6. **The memory.** todo-hub remembers the repo for the issue's project (or client label) and as the last repo picked.
 7. **The toast.** The popover closes, and a toast says "Started ENG-9512 in Claude Code". Each warning is an error toast, as for periscope.
@@ -133,6 +133,7 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 
 | Cause | Message |
 |---|---|
+| The repo is not on the Settings list (a stale popover after a Remove) | "Pick a repo from the Settings list." (400). The route runs git and the script only in a repo from that list. |
 | A Settings repo is gone, or is no longer a git repo | "Not a git repo: ~/code/api" |
 | `git fetch origin` fails or takes more than 30 s | Warning: "Could not fetch origin. The worktree uses the local branches." |
 | The repo has no `origin/HEAD` | Warning: "~/code/api has no origin/HEAD. The new branch starts from HEAD." |
@@ -152,23 +153,27 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 - `fill_prompt(template, issue)`, unchanged.
 - `claude_name(settings, issue)`: the Haiku name. It was `pane_name`. The name now also names a Claude Code session, not only a periscope pane.
 - `default_repo(db, issue, repos)` and `remember_repo(db, issue, repo)`, unchanged. Their meta keys become `start_repos` and `start_last_repo`. The old `periscope_repos` and `periscope_last_repo` are not copied: you pick the repo again one time for each project.
-- `session_comment(...)`: the comment text, now used by two routes.
+- `session_comment(started, email, session_id)`: the comment text, now used by two routes.
+- `StartError(message)`: a start that cannot go on. The routes give it as a 502 with its message.
 
 **`backend/src/todohub/periscope.py`**: only `Periscope`, `PeriscopeError` and `bring_to_front`.
 
 **New `backend/src/todohub/claude_code.py`**
 
+- `tilde(path)`: the path with the home folder shown as `~`, for labels and messages.
+- `repo_top(path) -> str | None`: `git rev-parse --show-toplevel`, or None when the path is in no repo.
+- `worktrees(repo) -> {branch: path}`: from `git worktree list --porcelain`.
 - `worktree_for(repo, branch) -> (path, reused, warnings)`: the steps in "After Start".
-- `write_script(home, identifier, worktree, claude, name, session_id, prompt) -> Path`: the `.command` file, mode 700.
+- `start_command(settings, name, session_id, prompt) -> list[str]`: `claude` by its absolute path, with `--name`, `--session-id`, `--` and the prompt.
+- `write_script(folder, identifier, worktree, command) -> Path`: the `.command` file, mode 700.
 - `open_script(path)`: runs `open`.
 - `account_email(settings) -> str | None`: `claude auth status --json`, 15 s.
-- `ClaudeCodeStartError(message)`: for the messages in the errors table.
 
 **New `backend/src/todohub/claude_desktop.py`**
 
 - `BUNDLE_ID = "com.anthropic.claudefordesktop"`.
 - `is_installed() -> bool`: the Launch Services check.
-- `open_chat(prompt)`: runs `open "claude://claude.ai/new?q=…"`.
+- `chat_url(prompt)` and `open_chat(prompt)`: runs `open "claude://claude.ai/new?q=…"`.
 
 **`backend/src/todohub/config.py`**
 
@@ -194,9 +199,9 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 - `startItems(i)` gives the menu items that are on. The Claude Desktop item calls its route and shows the toast.
 - The `.pp-*` classes and the `periscope-*` focus keys get `start` names.
 
-**`app/src/main.ts`**: the ⋯ menus call `startItems(i)`. **`app/src/api.ts`**: the new calls and types. **`app/src/settings.ts`**: the **Start Claude** section. **`app/src/styles.css`**: the renamed classes, and the repo rows.
+**`app/src/main.ts`**: the ⋯ menus call `startItems(i)`. The Settings page context gets `metaChanged`, which reads meta again after a repo is added or removed. **`app/src/api.ts`**: the new calls and types. **`app/src/settings.ts`**: the **Start Claude** section. **`app/src/styles.css`**: the renamed classes, and the repo rows.
 
-**`README.md`**: a **Start in Claude Code** and **Start in Claude Desktop** part after "Start in periscope", the **Start Claude** section of the Settings page, and `settings.json`'s new key. **`CHANGELOG.md`**: one entry.
+**`README.md`**: a **Start in Claude Code** and **Start in Claude Desktop** part after "Start in periscope", the **Start Claude** section of the Settings page, and `settings.json`'s new key. `CHANGELOG.md` gets its entry when the next release is cut (`docs/releasing.md`).
 
 ## Tests
 
@@ -215,12 +220,11 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 
 `backend/tests/test_start.py`: the tests for `fill_prompt`, `default_repo` and the Haiku name move here from `test_periscope.py`.
 
-`backend/tests/test_api.py`:
+The route tests go in each module's test file, as `test_periscope.py` does for periscope:
 
-- The Claude Code routes: options, start (the script, the comment, the memory), and the 404 when off.
-- The Claude Desktop route, and its 404 when the app is not installed.
-- `/api/meta` gives `claude_code` and `claude_desktop`.
-- Settings: add a repo (resolved top folder, no duplicate), "Not a git repo", remove a repo, save and reset each prompt, and refuse a chat prompt that starts with `/`.
+- `test_claude_code.py`: options, start (the script, the comment, the memory), a repo not on the list, a git error, and the 404 when off. `/api/meta` gives `claude_code`.
+- `test_claude_desktop.py`: the route, its 404 when the app is not installed, and a link that fails. `/api/meta` gives `claude_desktop`.
+- `test_settings.py`: add a repo (resolved top folder, no duplicate), "Not a git repo", remove a repo, save and reset each prompt, and refuse a chat prompt that starts with `/`.
 
 The app has no frontend test runner. Check in Playwright, with a scratch `TODOHUB_HOME` and the Tauri shim: the ⋯ menus with each item on and off, the Claude Code popover, the toasts, and the Settings section. Check the widths at a 1120 px window.
 
@@ -234,7 +238,6 @@ Before the merge, check on the Mac:
 
 - **todo-hub adds the session comment when `open` returns.** If the terminal app then fails to run the script, the comment names a session that never ran.
 - **The terminal Claude and the backend use the same Claude account.** The email in the comment comes from the backend's `claude auth status`.
-- **`claude` takes `--` before the prompt**, so a prompt that starts with `-` is not read as a flag. The plan checks this. If it does not, a prompt that starts with `-` is refused at Save.
 - **The `claude://claude.ai/new?q=` link keeps working.** Claude Desktop's own "Ask Claude" service uses it. A Claude Desktop update can change it.
 - **The default app for `.command` files runs the file.** Terminal and iTerm2 do. Another app may not.
 - **A file that todo-hub writes has no quarantine mark**, so macOS runs the script with no warning.
