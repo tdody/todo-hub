@@ -65,7 +65,7 @@ def _has_ref(repo: str, ref: str) -> bool:
     return _git(repo, "show-ref", "--verify", "--quiet", ref).returncode == 0
 
 
-def worktree_for(repo: str, branch: str) -> tuple[str, bool, list[str]]:
+def find_or_add_worktree(repo: str, branch: str) -> tuple[str, bool, list[str]]:
     """The worktree on ``branch``: the one already on it (reused), else a new one in
     ``<repo>-worktrees/<branch with - for />``. Also the warnings for the toast."""
     if repo_top(repo) is None:

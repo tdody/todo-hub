@@ -21,7 +21,7 @@ _TOKEN = re.compile(r"\{(identifier|title|url)\}")
 _WORD = re.compile(r"[a-z0-9]+")
 
 
-class StartError(RuntimeError):
+class StartError(Exception):
     """A start that cannot go on. The routes answer 502 with its message."""
 
 

@@ -1007,7 +1007,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.get("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_options(issue_id: str) -> dict:
         """What the popover shows first: periscope's repos, the one to select and why, Linear's branch, the
-        repos with a worktree already on it, and the Settings page's prompt filled in for the issue."""
+        repos with a worktree already on it, and the code prompt filled in for the issue."""
         raw = linear_call(lambda l: l.get_issue(issue_id))
         issue = shape_issue(raw, settings)
         catalog = periscope_call(lambda p: p.catalog())
@@ -1088,7 +1088,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
         session_id = str(uuid.uuid4())
         try:
-            path, reused, warnings = claude_code.worktree_for(body.repo, branch)
+            path, reused, warnings = claude_code.find_or_add_worktree(body.repo, branch)
             command = claude_code.start_command(settings, name_claude(issue), session_id, body.prompt)
             script = claude_code.write_script(settings.home / "start", issue["identifier"], path, command)
             claude_code.open_script(script)
@@ -1100,7 +1100,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     # ---- Start in Claude Desktop --------------------------------------------------------------
     def require_claude_desktop() -> None:
-        if not claude_desktop.is_installed():
+        if not cache.get("claude_desktop"):
             raise HTTPException(404, "Claude Desktop is not installed.")
 
     @app.post("/api/issues/{issue_id}/claude-desktop", dependencies=[*auth, Depends(require_claude_desktop)])

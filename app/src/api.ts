@@ -331,7 +331,7 @@ export interface StartOptions {
   hint: string;                                 // why: "Remembered for Pipelines.", or ""
   branch: string;                               // Linear's branch name
   branch_worktrees: string[];                   // repos with a worktree already on that branch
-  prompt: string;                               // the Settings page's template, filled in
+  prompt: string;                               // the code prompt, filled in
 }
 
 export interface PeriscopeStart {
@@ -344,7 +344,7 @@ export interface ClaudeCodeStart {
   path: string;                                 // the worktree
   reused: boolean;                              // it was already on the branch
   session_id: string;
-  warnings: string[];                           // a fetch that failed, a comment Linear refused; usually empty
+  warnings: string[];                           // a fetch that failed, no origin/HEAD, a comment Linear refused; usually empty
 }
 
 export interface RateCell {

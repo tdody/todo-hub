@@ -68,7 +68,9 @@ def test_the_route_opens_a_chat_with_the_chat_prompt(monkeypatch):
     chats = []
     monkeypatch.setattr(claude_desktop, "is_installed", lambda: True)
     monkeypatch.setattr(claude_desktop, "open_chat", chats.append)
-    r = client().post("/api/issues/id-ENG-1/claude-desktop")
+    c = client()
+    c.get("/api/meta")
+    r = c.post("/api/issues/id-ENG-1/claude-desktop")
     assert r.status_code == 200 and r.json() == {"ok": True}
     assert chats == ["Read Linear ticket ENG-1 (https://linear.app/x/issue/ENG-1) and its comments with the Linear "
                      "connector. Sum up the ask, then help me with it."]
@@ -77,7 +79,9 @@ def test_the_route_opens_a_chat_with_the_chat_prompt(monkeypatch):
 def test_the_route_answers_404_when_claude_desktop_is_not_installed(monkeypatch):
     monkeypatch.setattr(claude_desktop, "is_installed", lambda: False)
     monkeypatch.setattr(claude_desktop, "open_chat", pytest.fail)
-    r = client().post("/api/issues/id-ENG-1/claude-desktop")
+    c = client()
+    c.get("/api/meta")
+    r = c.post("/api/issues/id-ENG-1/claude-desktop")
     assert r.status_code == 404 and r.json() == {"error": "Claude Desktop is not installed."}
 
 
@@ -87,7 +91,9 @@ def test_a_link_that_fails_is_a_502(monkeypatch):
 
     monkeypatch.setattr(claude_desktop, "is_installed", lambda: True)
     monkeypatch.setattr(claude_desktop, "open_chat", fail)
-    r = client().post("/api/issues/id-ENG-1/claude-desktop")
+    c = client()
+    c.get("/api/meta")
+    r = c.post("/api/issues/id-ENG-1/claude-desktop")
     assert r.status_code == 502 and r.json() == {"error": "Could not open Claude Desktop."}
 
 

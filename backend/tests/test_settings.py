@@ -211,7 +211,7 @@ def test_a_start_key_that_is_not_a_dict_does_not_block_a_save(tmp_home):
 
 
 def test_a_repo_path_in_a_worktree_adds_nothing_new(git_repo):
-    path, _, _ = claude_code.worktree_for(str(git_repo), "me/eng-1")
+    path, _, _ = claude_code.find_or_add_worktree(str(git_repo), "me/eng-1")
     client, settings, _ = client_for()
     assert client.post("/api/settings/repos", json={"path": str(git_repo)}).status_code == 200
     assert client.post("/api/settings/repos", json={"path": path}).status_code == 200

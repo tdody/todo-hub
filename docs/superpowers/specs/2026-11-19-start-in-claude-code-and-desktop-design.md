@@ -153,7 +153,6 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 - `fill_prompt(template, issue)`, unchanged.
 - `claude_name(settings, issue)`: the Haiku name. It was `pane_name`. The name now also names a Claude Code session, not only a periscope pane.
 - `default_repo(db, issue, repos)` and `remember_repo(db, issue, repo)`, unchanged. Their meta keys become `start_repos` and `start_last_repo`. The old `periscope_repos` and `periscope_last_repo` are not copied: you pick the repo again one time for each project.
-- `session_comment(started, email, session_id)`: the comment text, now used by two routes.
 - `StartError(message)`: a start that cannot go on. The routes give it as a 502 with its message.
 
 **`backend/src/todohub/periscope.py`**: only `Periscope`, `PeriscopeError` and `bring_to_front`.
@@ -163,8 +162,8 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 - `tilde(path)`: the path with the home folder shown as `~`, for labels and messages.
 - `repo_top(path) -> str | None`: the absolute top folder of the repo, or None when the path is in no repo or is not absolute. A path in a linked worktree gives the main repo.
 - `worktrees(repo) -> {branch: path}`: from `git worktree list --porcelain`.
-- `worktree_for(repo, branch) -> (path, reused, warnings)`: the steps in "After Start".
-- `start_command(settings, name, session_id, prompt) -> list[str]`: `claude` by its absolute path, with `--name`, `--session-id`, `--` and the prompt.
+- `find_or_add_worktree(repo, branch) -> (path, reused, warnings)`: the steps in "After Start".
+- `start_command(settings, name, session_id, prompt) -> list[str]`: `claude` found on the PATH that the sweeps use (else the bare `claude_path`), with `--name`, `--session-id`, `--` and the prompt.
 - `write_script(folder, identifier, worktree, command) -> Path`: the `.command` file, mode 700.
 - `open_script(path)`: runs `open`.
 - `account_email(settings) -> str | None`: `claude auth status --json`, 15 s.
@@ -184,6 +183,7 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 
 **`backend/src/todohub/api.py`**
 
+- `add_session_comment(issue, email, session_id)`: builds the session comment and adds it to the issue. Both start routes use it. A comment that Linear refuses gives a warning.
 - `GET /api/issues/{issue_id}/claude-code` → `{repos: [{repo, label}], repo, hint, branch, branch_worktrees, prompt}`.
 - `POST /api/issues/{issue_id}/claude-code` with `{repo, branch, prompt}` → `{path, reused, session_id, warnings}`.
 - `POST /api/issues/{issue_id}/claude-desktop` → `{ok: true}`.
@@ -196,10 +196,10 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 **`app/src/periscope.ts` becomes `app/src/start.ts`**
 
 - The popover has a target: `periscope` or `claude-code`. The title, the wait text, the hints, the start call and the toast follow the target.
-- `startItems(i)` gives the menu items that are on. The Claude Desktop item calls its route and shows the toast.
+- `startItems(i, meta)` gives the menu items that are on. The Claude Desktop item calls its route and shows the toast.
 - The `.pp-*` classes and the `periscope-*` focus keys get `start` names.
 
-**`app/src/main.ts`**: the ⋯ menus call `startItems(i)`. The Settings page context gets `metaChanged`, which reads meta again after a repo is added or removed. **`app/src/api.ts`**: the new calls and types. **`app/src/settings.ts`**: the **Start Claude** section. **`app/src/styles.css`**: the renamed classes, and the repo rows.
+**`app/src/main.ts`**: the ⋯ menus call `startItems(i, meta)`. The Settings page context gets `metaChanged`, which reads meta again after a repo is added or removed. **`app/src/api.ts`**: the new calls and types. **`app/src/settings.ts`**: the **Start Claude** section. **`app/src/styles.css`**: the renamed classes, and the repo rows.
 
 **`README.md`**: a **Start in Claude Code** and **Start in Claude Desktop** part after "Start in periscope", the **Start Claude** section of the Settings page, and `settings.json`'s new key. `CHANGELOG.md` gets its entry when the next release is cut (`docs/releasing.md`).
 
@@ -207,7 +207,7 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 
 `backend/tests/test_claude_code.py`, on a temporary repo with a bare `origin`:
 
-- `worktree_for` uses a worktree that is already on the branch.
+- `find_or_add_worktree` uses a worktree that is already on the branch.
 - It adds one from a local branch, from `origin/<branch>`, and as a new branch from `origin/HEAD`.
 - With no `origin`, it warns and starts the new branch from `HEAD`.
 - The worktree path is `<repo>-worktrees/<branch with - for />`.
