@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
-from . import claude_code, logos, mutes, pulls, schedule, stats, summary, tools
+from . import claude_code, claude_desktop, logos, mutes, pulls, schedule, stats, summary, tools
 from .categories import categorize
 from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST,
                      SCHEDULE_LAST, SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides,
@@ -381,6 +381,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "done_state": (done_status(m.states) or {}).get("name"),
             "periscope": settings.periscope_on,
             "claude_code": settings.claude_code_on,
+            "claude_desktop": claude_desktop.is_installed(),
         }
 
     @app.get("/api/daylight", dependencies=auth)
@@ -1095,6 +1096,21 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         remember_repo(db, issue, body.repo)
         warnings += add_session_comment(issue, claude_code.account_email(settings), session_id)
         return {"path": path, "reused": reused, "session_id": session_id, "warnings": warnings}
+
+    # ---- Start in Claude Desktop --------------------------------------------------------------
+    def require_claude_desktop() -> None:
+        if not claude_desktop.is_installed():
+            raise HTTPException(404, "Claude Desktop is not installed.")
+
+    @app.post("/api/issues/{issue_id}/claude-desktop", dependencies=[*auth, Depends(require_claude_desktop)])
+    def claude_desktop_start(issue_id: str) -> dict:
+        """Open a new Claude Desktop chat with the chat prompt, filled in for the issue, in its message box."""
+        issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
+        try:
+            claude_desktop.open_chat(fill_prompt(settings.chat_prompt, issue))
+        except StartError as exc:
+            raise HTTPException(502, str(exc))
+        return {"ok": True}
 
     @app.get("/api/slips", dependencies=auth)
     def slips(refresh: bool = False) -> dict:
