@@ -121,8 +121,8 @@ def home() -> Path:
     return Path.home() / ".todohub"
 
 
-# What Start in periscope and Start in Claude Code tell the new Claude, and what Start in Claude Desktop puts in a
-# new chat. {identifier}, {title} and {url} become the issue's.
+# Start in periscope and Start in Claude Code send the code prompt. Start in Claude Desktop puts the chat prompt in
+# a new chat. {identifier}, {title} and {url} become the issue's.
 DEFAULT_CODE_PROMPT = (
     "Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. "
     "Sum up the ask, then propose a plan. Do not change code until I agree."

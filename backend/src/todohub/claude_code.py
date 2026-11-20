@@ -35,12 +35,16 @@ def _git(repo: str, *args: str, timeout: int = QUICK_SECONDS) -> subprocess.Comp
 
 def repo_top(path: str) -> str | None:
     """The absolute top folder of the git repo that ``path`` (``~`` allowed) is in, or None.
-    A path that is not absolute gives None: it would mean the folder the backend runs in."""
+    A path in a linked worktree gives the main repo. A submodule gives itself.
+    Git reads a path that is not absolute from the folder the backend runs in, so it gives None."""
     folder = Path(path).expanduser()
     if not folder.is_absolute():
         return None
-    proc = _git(str(folder), "rev-parse", "--show-toplevel")
-    return proc.stdout.strip() if proc.returncode == 0 else None
+    proc = _git(str(folder), "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir")
+    if proc.returncode != 0:
+        return None
+    top, common = proc.stdout.splitlines()
+    return str(Path(common).parent) if Path(common).name == ".git" else top
 
 
 def worktrees(repo: str) -> dict[str, str]:

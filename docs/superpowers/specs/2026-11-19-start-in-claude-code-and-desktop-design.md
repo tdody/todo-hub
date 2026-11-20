@@ -114,7 +114,7 @@ The **Periscope** section becomes **Start Claude**. It always shows, so the page
 > **Chat prompt** — Start in Claude Desktop puts it in a new chat.
 > `[text area]` **Save** · **Reset to default**
 
-- **+ Add** takes a path, such as `~/code/api`. todo-hub runs `git -C <path> rev-parse --show-toplevel` and saves that absolute top folder. A path in no git repo shows "Not a git repo: ~/foo" under the field. A repo that is already on the list is not added again.
+- **+ Add** takes a path, such as `~/code/api`. todo-hub asks git for the top folder of the repo that the path is in and saves that absolute folder. A path inside a linked worktree saves its main repo. A path in no git repo shows "Not a git repo: ~/foo" under the field. A repo that is already on the list is not added again.
 - With an empty list, a hint says "Add a repo to turn on Start in Claude Code."
 - **The code prompt** default is the periscope default, unchanged:
 
@@ -161,7 +161,7 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 **New `backend/src/todohub/claude_code.py`**
 
 - `tilde(path)`: the path with the home folder shown as `~`, for labels and messages.
-- `repo_top(path) -> str | None`: `git rev-parse --show-toplevel`, or None when the path is in no repo.
+- `repo_top(path) -> str | None`: the absolute top folder of the repo, or None when the path is in no repo or is not absolute. A path in a linked worktree gives the main repo.
 - `worktrees(repo) -> {branch: path}`: from `git worktree list --porcelain`.
 - `worktree_for(repo, branch) -> (path, reused, warnings)`: the steps in "After Start".
 - `start_command(settings, name, session_id, prompt) -> list[str]`: `claude` by its absolute path, with `--name`, `--session-id`, `--` and the prompt.

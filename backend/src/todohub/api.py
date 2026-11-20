@@ -29,9 +29,8 @@ from . import capture as capture_mod
 from . import claude_code, logos, mutes, pulls, schedule, stats, summary, tools
 from .categories import categorize
 from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST,
-                     SCHEDULE_LAST,
-                     SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides, source_state,
-                     write_overrides)
+                     SCHEDULE_LAST, SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides,
+                     source_state, write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
 from .periscope import Periscope, PeriscopeError, bring_to_front
@@ -400,7 +399,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     def save_override(section: str, value) -> None:
         data = read_overrides()
-        if isinstance(value, dict) and isinstance(data.get(section), dict) and section == "sources":
+        if isinstance(value, dict) and isinstance(data.get(section), dict) and section in ("sources", "start"):
             data[section] = {**data[section], **value}
         else:
             data[section] = value
@@ -466,16 +465,14 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         save_override("daylight", body.model_dump())
         return settings_body()
 
-    def save_start(**changes) -> None:
-        save_override("start", {**(read_overrides().get("start") or {}), **changes})
-
     @app.put("/api/settings/prompts/{kind}", dependencies=auth)
     def set_prompt(kind: Literal["code", "chat"], body: PromptIn) -> dict:
-        """The code prompt (periscope and Claude Code) or the chat prompt (Claude Desktop); empty is the default."""
+        """Save the code prompt (periscope and Claude Code) or the chat prompt (Claude Desktop).
+        An empty prompt goes back to the default."""
         prompt = body.prompt.strip()
         if kind == "chat" and prompt.startswith("/"):
             raise HTTPException(400, "The chat prompt cannot start with /.")    # Claude Desktop refuses that link
-        save_start(**{f"{kind}_prompt": prompt})
+        save_override("start", {f"{kind}_prompt": prompt})
         return settings_body()
 
     @app.post("/api/settings/repos", dependencies=auth)
@@ -484,14 +481,14 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         path = body.path.strip()
         top = claude_code.repo_top(path)
         if top is None:
-            raise HTTPException(400, f"Not a git repo: {path}")
+            raise HTTPException(400, f"Not a git repo: {claude_code.tilde(path)}")
         if top not in settings.repos:
-            save_start(repos=[*settings.repos, top])
+            save_override("start", {"repos": [*settings.repos, top]})
         return settings_body()
 
     @app.delete("/api/settings/repos", dependencies=auth)
     def remove_repo(repo: str) -> dict:
-        save_start(repos=[r for r in settings.repos if r != repo])
+        save_override("start", {"repos": [r for r in settings.repos if r != repo]})
         return settings_body()
 
     # ---- review queue -----------------------------------------------------------------

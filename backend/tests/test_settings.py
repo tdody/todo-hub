@@ -200,3 +200,20 @@ def test_a_blank_repo_path_is_not_the_folder_the_backend_runs_in(git_repo, monke
     r = client.post("/api/settings/repos", json={"path": "   "})
     assert r.status_code == 400 and r.json() == {"error": "Not a git repo: "}
     assert settings.repos == []
+
+
+def test_a_start_key_that_is_not_a_dict_does_not_block_a_save(tmp_home):
+    tmp_home.mkdir(parents=True, exist_ok=True)
+    (tmp_home / "settings.json").write_text('{"start": "x"}')
+    client, _, _ = client_for()
+    r = client.put("/api/settings/prompts/code", json={"prompt": "Read {identifier}."})
+    assert r.status_code == 200 and r.json()["start"]["code_prompt"] == "Read {identifier}."
+
+
+def test_a_repo_path_in_a_worktree_adds_nothing_new(git_repo, monkeypatch):
+    from todohub import claude_code
+    path, _, _ = claude_code.worktree_for(str(git_repo), "me/eng-1")
+    client, settings, _ = client_for()
+    client.post("/api/settings/repos", json={"path": str(git_repo)})
+    client.post("/api/settings/repos", json={"path": path})
+    assert settings.repos == [str(git_repo)]

@@ -42,6 +42,15 @@ def test_repo_top_is_none_outside_a_repo(tmp_path):
     assert claude_code.repo_top(str(tmp_path / "nothing")) is None
 
 
+def test_repo_top_of_a_worktree_is_the_main_repo(git_repo):
+    (git_repo / "src").mkdir()
+    path, _, _ = claude_code.worktree_for(str(git_repo), "me/eng-1")
+    (Path(path) / "src").mkdir()
+    assert claude_code.repo_top(path) == str(git_repo)
+    assert claude_code.repo_top(str(Path(path) / "src")) == str(git_repo)
+    assert claude_code.repo_top(str(git_repo / "src")) == str(git_repo)
+
+
 def test_repo_top_is_none_for_a_path_that_is_not_absolute(git_repo, monkeypatch):
     monkeypatch.chdir(git_repo.parent)
     assert claude_code.repo_top("api") is None
