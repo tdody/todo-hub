@@ -432,7 +432,7 @@ Flat by default. Depth comes from three tonal steps (Desk, Paper, Shaded Paper) 
 - **Selected row** (`box-shadow: 0 1px 3px rgba(27, 35, 48, 0.06)`): the selected item in a list, with a border tinted 35% toward the accent.
 - **Menu** (`box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14)`): drop, snooze, pill and type menus.
 - **Toast** (`box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18)`): Undo toasts at the bottom center.
-- **Popover** (`box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18)`): the balance popover, the sources popover and the Start in periscope popover.
+- **Popover** (`box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18)`): the balance popover, the sources popover and the start popover (Start in periscope and Start in Claude Code).
 - **Dialog** (`box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3)`): dialogs, over a 45% dark scrim.
 - **Ring** (`box-shadow: 0 0 0 1px var(--accent)`): the focused Inbox card; green or red for approved and dropped cards.
 
