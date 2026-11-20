@@ -247,6 +247,8 @@ export interface Meta {
   todo_state: string | null;      // the status a new or reopened sub-issue gets; null if the team has none
   done_state: string | null;      // the completed status Mark done and a ticked sub-issue get; null if the team has none
   periscope: boolean;             // app.periscope_url is set: Start in periscope is on
+  claude_code: boolean;           // Settings lists a repo: Start in Claude Code is on
+  claude_desktop: boolean;        // Claude Desktop is installed: Start in Claude Desktop is on
 }
 
 export interface SourceStatus {
@@ -310,12 +312,21 @@ export interface AppSettings {
   sources: SettingsSource[];
   schedule: Schedule;
   daylight: { place: string; latitude: number | null; longitude: number | null };
-  periscope: { enabled: boolean; prompt: string; default_prompt: string };
+  start: StartSettings;
 }
 
-/** Start in periscope: what the popover shows first. */
-export interface PeriscopeOptions {
-  repos: { repo: string; label: string }[];   // periscope's repos
+/** Settings → Start Claude: Start in Claude Code's repos, and the prompts. */
+export interface StartSettings {
+  repos: { repo: string; label: string }[];   // absolute top folders; the label shows ~
+  code_prompt: string;                        // Start in periscope and Start in Claude Code
+  chat_prompt: string;                        // Start in Claude Desktop
+  default_code_prompt: string;
+  default_chat_prompt: string;
+}
+
+/** Start in periscope and Start in Claude Code: what the popover shows first. */
+export interface StartOptions {
+  repos: { repo: string; label: string }[];   // periscope's repos, or the Settings repos
   repo: string | null;                          // the one to select first
   hint: string;                                 // why: "Remembered for Pipelines.", or ""
   branch: string;                               // Linear's branch name
@@ -327,6 +338,13 @@ export interface PeriscopeStart {
   mode: "spawned" | "existing";                 // existing: a Claude was already on the branch
   pid: string;                                  // periscope always gives the pane's id
   warnings: string[];                           // why the session comment was not added; usually empty
+}
+
+export interface ClaudeCodeStart {
+  path: string;                                 // the worktree
+  reused: boolean;                              // it was already on the branch
+  session_id: string;
+  warnings: string[];                           // a fetch that failed, a comment Linear refused; usually empty
 }
 
 export interface RateCell {
@@ -553,10 +571,16 @@ export const api = {
   replyDraft: (id: number, body: string) => call<{ url: string | null }>("POST", `/api/candidates/${id}/reply-draft`, { body }),
   issuePreview: (ident: string) => call<IssuePreview>("GET", `/api/issues/${encodeURIComponent(ident)}/preview`),
   periscopeOptions: (issueId: string) =>
-    call<PeriscopeOptions>("GET", `/api/issues/${encodeURIComponent(issueId)}/periscope`),
+    call<StartOptions>("GET", `/api/issues/${encodeURIComponent(issueId)}/periscope`),
   startInPeriscope: (issueId: string, body: { repo: string; branch: string; prompt: string }) =>
     call<PeriscopeStart>("POST", `/api/issues/${encodeURIComponent(issueId)}/periscope`, body),
   showInPeriscope: (pid: string) => call<{ ok: boolean }>("POST", "/api/periscope/show", { pid }),
+  claudeCodeOptions: (issueId: string) =>
+    call<StartOptions>("GET", `/api/issues/${encodeURIComponent(issueId)}/claude-code`),
+  startInClaudeCode: (issueId: string, body: { repo: string; branch: string; prompt: string }) =>
+    call<ClaudeCodeStart>("POST", `/api/issues/${encodeURIComponent(issueId)}/claude-code`, body),
+  startInClaudeDesktop: (issueId: string) =>
+    call<{ ok: boolean }>("POST", `/api/issues/${encodeURIComponent(issueId)}/claude-desktop`),
   mutes: () => call<MuteRule[]>("GET", "/api/mutes"),
   /** Mute a sender, channel or repo; with dropPending, cards already waiting from it are dropped too. */
   addMute: (key: MuteKey, dropPending = true) =>
@@ -571,7 +595,9 @@ export const api = {
   setSchedule: (s: Pick<Schedule, "every" | "start" | "end" | "days">) => call<AppSettings>("PUT", "/api/settings/schedule", s),
   installSchedule: () => call<AppSettings>("POST", "/api/settings/schedule/install"),
   setDaylightPlace: (d: AppSettings["daylight"]) => call<AppSettings>("PUT", "/api/settings/daylight", d),
-  setPeriscopePrompt: (prompt: string) => call<AppSettings>("PUT", "/api/settings/periscope", { prompt }),
+  setPrompt: (kind: "code" | "chat", prompt: string) => call<AppSettings>("PUT", `/api/settings/prompts/${kind}`, { prompt }),
+  addRepo: (path: string) => call<AppSettings>("POST", "/api/settings/repos", { path }),
+  removeRepo: (repo: string) => call<AppSettings>("DELETE", `/api/settings/repos?repo=${encodeURIComponent(repo)}`),
   daylight: () => call<{ location: { lat: number; lon: number; place: string } | null }>("GET", "/api/daylight"),
   recheck: () => call<{ flagged: number }>("POST", "/api/candidates/recheck"),
   keep: (id: number) => call<Candidate>("POST", `/api/candidates/${id}/keep`),

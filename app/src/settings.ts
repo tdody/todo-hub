@@ -1,5 +1,5 @@
 // The Settings page: the style TodoHub opens with, the sources the sweep reads (add, pause,
-// remove, check now), when the sweep runs on its own, and the prompt that Start in periscope sends.
+// remove, check now), when the sweep runs on its own, and how the ⋯ menu's start items start Claude.
 // Choices are saved by the backend in settings.json in the TodoHub folder and apply at once; nothing
 // here can send anything.
 import { api, ApiError } from "./api";
@@ -16,6 +16,7 @@ export interface SettingsCtx {
   runNow: (source?: Source) => void;
   running: () => boolean;
   toast: (message: string) => void;
+  metaChanged: () => void;           // a repo was added or removed: the ⋯ menus follow
   fail: (e: unknown) => void;
   when: (iso: string | null) => string;   // "10:02", "Fri 9:14"
 }
@@ -73,7 +74,7 @@ export function settingsView(ctx: SettingsCtx): HTMLElement {
     ["appearance", "Appearance", () => appearance(ctx)],
     ["sources", "Sources", () => sources(data!, ctx)],
     ["schedule", "Schedule", () => scheduleSection(data!.schedule, ctx)],
-    ...(data.periscope.enabled ? [["periscope", "Periscope", () => periscopeSection(ctx)] as [string, string, () => HTMLElement]] : []),
+    ["start", "Start Claude", () => startSection(ctx)],
     ["updates", "Updates", () => updatesSection(ctx)],
   ];
   const toc = h("nav", { class: "set-toc", "aria-label": "Settings sections" },
@@ -93,7 +94,7 @@ export function settingsView(ctx: SettingsCtx): HTMLElement {
 function sectionIcon(id: string): Node {
   if (id === "appearance") return themeIcon("system");     // not the sun: that's Today
   return h("span", { class: "set-ico", "aria-hidden": "true" },
-    id === "sources" ? "⇄" : id === "periscope" ? "↗" : id === "updates" ? "↑" : "◷");
+    id === "sources" ? "⇄" : id === "start" ? "↗" : id === "updates" ? "↑" : "◷");
 }
 
 function card(id: string, title: string, hint: string, right: Node | "", ...body: (Node | string)[]): HTMLElement {
@@ -296,21 +297,80 @@ function scheduleSection(s: Schedule, ctx: SettingsCtx): HTMLElement {
     ...notes.map((n) => h("p", { class: "set-sub set-note" }, n)));
 }
 
-// ---- periscope ----------------------------------------------------------------------------------
-function periscopeSection(ctx: SettingsCtx): HTMLElement {
-  const p = data!.periscope;
-  const box = h("textarea", { class: "set-input set-prompt", rows: 4, value: p.prompt, "aria-label": "Prompt" });
+// ---- start claude -------------------------------------------------------------------------------
+let repoPath = "";                   // the + Add field's text, kept across re-renders
+let repoError = "";                  // why the last + Add failed, shown under the field
+
+async function addRepo(ctx: SettingsCtx) {
+  if (!repoPath.trim() || busy) return;
+  busy = "repo-add";
+  repoError = "";
+  ctx.rerender();
+  try {
+    data = await api.addRepo(repoPath.trim());
+    repoPath = "";
+    ctx.metaChanged();
+  } catch (e) {
+    repoError = e instanceof ApiError ? e.message : String(e);
+  } finally {
+    busy = "";
+    ctx.rerender();
+  }
+}
+
+function removeRepo(r: { repo: string; label: string }, ctx: SettingsCtx) {
+  void save(`repo-${r.repo}`, ctx, async () => {
+    const s = await api.removeRepo(r.repo);
+    ctx.metaChanged();
+    return s;
+  }, `${r.label} removed`);
+}
+
+function promptField(kind: "code" | "chat", title: string, hint: string, ctx: SettingsCtx): HTMLElement {
+  const s = data!.start;
+  const [value, fallback] = kind === "code" ? [s.code_prompt, s.default_code_prompt] : [s.chat_prompt, s.default_chat_prompt];
+  const key = `prompt-${kind}`;
+  const box = h("textarea", { class: "set-input set-prompt", rows: 4, value, "aria-label": title });
   const saveBtn = h("button", {
-    type: "button", class: "ghost small-btn", disabled: busy === "periscope",
-    onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompt(box.value), "Prompt saved"),
-  }, busy === "periscope" ? "Saving…" : "Save");
-  const reset = p.prompt !== p.default_prompt ? h("button", {
+    type: "button", class: "ghost small-btn", disabled: busy === key,
+    onclick: () => void save(key, ctx, () => api.setPrompt(kind, box.value), `${title} saved`),
+  }, busy === key ? "Saving…" : "Save");
+  const reset = value !== fallback ? h("button", {
     type: "button", class: "link-btn small",
-    onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompt(""), "Prompt back to the default"),
+    onclick: () => void save(key, ctx, () => api.setPrompt(kind, ""), `${title} back to the default`),
   }, "Reset to default") : "";
-  return card("periscope", "Periscope",
-    "Start in periscope (⋯ or p on an issue) sends this prompt to the new Claude. {identifier}, {title} and {url} become the issue's.",
-    "", box, h("div", { class: "set-row-inline" }, saveBtn, reset));
+  return h("div", { class: "set-start-part" },
+    h("div", { class: "set-label" }, title), h("p", { class: "set-sub" }, hint),
+    box, h("div", { class: "set-row-inline" }, saveBtn, reset));
+}
+
+function startSection(ctx: SettingsCtx): HTMLElement {
+  const s = data!.start;
+  const field = h("input", {
+    type: "text", class: "set-input set-repo-field", value: repoPath, placeholder: "~/code/api",
+    "aria-label": "Path to a repo",
+    oninput: (e: Event) => { repoPath = (e.target as HTMLInputElement).value; },
+    onkeydown: (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); void addRepo(ctx); }
+    },
+  });
+  const rows = s.repos.map((r) => h("div", { class: "set-repo" },
+    h("span", { class: "set-repo-path" }, r.label),
+    h("button", { type: "button", class: "link-btn danger-link set-remove", disabled: busy === `repo-${r.repo}`,
+      "aria-label": `Remove ${r.label}`, onclick: () => removeRepo(r, ctx) }, "Remove")));
+  return card("start", "Start Claude",
+    "How the ⋯ menu's start items start Claude on an issue. In the prompts, {identifier}, {title} and {url} become the issue's.",
+    "",
+    h("div", { class: "set-start-part" },
+      h("div", { class: "set-label" }, "Repos"),
+      h("p", { class: "set-sub" }, s.repos.length ? "Start in Claude Code picks from these." : "Add a repo to turn on Start in Claude Code."),
+      rows.length ? h("div", { class: "set-repo-list" }, ...rows) : "",
+      h("div", { class: "set-row-inline" }, field,
+        h("button", { type: "button", class: "ghost small-btn", disabled: busy === "repo-add", onclick: () => void addRepo(ctx) },
+          busy === "repo-add" ? "Adding…" : "+ Add")),
+      repoError ? h("p", { class: "set-sub bad" }, repoError) : ""),
+    promptField("code", "Code prompt", "Start in periscope and Start in Claude Code send it to the new Claude.", ctx),
+    promptField("chat", "Chat prompt", "Start in Claude Desktop puts it in a new chat. It cannot start with /.", ctx));
 }
 
 // ---- updates ------------------------------------------------------------------------------------

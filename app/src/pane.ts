@@ -72,7 +72,7 @@ interface PaneSnapshot {
   edit: string | null; start: number | null; end: number | null; focus: string | null; ident: string | null; scroll: number;
 }
 
-// A control with data-focus (a sub-issue tick box, the periscope popover's select and buttons) keeps
+// A control with data-focus (a sub-issue tick box, the start popover's select and buttons) keeps
 // the focus across a re-render. One rebuilt disabled (its save or start in flight) gets it back from
 // the first re-render that shows it enabled, unless you moved on.
 let focusToRestore: string | null = null;
