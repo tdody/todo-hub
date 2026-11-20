@@ -3405,7 +3405,7 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
 }
 
 setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, doneStatus, todoStatus, state });
-setupStart({ render, toast: (m, a) => void toast(m, a, false, 9000), fail });   // 9 s for Show, like Undo
+setupStart({ render, toast: (m, a) => void toast(m, a, false, 9000), fail });   // 9 s, like Undo: time to click Show
 setupPulls({
   rerender: () => { if (state.tab === "pulls" && !editing()) render(); else renderHeader(); },
   toast: (m) => void toast(m),
@@ -3418,7 +3418,7 @@ const settingsCtx: SettingsCtx = {
   runNow: (source) => void runNow(source).then(() => settingsCtx.rerender()),
   running: () => state.run.status === "running",
   toast: (m) => void toast(m),
-  metaChanged: () => void api.meta().then((m) => { state.meta = m; }).catch(fail),
+  metaChanged: () => void api.meta().then((m) => { state.meta = m; if (state.tab !== "settings") render(); }).catch(fail),
   fail,
   when: (iso) => shortWhen(iso),
 };

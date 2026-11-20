@@ -1512,7 +1512,7 @@ details.more[open] > summary { margin-bottom: 10px; }
 .set-src-name small { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
 .set-src-acts { display: flex; gap: 14px; align-items: center; white-space: nowrap; }
 .set-src-acts .link-btn { font-size: 12px; }
-.set-src-acts .link-btn:disabled { color: var(--muted); opacity: .6; cursor: default; }
+.set-src-acts .link-btn:disabled, .set-repo .link-btn:disabled { color: var(--muted); opacity: .6; cursor: default; }
 .set-remove { opacity: 0; }
 .set-src:hover .set-remove, .set-repo:hover .set-remove, .set-remove:focus-visible { opacity: 1; }
 .danger-link { color: var(--bad) !important; }
@@ -1822,6 +1822,7 @@ textarea.start-input { resize: vertical; line-height: 1.5; }
 /* Settings → Start Claude: the repo rows, the + Add field and the two prompts. .set-label gives each part its top
    margin. */
 .set-start-part .set-sub { margin: 0 0 6px; }
+.set-start-part .set-sub.bad { margin-top: 6px; }
 .set-start-part .set-prompt { margin-bottom: 8px; }
 .set-repo-list { max-width: 640px; margin-bottom: 8px; }
 .set-repo { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px;

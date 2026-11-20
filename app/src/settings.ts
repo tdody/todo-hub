@@ -300,6 +300,7 @@ function scheduleSection(s: Schedule, ctx: SettingsCtx): HTMLElement {
 // ---- start claude -------------------------------------------------------------------------------
 let repoPath = "";                   // the + Add field's text, kept across re-renders
 let repoError = "";                  // why the last + Add failed, shown under the field
+const promptDrafts: Partial<Record<"code" | "chat", string>> = {};   // typed, not saved yet; kept across re-renders
 
 async function addRepo(ctx: SettingsCtx) {
   if (!repoPath.trim() || busy) return;
@@ -330,14 +331,25 @@ function promptField(kind: "code" | "chat", title: string, hint: string, ctx: Se
   const s = data!.start;
   const [value, fallback] = kind === "code" ? [s.code_prompt, s.default_code_prompt] : [s.chat_prompt, s.default_chat_prompt];
   const key = `prompt-${kind}`;
-  const box = h("textarea", { class: "set-input set-prompt", rows: 4, value, "aria-label": title });
+  const box = h("textarea", {
+    class: "set-input set-prompt", rows: 4, value: promptDrafts[kind] ?? value, "aria-label": title, "data-edit": key,
+    oninput: () => { promptDrafts[kind] = box.value; },
+  });
   const saveBtn = h("button", {
     type: "button", class: "ghost small-btn", disabled: busy === key,
-    onclick: () => void save(key, ctx, () => api.setPrompt(kind, box.value), `${title} saved`),
+    onclick: () => void save(key, ctx, async () => {
+      const saved = await api.setPrompt(kind, box.value);
+      delete promptDrafts[kind];
+      return saved;
+    }, `${title} saved`),
   }, busy === key ? "Saving…" : "Save");
   const reset = value !== fallback ? h("button", {
     type: "button", class: "link-btn small",
-    onclick: () => void save(key, ctx, () => api.setPrompt(kind, ""), `${title} back to the default`),
+    onclick: () => void save(key, ctx, async () => {
+      const saved = await api.setPrompt(kind, "");
+      delete promptDrafts[kind];
+      return saved;
+    }, `${title} back to the default`),
   }, "Reset to default") : "";
   return h("div", { class: "set-start-part" },
     h("div", { class: "set-label" }, title), h("p", { class: "set-sub" }, hint),
@@ -348,16 +360,18 @@ function startSection(ctx: SettingsCtx): HTMLElement {
   const s = data!.start;
   const field = h("input", {
     type: "text", class: "set-input set-repo-field", value: repoPath, placeholder: "~/code/api",
-    "aria-label": "Path to a repo",
+    "aria-label": "Path to a repo", "data-edit": "repo-path",
     oninput: (e: Event) => { repoPath = (e.target as HTMLInputElement).value; },
     onkeydown: (e: KeyboardEvent) => {
-      if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); void addRepo(ctx); }
+      // keyCode 229: WebKit's Enter that commits an IME composition, with isComposing false.
+      if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); void addRepo(ctx); }
     },
   });
   const rows = s.repos.map((r) => h("div", { class: "set-repo" },
     h("span", { class: "set-repo-path" }, r.label),
     h("button", { type: "button", class: "link-btn danger-link set-remove", disabled: busy === `repo-${r.repo}`,
-      "aria-label": `Remove ${r.label}`, onclick: () => removeRepo(r, ctx) }, "Remove")));
+      "aria-label": `Remove ${r.label}`, onclick: () => removeRepo(r, ctx) },
+      busy === `repo-${r.repo}` ? "Removing…" : "Remove")));
   return card("start", "Start Claude",
     "How the ⋯ menu's start items start Claude on an issue. In the prompts, {identifier}, {title} and {url} become the issue's.",
     "",
@@ -368,7 +382,7 @@ function startSection(ctx: SettingsCtx): HTMLElement {
       h("div", { class: "set-row-inline" }, field,
         h("button", { type: "button", class: "ghost small-btn", disabled: busy === "repo-add", onclick: () => void addRepo(ctx) },
           busy === "repo-add" ? "Adding…" : "+ Add")),
-      repoError ? h("p", { class: "set-sub bad" }, repoError) : ""),
+      repoError ? h("p", { class: "set-sub bad", role: "alert" }, repoError) : ""),
     promptField("code", "Code prompt", "Start in periscope and Start in Claude Code send it to the new Claude.", ctx),
     promptField("chat", "Chat prompt", "Start in Claude Desktop puts it in a new chat. It cannot start with /.", ctx));
 }

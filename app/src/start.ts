@@ -14,8 +14,6 @@ export interface StartCtx {
 
 type Target = "periscope" | "claude-code";
 
-const TARGET_NAME: Record<Target, string> = { periscope: "periscope", "claude-code": "Claude Code" };
-
 interface Popover {
   issueId: string;
   target: Target;
@@ -28,6 +26,7 @@ interface Popover {
 
 let ctx: StartCtx;
 let popover: Popover | null = null;
+const starting = new Set<string>();    // `${target}:${issueId}` while a start request runs, even if its popover is closed
 
 export function setupStart(c: StartCtx) {
   ctx = c;
@@ -80,28 +79,34 @@ export function startItems(i: Issue, meta: Meta | null): HTMLElement[] {
 }
 
 async function openChat(i: Issue) {
+  const key = `claude-desktop:${i.id}`;
+  if (starting.has(key)) return;
+  starting.add(key);
   try {
     await api.startInClaudeDesktop(i.id);
     ctx.toast(`Opened a chat for ${i.identifier} in Claude Desktop`);
   } catch (e) {
     ctx.fail(e);
+  } finally {
+    starting.delete(key);
   }
 }
 
 async function openFor(i: Issue, target: Target) {
   if (popover?.issueId === i.id && popover.target === target) return;
-  popover = { issueId: i.id, target, options: null, repo: "", branch: "", prompt: "", starting: false };
+  const mine: Popover = popover = { issueId: i.id, target, options: null, repo: "", branch: "", prompt: "",
+    starting: starting.has(`${target}:${i.id}`) };
   ctx.render();
   try {
     const o = await (target === "periscope" ? api.periscopeOptions(i.id) : api.claudeCodeOptions(i.id));
-    if (popover?.issueId !== i.id || popover.target !== target) return;     // closed, or opened again, meanwhile
-    popover = { ...popover, options: o, repo: o.repo ?? "", branch: o.branch, prompt: o.prompt };
+    if (popover !== mine) return;     // closed, or opened again, meanwhile
+    popover = { ...mine, options: o, repo: o.repo ?? "", branch: o.branch, prompt: o.prompt };
     ctx.render();
     const pop = document.querySelector<HTMLElement>(".start-pop");
     pop?.scrollIntoView({ block: "nearest" });
     pop?.querySelector<HTMLElement>(popover.repo ? ".start-go" : ".start-repo")?.focus();
   } catch (e) {
-    if (popover?.issueId === i.id && popover.target === target) closeStart();
+    if (popover === mine) closeStart();
     ctx.fail(e);
   }
 }
@@ -114,26 +119,33 @@ function canStart(p: Popover): boolean {
 async function start(i: Issue) {
   const p = popover;
   if (!p || p.issueId !== i.id || !canStart(p)) return;
+  const key = `${p.target}:${i.id}`;
+  if (starting.has(key)) return;
+  starting.add(key);
   p.starting = true;
   ctx.render();
   const body = { repo: p.repo, branch: p.branch, prompt: p.prompt };
+  // The popover can be closed, or opened again, while the request runs: act on the one that is open now.
+  const isOpen = () => popover?.issueId === i.id && popover.target === p.target;
   try {
     if (p.target === "periscope") {
       const r = await api.startInPeriscope(i.id, body);
-      if (popover === p) closeStart();
+      if (isOpen()) closeStart();
       ctx.toast(r.mode === "existing" ? `${i.identifier} is already open in periscope` : `Started ${i.identifier} in periscope`,
         { label: "Show", run: () => void api.showInPeriscope(r.pid).catch(ctx.fail) });
       for (const w of r.warnings) ctx.fail(w);
     } else {
       const r = await api.startInClaudeCode(i.id, body);
-      if (popover === p) closeStart();
+      if (isOpen()) closeStart();
       ctx.toast(`Started ${i.identifier} in Claude Code`);
       for (const w of r.warnings) ctx.fail(w);
     }
   } catch (e) {
     p.starting = false;
-    if (popover === p) ctx.render();
+    if (popover && isOpen()) { popover.starting = false; ctx.render(); }
     ctx.fail(e);
+  } finally {
+    starting.delete(key);
   }
 }
 
@@ -142,7 +154,7 @@ async function start(i: Issue) {
 export function startPopover(i: Issue): HTMLElement | "" {
   const p = popover;
   if (!p || p.issueId !== i.id) return "";
-  const label = `Start ${i.identifier} in ${TARGET_NAME[p.target]}`;
+  const label = `Start ${i.identifier} in ${p.target === "periscope" ? "periscope" : "Claude Code"}`;
   const o = p.options;
   if (!o) {
     return h("div", { class: "start-pop", role: "dialog", "aria-label": label },
@@ -158,7 +170,7 @@ export function startPopover(i: Issue): HTMLElement | "" {
   const startButton = h("button", { type: "button", class: "td-btn primary start-go", "data-focus": "start-go",
     onclick: () => void start(i) }, p.starting ? "Starting…" : "Start", h("kbd", {}, "↵"));
   const branchHint = h("p", { class: "start-hint" });
-  const fresh = p.target === "periscope" ? "A new worktree, or the one already on this branch."
+  const newWorktreeHint = p.target === "periscope" ? "A new worktree, or the one already on this branch."
     : "A new worktree next to the repo, or the one already on this branch.";
   // Typing does not re-render: Start and the branch's hint follow the fields here.
   const update = () => {
@@ -166,7 +178,7 @@ export function startPopover(i: Issue): HTMLElement | "" {
     const fromLinear = p.branch.trim() === o.branch;
     branchHint.textContent = fromLinear && o.branch_worktrees.includes(p.repo)
       ? "A worktree is already on this branch."
-      : `${fromLinear ? "From Linear. " : ""}${fresh}`;
+      : `${fromLinear ? "From Linear. " : ""}${newWorktreeHint}`;
   };
   update();
   // Read-only, not disabled, while starting: the field keeps the focus and the cursor.
