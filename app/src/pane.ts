@@ -77,8 +77,8 @@ interface PaneSnapshot {
 // the first re-render that shows it enabled, unless you moved on.
 let focusToRestore: string | null = null;
 
-/** Before a re-render: the pane field holding the cursor or the data-focus control with the focus,
- *  and how far the reading pane is scrolled. */
+/** Before a re-render: the data-edit field (a pane or Settings field) holding the cursor, or the
+ *  data-focus control with the focus, and how far the reading pane is scrolled. */
 function snapshotPane(): PaneSnapshot {
   const a = document.activeElement as HTMLInputElement | null;
   const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");

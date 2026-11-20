@@ -3418,7 +3418,7 @@ const settingsCtx: SettingsCtx = {
   runNow: (source) => void runNow(source).then(() => settingsCtx.rerender()),
   running: () => state.run.status === "running",
   toast: (m) => void toast(m),
-  metaChanged: () => void api.meta().then((m) => { state.meta = m; if (state.tab !== "settings") render(); }).catch(fail),
+  metaChanged: () => void api.meta().then((m) => { state.meta = m; if (state.tab !== "settings" && !editing()) render(); }).catch(fail),
   fail,
   when: (iso) => shortWhen(iso),
 };

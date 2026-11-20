@@ -26,7 +26,7 @@ interface Popover {
 
 let ctx: StartCtx;
 let popover: Popover | null = null;
-const starting = new Set<string>();    // `${target}:${issueId}` while a start request runs, even if its popover is closed
+const runningStarts = new Set<string>();    // `${target}:${issueId}` while a start request runs, even if its popover is closed
 
 export function setupStart(c: StartCtx) {
   ctx = c;
@@ -80,22 +80,22 @@ export function startItems(i: Issue, meta: Meta | null): HTMLElement[] {
 
 async function openChat(i: Issue) {
   const key = `claude-desktop:${i.id}`;
-  if (starting.has(key)) return;
-  starting.add(key);
+  if (runningStarts.has(key)) return;
+  runningStarts.add(key);
   try {
     await api.startInClaudeDesktop(i.id);
     ctx.toast(`Opened a chat for ${i.identifier} in Claude Desktop`);
   } catch (e) {
     ctx.fail(e);
   } finally {
-    starting.delete(key);
+    runningStarts.delete(key);
   }
 }
 
 async function openFor(i: Issue, target: Target) {
   if (popover?.issueId === i.id && popover.target === target) return;
   const mine: Popover = popover = { issueId: i.id, target, options: null, repo: "", branch: "", prompt: "",
-    starting: starting.has(`${target}:${i.id}`) };
+    starting: runningStarts.has(`${target}:${i.id}`) };
   ctx.render();
   try {
     const o = await (target === "periscope" ? api.periscopeOptions(i.id) : api.claudeCodeOptions(i.id));
@@ -120,8 +120,7 @@ async function start(i: Issue) {
   const p = popover;
   if (!p || p.issueId !== i.id || !canStart(p)) return;
   const key = `${p.target}:${i.id}`;
-  if (starting.has(key)) return;
-  starting.add(key);
+  runningStarts.add(key);
   p.starting = true;
   ctx.render();
   const body = { repo: p.repo, branch: p.branch, prompt: p.prompt };
@@ -141,11 +140,10 @@ async function start(i: Issue) {
       for (const w of r.warnings) ctx.fail(w);
     }
   } catch (e) {
-    p.starting = false;
     if (popover && isOpen()) { popover.starting = false; ctx.render(); }
     ctx.fail(e);
   } finally {
-    starting.delete(key);
+    runningStarts.delete(key);
   }
 }
 

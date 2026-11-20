@@ -332,7 +332,7 @@ function promptField(kind: "code" | "chat", title: string, hint: string, ctx: Se
   const [value, fallback] = kind === "code" ? [s.code_prompt, s.default_code_prompt] : [s.chat_prompt, s.default_chat_prompt];
   const key = `prompt-${kind}`;
   const box = h("textarea", {
-    class: "set-input set-prompt", rows: 4, value: promptDrafts[kind] ?? value, "aria-label": title, "data-edit": key,
+    class: "set-input set-prompt", rows: 4, value: promptDrafts[kind] ?? value, "aria-label": title, "data-edit": key, readOnly: busy === key,
     oninput: () => { promptDrafts[kind] = box.value; },
   });
   const saveBtn = h("button", {
@@ -361,7 +361,7 @@ function startSection(ctx: SettingsCtx): HTMLElement {
   const field = h("input", {
     type: "text", class: "set-input set-repo-field", value: repoPath, placeholder: "~/code/api",
     "aria-label": "Path to a repo", "data-edit": "repo-path",
-    oninput: (e: Event) => { repoPath = (e.target as HTMLInputElement).value; },
+    oninput: (e: Event) => { repoPath = (e.target as HTMLInputElement).value; repoError = ""; },
     onkeydown: (e: KeyboardEvent) => {
       // keyCode 229: WebKit's Enter that commits an IME composition, with isComposing false.
       if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); void addRepo(ctx); }
