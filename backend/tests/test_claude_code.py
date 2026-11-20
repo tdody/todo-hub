@@ -6,10 +6,17 @@ from pathlib import Path
 
 import pytest
 
+from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
+
 from todohub import claude_code
+from todohub.api import create_app
 from todohub.config import load_settings
-from todohub.start import StartError
-from conftest import git
+from todohub.db import DB
+from todohub.linear import LinearError
+from todohub.start import LAST_REPO_KEY, REPOS_KEY, StartError
+from conftest import FakeLinear, git
 
 
 def upstream(path: str) -> str | None:
@@ -231,3 +238,114 @@ def test_account_email_is_none_when_claude_is_slow(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", run)
     assert claude_code.account_email(load_settings()) is None
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    """The scripts the route opens. claude auth status gives you@example.com."""
+    scripts = []
+    monkeypatch.setattr(claude_code, "open_script", scripts.append)
+    monkeypatch.setattr(claude_code, "account_email", lambda settings: "you@example.com")
+    return scripts
+
+
+@pytest.fixture
+def env(git_repo, opened):
+    settings = load_settings()
+    settings.repos = [str(git_repo)]
+    db = DB(settings.db_path)
+    linear = FakeLinear()
+    app = create_app(settings, db, linear_factory=lambda: linear,
+                     name_fn=lambda issue: f"{issue['identifier'].lower()}-rebin")
+    return SimpleNamespace(client=TestClient(app), db=db, linear=linear, settings=settings, repo=git_repo,
+                           opened=opened, start={"repo": str(git_repo), "branch": " me/eng-1 ", "prompt": "Read ENG-1."})
+
+
+def test_options_fill_the_popover(env, monkeypatch):
+    monkeypatch.setenv("HOME", str(env.repo.parent))
+    git("worktree", "add", "-q", "-b", "me/eng-1", str(env.repo.parent / "other"), cwd=env.repo)
+    env.db.set_meta(REPOS_KEY, {"client:Globex": str(env.repo)})
+    r = env.client.get("/api/issues/id-ENG-1/claude-code")
+    assert r.status_code == 200
+    assert r.json() == {
+        "repos": [{"repo": str(env.repo), "label": "~/api"}],
+        "repo": str(env.repo),
+        "hint": "Remembered for Globex.",
+        "branch": "me/eng-1",
+        "branch_worktrees": [str(env.repo)],
+        "prompt": "Read Linear ticket ENG-1 (https://linear.app/x/issue/ENG-1) and its comments with the Linear "
+                  "tools. Sum up the ask, then propose a plan. Do not change code until I agree.",
+    }
+
+
+def test_start_makes_the_worktree_opens_the_script_and_records_the_session(env):
+    r = env.client.post("/api/issues/id-ENG-1/claude-code", json=env.start)
+    assert r.status_code == 200
+    out = r.json()
+    path = str(env.repo.parent / "api-worktrees" / "me-eng-1")
+    assert out == {"path": path, "reused": False, "session_id": out["session_id"], "warnings": []}
+    [script] = env.opened
+    assert script == env.settings.home / "start" / "ENG-1.command"
+    text = script.read_text()
+    assert f"cd {path} || exit 1" in text
+    assert f" --name eng-1-rebin --session-id {out['session_id']} -- 'Read ENG-1.'" in text
+    assert env.db.get_meta(REPOS_KEY) == {"client:Globex": str(env.repo)}
+    assert env.db.get_meta(LAST_REPO_KEY) == str(env.repo)
+    [(issue_id, body)] = env.linear.comments
+    assert issue_id == "id-ENG-1"
+    assert body.split("\n")[1:] == ["- Claude account: you@example.com", f"- Claude session: `{out['session_id']}`"]
+
+
+def test_a_second_start_uses_the_same_worktree(env):
+    env.client.post("/api/issues/id-ENG-1/claude-code", json=env.start)
+    r = env.client.post("/api/issues/id-ENG-1/claude-code", json=env.start)
+    assert r.json()["reused"] is True and len(env.opened) == 2
+
+
+def test_a_comment_that_fails_is_a_warning_not_an_error(env):
+    def refuse(issue_id, body):
+        raise LinearError("Can't reach Linear")
+
+    env.linear.create_comment = refuse
+    r = env.client.post("/api/issues/id-ENG-1/claude-code", json=env.start)
+    assert r.status_code == 200
+    assert r.json()["warnings"] == ["The Claude session was not added to ENG-1: Can't reach Linear"]
+
+
+def test_a_repo_not_on_the_settings_list_is_a_400(env):
+    r = env.client.post("/api/issues/id-ENG-1/claude-code", json={**env.start, "repo": "/elsewhere"})
+    assert r.status_code == 400 and r.json() == {"error": "Pick a repo from the Settings list."}
+    assert env.opened == []
+
+
+def test_a_start_that_git_refuses_is_a_502_and_nothing_opens(env):
+    taken = env.repo.parent / "api-worktrees" / "me-eng-1"
+    taken.mkdir(parents=True)
+    (taken / "notes.txt").write_text("mine")
+    r = env.client.post("/api/issues/id-ENG-1/claude-code", json=env.start)
+    assert r.status_code == 502 and "already exists" in r.json()["error"]
+    assert env.opened == [] and env.db.get_meta(LAST_REPO_KEY) is None and env.linear.comments == []
+
+
+def test_a_blank_branch_is_a_400(env):
+    r = env.client.post("/api/issues/id-ENG-1/claude-code", json={**env.start, "branch": "  "})
+    assert r.status_code == 400 and r.json() == {"error": "The branch is empty"}
+    assert env.opened == []
+
+
+def test_the_routes_answer_404_when_no_repo_is_set(opened):
+    settings = load_settings()
+    client = TestClient(create_app(settings, DB(settings.db_path), linear_factory=FakeLinear))
+    off = {"error": "Start in Claude Code is off. Add a repo on the Settings page."}
+    for r in (client.get("/api/issues/id-ENG-1/claude-code"),
+              client.post("/api/issues/id-ENG-1/claude-code", json={"repo": "/x", "branch": "b", "prompt": "p"})):
+        assert r.status_code == 404 and r.json() == off
+    assert opened == []
+
+
+def test_meta_says_whether_claude_code_is_on(git_repo):
+    for repos, expected in (([], False), ([str(git_repo)], True)):
+        settings = load_settings()
+        settings.repos = repos
+        app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear)
+        assert TestClient(app).get("/api/meta").json()["claude_code"] is expected

@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -36,7 +37,7 @@ from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_u
 from .periscope import Periscope, PeriscopeError, bring_to_front
 from .selfcmd import self_command
 from .sources import SourceError
-from .start import claude_name, default_repo, fill_prompt, remember_repo
+from .start import StartError, claude_name, default_repo, fill_prompt, remember_repo
 from .sweep import _env, next_working_day
 from .tools import ToolError
 
@@ -115,8 +116,8 @@ class RepoIn(BaseModel):
     path: str = Field(min_length=1, max_length=500)       # a folder in a git repo; ~ is allowed
 
 
-class PeriscopeStartIn(BaseModel):
-    repo: str = Field(min_length=1, max_length=500)       # a repo path from periscope's catalog
+class StartIn(BaseModel):
+    repo: str = Field(min_length=1, max_length=500)       # a repo path from periscope's catalog or the Settings list
     branch: str = Field(min_length=1, max_length=250)
     prompt: str = Field(min_length=1, max_length=8000)
 
@@ -379,6 +380,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "todo_state": (todo_status(m.states) or {}).get("name"),
             "done_state": (done_status(m.states) or {}).get("name"),
             "periscope": settings.periscope_on,
+            "claude_code": settings.claude_code_on,
         }
 
     @app.get("/api/daylight", dependencies=auth)
@@ -1017,7 +1019,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         }
 
     @app.post("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
-    def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
+    def periscope_start(issue_id: str, body: StartIn) -> dict:
         """Ask periscope to start Claude on the branch with the prompt and a name from Haiku, then remember the
         repo for the issue's project (or client). A Claude already on the branch is answered as mode "existing".
         A new Claude's session goes into a comment on the issue; a comment that fails is a warning."""
@@ -1049,6 +1051,49 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
         periscope_call(select_then_front)
         return {"ok": True}
+
+    # ---- Start in Claude Code -----------------------------------------------------------------
+    def require_claude_code() -> None:
+        if not settings.claude_code_on:
+            raise HTTPException(404, "Start in Claude Code is off. Add a repo on the Settings page.")
+
+    claude_code_auth = [*auth, Depends(require_claude_code)]
+
+    @app.get("/api/issues/{issue_id}/claude-code", dependencies=claude_code_auth)
+    def claude_code_options(issue_id: str) -> dict:
+        """What the popover shows first: the Settings repos, the one to select and why, Linear's branch, the
+        repos with a worktree already on it, and the code prompt filled in for the issue."""
+        raw = linear_call(lambda l: l.get_issue(issue_id))
+        issue = shape_issue(raw, settings)
+        repo, hint = default_repo(db, issue, settings.repos)
+        branch = raw["branchName"]
+        return {
+            "repos": repo_labels(), "repo": repo, "hint": hint, "branch": branch,
+            "branch_worktrees": [r for r in settings.repos if branch in claude_code.worktrees(r)],
+            "prompt": fill_prompt(settings.code_prompt, issue),
+        }
+
+    @app.post("/api/issues/{issue_id}/claude-code", dependencies=claude_code_auth)
+    def claude_code_start(issue_id: str, body: StartIn) -> dict:
+        """Find or make the worktree on the branch, then open a script that starts Claude Code there with the
+        prompt and a name from Haiku. The new session goes into a comment on the issue."""
+        branch = body.branch.strip()
+        if not branch:
+            raise HTTPException(400, "The branch is empty")
+        if body.repo not in settings.repos:       # git and the script run only in a repo you listed
+            raise HTTPException(400, "Pick a repo from the Settings list.")
+        issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
+        session_id = str(uuid.uuid4())
+        try:
+            path, reused, warnings = claude_code.worktree_for(body.repo, branch)
+            command = claude_code.start_command(settings, name_claude(issue), session_id, body.prompt)
+            claude_code.open_script(claude_code.write_script(settings.home / "start", issue["identifier"], path,
+                                                             command))
+        except StartError as exc:
+            raise HTTPException(502, str(exc))
+        remember_repo(db, issue, body.repo)
+        warnings += add_session_comment(issue, claude_code.account_email(settings), session_id)
+        return {"path": path, "reused": reused, "session_id": session_id, "warnings": warnings}
 
     @app.get("/api/slips", dependencies=auth)
     def slips(refresh: bool = False) -> dict:
