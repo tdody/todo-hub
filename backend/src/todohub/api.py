@@ -305,6 +305,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             if refresh or cache["meta"] is None or time.time() - cache["at"] > META_TTL_SECONDS:
                 cache["meta"] = linear_call(lambda l: l.team_meta(settings.team_key, settings.client_label_group))
                 cache["at"] = time.time()
+                cache["claude_desktop"] = claude_desktop.is_installed()
                 db.set_meta("client_labels", [l["name"] for l in cache["meta"].client_labels])
                 db.set_meta("projects", [p["name"] for p in cache["meta"].projects])
             return cache["meta"]
@@ -381,7 +382,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "done_state": (done_status(m.states) or {}).get("name"),
             "periscope": settings.periscope_on,
             "claude_code": settings.claude_code_on,
-            "claude_desktop": claude_desktop.is_installed(),
+            "claude_desktop": cache["claude_desktop"],
         }
 
     @app.get("/api/daylight", dependencies=auth)

@@ -39,7 +39,7 @@ The ⋯ menu of the Today pane and of the Client and Dev pane has these items, i
 4. **Start in Claude Desktop**, when Claude Desktop is installed
 5. Remove from Today, Delete… (as now)
 
-The app reads `periscope`, `claude_code` and `claude_desktop` from `GET /api/meta`. It reads meta at most every 10 minutes and on ⌘R. When you add or remove a repo on the Settings page, the app reads meta again, so Start in Claude Code shows or goes at once. After you install Claude Desktop, ⌘R shows its item.
+The app reads `periscope`, `claude_code` and `claude_desktop` from `GET /api/meta`. The app reads meta on load, on each window focus and on ⌘R. The backend checks for Claude Desktop with the Linear part of meta, at most every 10 minutes and on ⌘R. When you add or remove a repo on the Settings page, the app reads meta again, so Start in Claude Code shows or goes at once. After you install Claude Desktop, its item shows within 10 minutes or after ⌘R.
 
 ### Start in Claude Code: the popover
 

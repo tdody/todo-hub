@@ -75,6 +75,7 @@ def test_the_route_opens_a_chat_with_the_chat_prompt(monkeypatch):
 
 
 def test_the_route_answers_404_when_claude_desktop_is_not_installed(monkeypatch):
+    monkeypatch.setattr(claude_desktop, "is_installed", lambda: False)
     monkeypatch.setattr(claude_desktop, "open_chat", pytest.fail)
     r = client().post("/api/issues/id-ENG-1/claude-desktop")
     assert r.status_code == 404 and r.json() == {"error": "Claude Desktop is not installed."}
@@ -94,3 +95,14 @@ def test_a_link_that_fails_is_a_502(monkeypatch):
 def test_meta_says_whether_claude_desktop_is_installed(monkeypatch, installed):
     monkeypatch.setattr(claude_desktop, "is_installed", lambda: installed)
     assert client().get("/api/meta").json()["claude_desktop"] is installed
+
+
+def test_meta_checks_for_claude_desktop_once_per_refresh(monkeypatch):
+    checks = []
+    monkeypatch.setattr(claude_desktop, "is_installed", lambda: checks.append(1) or True)
+    c = client()
+    c.get("/api/meta")
+    c.get("/api/meta")
+    assert len(checks) == 1
+    c.get("/api/meta?refresh=true")
+    assert len(checks) == 2
