@@ -361,7 +361,10 @@ function startSection(ctx: SettingsCtx): HTMLElement {
   const field = h("input", {
     type: "text", class: "set-input set-repo-field", value: repoPath, placeholder: "~/code/api",
     "aria-label": "Path to a repo", "data-edit": "repo-path",
-    oninput: (e: Event) => { repoPath = (e.target as HTMLInputElement).value; repoError = ""; },
+    oninput: (e: Event) => {
+      repoPath = (e.target as HTMLInputElement).value;
+      if (repoError) { repoError = ""; ctx.rerender(); }
+    },
     onkeydown: (e: KeyboardEvent) => {
       // keyCode 229: WebKit's Enter that commits an IME composition, with isComposing false.
       if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); void addRepo(ctx); }
@@ -380,7 +383,7 @@ function startSection(ctx: SettingsCtx): HTMLElement {
       h("p", { class: "set-sub" }, s.repos.length ? "Start in Claude Code picks from these." : "Add a repo to turn on Start in Claude Code."),
       rows.length ? h("div", { class: "set-repo-list" }, ...rows) : "",
       h("div", { class: "set-row-inline" }, field,
-        h("button", { type: "button", class: "ghost small-btn", disabled: busy === "repo-add", onclick: () => void addRepo(ctx) },
+        h("button", { type: "button", class: "ghost small-btn", "data-focus": "repo-add", disabled: busy === "repo-add", onclick: () => void addRepo(ctx) },
           busy === "repo-add" ? "Adding…" : "+ Add")),
       repoError ? h("p", { class: "set-sub bad", role: "alert" }, repoError) : ""),
     promptField("code", "Code prompt", "Start in periscope and Start in Claude Code send it to the new Claude.", ctx),

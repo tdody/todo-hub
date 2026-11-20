@@ -1352,6 +1352,7 @@ details.more[open] > summary { margin-bottom: 10px; }
 .pane-menu > summary::-webkit-details-marker { display: none; }
 .pane-menu > summary.icon-more { padding: 4px 9px; font-weight: 700; letter-spacing: .05em; }
 .pane-menu .menu { top: calc(100% + 4px); bottom: auto; right: 0; left: auto; min-width: 180px; z-index: 6; }
+.pane-menu .menu button { white-space: nowrap; }   /* the menu grows to the left, under the right-aligned ⋯ */
 .pane-menu .menu .menu-link { display: block; padding: 6px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; font-size: 13px; }
 .pane-menu .menu .menu-link:hover { background: var(--surface-2); }
 .block-pop { gap: 8px; padding: 10px; min-width: 200px; }
@@ -1825,7 +1826,7 @@ textarea.start-input { resize: vertical; line-height: 1.5; }
 .set-start-part .set-sub.bad { margin-top: 6px; }
 .set-start-part .set-prompt { margin-bottom: 8px; }
 .set-repo-list { max-width: 640px; margin-bottom: 8px; }
-.set-repo { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px;
+.set-repo { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px; margin-left: -6px;
   border-top: 1px solid var(--border); }
 .set-repo:first-child { border-top: 0; }
 .set-repo:hover { background: var(--surface-2); }
