@@ -1076,7 +1076,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.post("/api/issues/{issue_id}/claude-code", dependencies=claude_code_auth)
     def claude_code_start(issue_id: str, body: StartIn) -> dict:
         """Find or make the worktree on the branch, then open a script that starts Claude Code there with the
-        prompt and a name from Haiku. The new session goes into a comment on the issue."""
+        prompt and a name from Haiku, then remember the repo for the issue's project (or client). The new
+        session goes into a comment on the issue; a comment that fails is a warning."""
         branch = body.branch.strip()
         if not branch:
             raise HTTPException(400, "The branch is empty")
@@ -1087,8 +1088,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         try:
             path, reused, warnings = claude_code.worktree_for(body.repo, branch)
             command = claude_code.start_command(settings, name_claude(issue), session_id, body.prompt)
-            claude_code.open_script(claude_code.write_script(settings.home / "start", issue["identifier"], path,
-                                                             command))
+            script = claude_code.write_script(settings.home / "start", issue["identifier"], path, command)
+            claude_code.open_script(script)
         except StartError as exc:
             raise HTTPException(502, str(exc))
         remember_repo(db, issue, body.repo)

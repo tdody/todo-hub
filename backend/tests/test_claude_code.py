@@ -3,11 +3,9 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-
-import pytest
-
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from todohub import claude_code
@@ -288,6 +286,7 @@ def test_start_makes_the_worktree_opens_the_script_and_records_the_session(env):
     assert script == env.settings.home / "start" / "ENG-1.command"
     text = script.read_text()
     assert f"cd {path} || exit 1" in text
+    assert branch_of(out["path"]) == "me/eng-1"
     assert f" --name eng-1-rebin --session-id {out['session_id']} -- 'Read ENG-1.'" in text
     assert env.db.get_meta(REPOS_KEY) == {"client:Globex": str(env.repo)}
     assert env.db.get_meta(LAST_REPO_KEY) == str(env.repo)
@@ -325,6 +324,16 @@ def test_a_start_that_git_refuses_is_a_502_and_nothing_opens(env):
     r = env.client.post("/api/issues/id-ENG-1/claude-code", json=env.start)
     assert r.status_code == 502 and "already exists" in r.json()["error"]
     assert env.opened == [] and env.db.get_meta(LAST_REPO_KEY) is None and env.linear.comments == []
+
+
+def test_a_script_that_will_not_open_is_a_502_and_nothing_is_recorded(env, monkeypatch):
+    def refuse(script):
+        raise StartError("Could not open the start script: x")
+
+    monkeypatch.setattr(claude_code, "open_script", refuse)
+    r = env.client.post("/api/issues/id-ENG-1/claude-code", json=env.start)
+    assert r.status_code == 502 and r.json() == {"error": "Could not open the start script: x"}
+    assert env.db.get_meta(LAST_REPO_KEY) is None and env.linear.comments == []
 
 
 def test_a_blank_branch_is_a_400(env):
