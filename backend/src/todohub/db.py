@@ -110,7 +110,7 @@ WRAPUP_TRIGGERS = ("wrapup",)
 NOTE_TRIGGERS = ("note",)
 CANDIDATE_FIELDS = (
     "id", "run_id", "source", "source_id", "source_url", "title", "signal", "why", "excerpt", "who",
-    "client_label", "due_date", "priority", "possible_duplicate", "links", "subtasks", "status", "drop_reason", "kind", "target_issue", "comment", "project", "snooze_until", "category",
+    "client_label", "new_client_label", "due_date", "priority", "possible_duplicate", "links", "subtasks", "status", "drop_reason", "kind", "target_issue", "comment", "project", "snooze_until", "category",
     "duplicate_advice", "duplicate_reason", "reply_draft", "sender", "channel", "handled",
     "linear_identifier", "linear_url", "created_at", "decided_at",
 )
@@ -140,6 +140,8 @@ MIGRATIONS = {
     "channel": "ALTER TABLE candidates ADD COLUMN channel TEXT",
     # A Linear issue that seems to have handled a pending candidate already (JSON); see handled.py.
     "handled": "ALTER TABLE candidates ADD COLUMN handled TEXT",
+    # A client label to create on approve, for a customer that has none yet; see tools.add_candidate.
+    "new_client_label": "ALTER TABLE candidates ADD COLUMN new_client_label TEXT",
 }
 KINDS = ("task", "waiting", "close", "comment")
 DROP_REASONS = ("not_mine", "already_done", "noise", "duplicate", "other")
@@ -338,13 +340,14 @@ class DB:
         with self.connect() as c:
             cur = c.execute(
                 "INSERT OR IGNORE INTO candidates (run_id, source, source_id, source_url, title, title_key, signal, "
-                "why, excerpt, who, client_label, due_date, priority, possible_duplicate, links, subtasks, "
+                "why, excerpt, who, client_label, new_client_label, due_date, priority, possible_duplicate, links, subtasks, "
                 "kind, target_issue, comment, project, category, duplicate_advice, duplicate_reason, reply_draft, "
                 "sender, channel, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id, f["source"], f["source_id"], f.get("source_url"), f["title"], key, f["signal"],
-                    f.get("why"), f.get("excerpt"), f.get("who"), f.get("client_label"), f.get("due_date"),
+                    f.get("why"), f.get("excerpt"), f.get("who"), f.get("client_label"),
+                    f.get("new_client_label"), f.get("due_date"),
                     int(f.get("priority") or 0), f.get("possible_duplicate"),
                     json.dumps(f.get("links") or []), json.dumps(f.get("subtasks") or []),
                     f.get("kind") or "task", f.get("target_issue"), f.get("comment"), f.get("project"),
@@ -395,6 +398,8 @@ class DB:
 
     def update_candidate(self, cid: int, **changes: Any) -> dict | None:
         changes = {k: v for k, v in changes.items() if k in EDITABLE_FIELDS}
+        if "client_label" in changes:
+            changes["new_client_label"] = None      # a candidate has a client label or a new one, never both
         for f in JSON_FIELDS:
             if f in changes:
                 changes[f] = json.dumps(changes[f] or [])
