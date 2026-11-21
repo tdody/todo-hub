@@ -93,7 +93,7 @@ One PR to the periscope repo.
    2. A Claude on the branch `pr-<N>` in the repo: the answer is `{mode: "existing", pid}`.
    3. A worktree on `pr-<N>`: Claude starts there, and the answer has `reused: true`. Periscope does not fetch or update it.
    4. Else `fetch_pr_into_worktree(repo, pr)` makes the worktree, and the answer has `reused: false`. Its 409s (the branch `pr-<N>` in use, the worktree path taken) become 400 with the same message, so a 409 from this route still means only "a start is already running".
-   5. The pane gets `linked_linear`, `linked_linear_title`, `linked_pr` and `is_fork`, as ⌘K's PR open stamps a PR.
+   5. The pane gets `linked_linear`, `linked_linear_title` and `linked_pr`. When periscope fetched the PR, it also gets `is_fork`, as ⌘K's PR open stamps it. A reused worktree gets no `is_fork`, because periscope does not ask GitHub then.
    6. The answer for mode "spawned" has the same fields as with `branch`: `{mode, pid, path, reused, session_id, email}`.
 3. README: the `slug` field, and `pr` in the `/api/linear/start` section.
 
@@ -116,7 +116,7 @@ Tests, in periscope's `tests/routes/test_linear.py` and its catalog tests:
   - A ticket that is not a review gets `prs: []` and `pr_hint: ""`, and todo-hub does not read its links.
   - An older periscope sends repos with no `slug` key. todo-hub then does not read the links, and gives `prs: []` and `pr_hint: ""`, because it cannot send `pr` to that periscope.
 - `POST /api/issues/{issue_id}/periscope`: `PeriscopeStartIn` gets `pr: int | None`, and `branch` becomes optional. The route answers 400 "Send a branch or a PR." unless exactly one is given. With `pr`, it calls `Periscope.start` with `pr` and does not call `remember_repo`.
-- `PUT /api/settings/periscope` takes `{prompt, review_prompt}`. An empty text gives the default. The settings body's `periscope` gets `review_prompt` and `default_review_prompt`.
+- `PUT /api/settings/periscope` takes `prompt`, `review_prompt` or both. A prompt that the body does not name stays as it is: `save_override` merges the `periscope` section, as it merges `sources`. An empty text gives the default. The settings body's `periscope` gets `review_prompt` and `default_review_prompt`.
 
 **`backend/src/todohub/linear.py`**
 
@@ -138,7 +138,7 @@ Tests, in periscope's `tests/routes/test_linear.py` and its catalog tests:
 
 **`app/src/periscope.ts`**: the **PR** select, its hint, the repos of the selected PR, the prompt that follows the PR until you edit it, the "None" option and `pr_hint`.
 
-**`app/src/settings.ts`**: the Periscope card gets a second text area, **Review prompt**. Its hint names `{identifier}`, `{title}`, `{url}` and `{pr}`. One **Save** saves both text areas. Each text area has its own **Reset to default**.
+**`app/src/settings.ts`**: the Periscope card gets a second text area, **Review prompt**. Its hint names `{identifier}`, `{title}`, `{url}` and `{pr}`. One **Save** saves both text areas. Each text area has its own **Reset to default**, which sends only that prompt, so the other text area keeps its saved text.
 
 **`app/src/styles.css`**: only if the PR row needs a style. The popover stays no wider than the issue's fields row.
 
@@ -159,7 +159,7 @@ Tests, in periscope's `tests/routes/test_linear.py` and its catalog tests:
 - A start with `pr` sends `pr` and no branch, leaves the remembered repos as they were, and adds the session comment.
 - A start with both `branch` and `pr`, or neither, gives 400.
 
-`backend/tests/test_settings.py`: `periscope_review_prompt` from `settings.json` overrides the default. An empty text gives the default. The PUT saves both prompts.
+`backend/tests/test_settings.py`: `periscope_review_prompt` from `settings.json` overrides the default. An empty text gives the default. A PUT with one prompt leaves the other as it was.
 
 The app has no frontend test runner. Check the popover in a browser with a scratch `TODOHUB_HOME` and periscope's dev instance on port 17375: PR mode, two PRs, "None", no matching repo, a reused `pr-<N>` worktree, and the Settings card.
 
