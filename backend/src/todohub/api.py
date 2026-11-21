@@ -32,7 +32,7 @@ from .config import (DEFAULT_PERISCOPE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SC
                      SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides, source_state,
                      write_overrides)
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
+from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_label, shape_issue
 from .periscope import (Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, pane_name,
                         remember_repo)
 from .selfcmd import self_command
@@ -288,6 +288,26 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 db.set_meta("client_labels", [l["name"] for l in cache["meta"].client_labels])
                 db.set_meta("projects", [p["name"] for p in cache["meta"].projects])
             return cache["meta"]
+
+    def ensure_client_label(name: str) -> tuple[dict, bool]:
+        """The client label ``name`` names, from Linear's labels as they are now, created in the client
+        label group if there is none. Returns the label and whether it was created."""
+        m = team_meta(refresh=True)
+        found = matching_client_label(name, [label["name"] for label in m.client_labels])
+        if found:
+            return next(label for label in m.client_labels if label["name"] == found), False
+        if not m.client_group:
+            raise HTTPException(502, f"Couldn't create the client label {name}: Linear has no label group "
+                                     f"named {settings.client_label_group!r}.")
+        client = linear_factory()
+        try:
+            label = client.create_client_label(name, m.client_group)
+        except LinearError as exc:
+            raise HTTPException(502, f"Couldn't create the client label {name}: {exc}")
+        finally:
+            client.close()
+        team_meta(refresh=True)      # the lists, the edit check and the next sweep know the label now
+        return label, True
 
     def id_by_name(items: list[dict], name: str | None, what: str) -> str | None:
         """The id of the client label or project called ``name`` (None for none); a 400 if Linear has none."""
@@ -568,6 +588,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if not state:
             raise HTTPException(500, f"Team {settings.team_key} has no {state_name!r} status")
         label_ids = [l["id"] for l in m.client_labels if l["name"] == c["client_label"]]
+        created_label = None
+        if c.get("new_client_label"):
+            label, created = ensure_client_label(c["new_client_label"])
+            label_ids = [label["id"]]
+            created_label = label["name"] if created else None
+            c = db.update_candidate(cid, client_label=label["name"])     # also clears new_client_label
         project_id = next((p["id"] for p in m.projects if p["name"] == c.get("project")), None)
         priority = chosen_priority if chosen_priority is not None else (c["priority"] or settings.default_priority)
         issue = linear_call(lambda l: l.create_issue(
@@ -579,6 +605,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         # a failure below must not lead to a second issue on retry.
         updated = db.decide(cid, "approved", issue["identifier"], issue["url"])
         undo = {"issues": [issue["id"]]}     # newest last; undo deletes them in reverse
+        if created_label:
+            undo["created_label"] = created_label     # undo keeps the label and says so
         db.set_undo(cid, undo)
         warnings: list[str] = []
         created: list[dict] = []
@@ -614,6 +642,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "issue": shape_issue(issue, settings),
             "subtasks": created,
             "warnings": warnings,
+            "created_label": created_label,
         }
 
     @app.post("/api/candidates/{cid}/merge", dependencies=auth)
@@ -826,18 +855,21 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.post("/api/candidates/{cid}/undo", dependencies=auth)
     def undo(cid: int) -> dict:
-        """Put an approved or dropped candidate back in the Inbox, reversing what it did in Linear:
+        """Put an approved or dropped candidate back in the Inbox, reversing what it did in Linear,
+        except a client label it created:
         created issues go to Linear's trash, a closed or merged-into issue gets its old fields back,
         and posted comments are deleted. If Linear fails part-way, what's left is kept for a retry."""
         c = candidate_or_404(cid)
         if c["status"] == "pending":
             raise HTTPException(409, "Nothing to undo: it's already in the Inbox")
         warnings: list[str] = []
+        kept_label = None
         if c["status"] == "approved":
             record = db.get_undo(cid)
             if not record:
                 raise HTTPException(409, f"{c['linear_identifier'] or 'This'} was approved before undo existed; "
                                          "change it in Linear instead.")
+            kept_label = record.get("created_label")
             try:
                 client = linear_factory()
             except RuntimeError as exc:      # missing API key
@@ -871,7 +903,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             finally:
                 client.close()
             db.set_undo(cid, None)
-        return {"candidate": db.decide(cid, "pending"), "warnings": warnings}
+        return {"candidate": db.decide(cid, "pending"), "warnings": warnings, "kept_label": kept_label}
 
     DECIDED_FIELDS = ("id", "title", "status", "kind", "drop_reason", "decided_at", "source", "source_url", "who",
                       "client_label", "linear_identifier", "linear_url", "target_issue")
