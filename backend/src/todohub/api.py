@@ -894,16 +894,17 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return db.decide(cid, "pending")
 
     # ---- Linear lists -----------------------------------------------------------------
+    def shape_issues(raw: list[dict]) -> list[dict]:
+        """Linear issues shaped for the app. The issues TodoHub created keep the type you approved."""
+        known = db.categories_by_identifier()
+        shaped = [shape_issue(i, settings) for i in raw]
+        for issue in shaped:
+            issue["category"] = known.get(issue["identifier"], issue["category"])
+        return shaped
+
     @app.get("/api/issues", dependencies=auth)
     def issues() -> list[dict]:
-        raw = linear_call(lambda l: l.my_open_issues())
-        known = db.categories_by_identifier()    # issues TodoHub created keep the type you approved
-        out = []
-        for i in raw:
-            shaped = shape_issue(i, settings)
-            shaped["category"] = known.get(shaped["identifier"], shaped["category"])
-            out.append(shaped)
-        return out
+        return shape_issues(linear_call(lambda l: l.my_open_issues()))
 
     images: dict[str, tuple[bytes, str]] = {}     # recent Linear images, oldest first
 
