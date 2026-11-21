@@ -39,6 +39,7 @@ class FakeLinear:
         self.fail_titles = set()   # create_issue raises for these titles
         self.client_labels = [{"id": "l-Initech & Co", "name": "Initech & Co"}, {"id": "l-Globex", "name": "Globex"}]
         self.created_labels = []   # (name, group id)
+        self.client_group = {"id": "g-client", "color": "#f7c8c1", "team_id": None}
         self.fail_label = False    # create_client_label raises
         self.issues = [
             make_issue("ENG-1", "Rebin Globex grades", client="Globex"),
@@ -55,7 +56,7 @@ class FakeLinear:
                 {"id": "s-Done", "name": "Done", "type": "completed", "position": 3},
             ],
             client_labels=list(self.client_labels),
-            client_group={"id": "g-client", "color": "#f7c8c1", "team_id": None},
+            client_group=self.client_group,
             viewer_id="me",
             projects=[{"id": "p-globex", "name": "Globex"}, {"id": "p-out", "name": "Improve our \"Forecast\" models"}],
         )

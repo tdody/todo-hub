@@ -1152,6 +1152,7 @@ def test_approve_creates_the_new_client_label_first(env):
 def test_approve_uses_a_client_label_made_in_the_meantime(env):
     client, db, fake, _ = env
     cid = seed(db, client_label="Hooli")
+    assert client.get("/api/meta").status_code == 200       # fills the cache
     fake.client_labels.append({"id": "l-hooli-inc", "name": "Hooli, Inc."})
     r = client.post(f"/api/candidates/{cid}/approve")
     assert r.status_code == 200, r.text
@@ -1213,3 +1214,13 @@ def test_undo_keeps_a_created_client_label(env):
     assert r.json()["kept_label"] == "Hooli" and fake.deleted_issues == ["id-ENG-99"]
     c = r.json()["candidate"]
     assert c["status"] == "pending" and c["client_label"] == "Hooli" and c["new_client_label"] is None
+
+
+def test_no_client_label_group_creates_no_issue(env):
+    client, db, fake, _ = env
+    cid = seed(db, client_label="Hooli")
+    fake.client_group = None
+    r = client.post(f"/api/candidates/{cid}/approve")
+    assert r.status_code == 502
+    assert r.json()["error"] == "Couldn't create the client label Hooli: Linear has no label group named 'client'."
+    assert fake.created == [] and db.get_candidate(cid)["new_client_label"] == "Hooli"

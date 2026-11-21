@@ -80,9 +80,11 @@ While a merge or drop plan is open, the box and the suffix do not show, because 
 When the candidate has a `new_client_label`, `approve_claimed`:
 
 1. Reads the labels from Linear again (`team_meta(refresh=True)`) and runs the near-match check. If a label matches now, for example from an earlier candidate in the same bulk approve, it uses that label.
-2. If not, it creates the label in the client label group, with the group's color and team (none for a workspace group).
-3. Creates the issue and its subtasks with the label, as today.
-4. Saves the name in `client_label`, clears `new_client_label` and reads the labels again, so the lists and the next sweep know the label.
+2. If not, it creates the label in the client label group, with the group's color and team (none for a workspace group), and reads the labels again, so the lists and the edit check know it.
+3. Saves the name in `client_label` and clears `new_client_label`.
+4. Creates the issue and its subtasks with the label, as today.
+
+Approves of new labels run one at a time, so two approves for one new client make one label.
 
 The response gains `created_label` (the name, or `null`). One approve says "Created the client label Hooli." Bulk approve adds the names of the labels it created to its "Approved N of M" message.
 
@@ -119,7 +121,7 @@ Undo sends the issue to Linear's trash, as today, and keeps the label. The candi
 ## Errors
 
 - **Linear refuses the label** (no permission, or no group named `client_label_group`): approve stops before it creates the issue. The candidate stays in the Inbox, and the message says "Couldn't create the client label Hooli: <reason>".
-- **Linear creates the label, then refuses the issue:** the label stays. The next approve finds it in step 1.
+- **Linear creates the label, then refuses the issue:** the label stays, and the candidate holds it in `client_label`. The next approve uses it.
 - **Two candidates for the same customer in one bulk approve:** the second one finds the first one's label in step 1.
 
 ## Testing

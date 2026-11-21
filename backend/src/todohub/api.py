@@ -251,6 +251,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     cache: dict = {"meta": None, "at": 0.0}
     lock = threading.Lock()
+    label_lock = threading.Lock()   # one client label check and create at a time
 
     def check_token(request: Request) -> None:
         # Only loopback names: blocks DNS-rebinding pages that point a hostname at 127.0.0.1.
@@ -292,22 +293,20 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     def ensure_client_label(name: str) -> tuple[dict, bool]:
         """The client label ``name`` names, from Linear's labels as they are now, created in the client
         label group if there is none. Returns the label and whether it was created."""
-        m = team_meta(refresh=True)
-        found = matching_client_label(name, [label["name"] for label in m.client_labels])
-        if found:
-            return next(label for label in m.client_labels if label["name"] == found), False
-        if not m.client_group:
-            raise HTTPException(502, f"Couldn't create the client label {name}: Linear has no label group "
-                                     f"named {settings.client_label_group!r}.")
-        client = linear_factory()
-        try:
-            label = client.create_client_label(name, m.client_group)
-        except LinearError as exc:
-            raise HTTPException(502, f"Couldn't create the client label {name}: {exc}")
-        finally:
-            client.close()
-        team_meta(refresh=True)      # the lists, the edit check and the next sweep know the label now
-        return label, True
+        with label_lock:
+            m = team_meta(refresh=True)
+            found = matching_client_label(name, [label["name"] for label in m.client_labels])
+            if found:
+                return next(label for label in m.client_labels if label["name"] == found), False
+            if not m.client_group:
+                raise HTTPException(502, f"Couldn't create the client label {name}: Linear has no label group "
+                                         f"named {settings.client_label_group!r}.")
+            try:
+                label = linear_call(lambda l: l.create_client_label(name, m.client_group))
+            except HTTPException as exc:
+                raise HTTPException(exc.status_code, f"Couldn't create the client label {name}: {exc.detail}")
+            team_meta(refresh=True)      # the Inbox lists and the edit check know the label now
+            return label, True
 
     def id_by_name(items: list[dict], name: str | None, what: str) -> str | None:
         """The id of the client label or project called ``name`` (None for none); a 400 if Linear has none."""
@@ -855,10 +854,10 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.post("/api/candidates/{cid}/undo", dependencies=auth)
     def undo(cid: int) -> dict:
-        """Put an approved or dropped candidate back in the Inbox, reversing what it did in Linear,
-        except a client label it created:
+        """Put an approved or dropped candidate back in the Inbox, reversing what it did in Linear:
         created issues go to Linear's trash, a closed or merged-into issue gets its old fields back,
-        and posted comments are deleted. If Linear fails part-way, what's left is kept for a retry."""
+        and posted comments are deleted. A client label it created stays. If Linear fails part-way,
+        what's left is kept for a retry."""
         c = candidate_or_404(cid)
         if c["status"] == "pending":
             raise HTTPException(409, "Nothing to undo: it's already in the Inbox")
