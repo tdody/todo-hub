@@ -1073,7 +1073,7 @@ export interface PeriscopePr {
   label: string;                                // "acme/api#812"
   url: string;
   repos: string[];                              // periscope's repos whose origin is the PR's repo
-  branch_worktrees: string[];                     // the ones with a worktree already on pr-<N>
+  branch_worktrees: string[];                   // the ones with a worktree already on pr-<N>
   prompt: string;                               // the review prompt, filled in for this PR
 }
 ```
