@@ -310,7 +310,17 @@ export interface AppSettings {
   sources: SettingsSource[];
   schedule: Schedule;
   daylight: { place: string; latitude: number | null; longitude: number | null };
-  periscope: { enabled: boolean; prompt: string; default_prompt: string };
+  periscope: { enabled: boolean; prompt: string; default_prompt: string; review_prompt: string; default_review_prompt: string };
+}
+
+/** A review ticket's PR whose GitHub repo is the origin of a periscope repo. */
+export interface PeriscopePr {
+  number: number;
+  label: string;                                // "acme/api#812"
+  url: string;
+  repos: string[];                              // periscope's repos whose origin is the PR's repo
+  branch_worktrees: string[];                   // the ones with a worktree already on pr-<N>
+  prompt: string;                               // the review prompt, filled in for this PR
 }
 
 /** Start in periscope: what the popover shows first. */
@@ -321,6 +331,8 @@ export interface PeriscopeOptions {
   branch: string;                               // Linear's branch name
   branch_worktrees: string[];                   // repos with a worktree already on that branch
   prompt: string;                               // the Settings page's template, filled in
+  prs: PeriscopePr[];                           // a review ticket's PRs; empty for other tickets
+  pr_hint: string;                              // "No periscope repo has acme/web as its origin. …", or ""
 }
 
 export interface PeriscopeStart {
@@ -554,7 +566,8 @@ export const api = {
   issuePreview: (ident: string) => call<IssuePreview>("GET", `/api/issues/${encodeURIComponent(ident)}/preview`),
   periscopeOptions: (issueId: string) =>
     call<PeriscopeOptions>("GET", `/api/issues/${encodeURIComponent(issueId)}/periscope`),
-  startInPeriscope: (issueId: string, body: { repo: string; branch: string; prompt: string }) =>
+  /** Start on Linear's branch (``branch``) or on a PR (``pr``), never both. */
+  startInPeriscope: (issueId: string, body: { repo: string; prompt: string; branch?: string; pr?: number }) =>
     call<PeriscopeStart>("POST", `/api/issues/${encodeURIComponent(issueId)}/periscope`, body),
   showInPeriscope: (pid: string) => call<{ ok: boolean }>("POST", "/api/periscope/show", { pid }),
   mutes: () => call<MuteRule[]>("GET", "/api/mutes"),
@@ -571,7 +584,9 @@ export const api = {
   setSchedule: (s: Pick<Schedule, "every" | "start" | "end" | "days">) => call<AppSettings>("PUT", "/api/settings/schedule", s),
   installSchedule: () => call<AppSettings>("POST", "/api/settings/schedule/install"),
   setDaylightPlace: (d: AppSettings["daylight"]) => call<AppSettings>("PUT", "/api/settings/daylight", d),
-  setPeriscopePrompt: (prompt: string) => call<AppSettings>("PUT", "/api/settings/periscope", { prompt }),
+  /** An empty prompt goes back to its default; a prompt left out stays as it is. */
+  setPeriscopePrompts: (prompts: { prompt?: string; review_prompt?: string }) =>
+    call<AppSettings>("PUT", "/api/settings/periscope", prompts),
   daylight: () => call<{ location: { lat: number; lon: number; place: string } | null }>("GET", "/api/daylight"),
   recheck: () => call<{ flagged: number }>("POST", "/api/candidates/recheck"),
   keep: (id: number) => call<Candidate>("POST", `/api/candidates/${id}/keep`),

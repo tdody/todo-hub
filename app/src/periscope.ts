@@ -1,8 +1,9 @@
 // Start in periscope: the ⋯ menu item (or p) opens a popover with the repo, Linear's branch and the
-// prompt; Start asks periscope to start Claude on that branch with the prompt. The toast's Show
-// brings periscope to the front with that Claude selected.
+// prompt; Start asks periscope to start Claude on that branch with the prompt. For a review ticket, the
+// popover selects one of its PRs, and periscope checks the PR out in place of the branch. The toast's
+// Show brings periscope to the front with that Claude selected.
 import { api } from "./api";
-import type { Issue, PeriscopeOptions } from "./api";
+import type { Issue, PeriscopeOptions, PeriscopePr } from "./api";
 import { h } from "./dom";
 
 export interface PeriscopeCtx {
@@ -14,9 +15,11 @@ export interface PeriscopeCtx {
 interface Popover {
   issueId: string;
   options: PeriscopeOptions | null;     // null while periscope is asked
+  pr: number | null;                    // the selected PR; null starts on the branch
   repo: string;
   branch: string;
   prompt: string;
+  promptEdited: boolean;                // you typed in the prompt: a PR change keeps it
   starting: boolean;
 }
 
@@ -62,14 +65,24 @@ export function periscopeItem(i: Issue): HTMLElement {
   }, "Start in periscope", h("kbd", {}, "p"));
 }
 
+/** Select ``pr`` (null: Linear's branch): its first repo and its prompt, or the remembered repo and the
+ *  normal prompt. A prompt you typed stays. */
+function selectPr(p: Popover, o: PeriscopeOptions, pr: PeriscopePr | null) {
+  p.pr = pr?.number ?? null;
+  p.repo = pr ? pr.repos[0] : o.repo ?? "";
+  if (!p.promptEdited) p.prompt = pr ? pr.prompt : o.prompt;
+}
+
 async function openFor(i: Issue) {
   if (popover?.issueId === i.id) return;
-  popover = { issueId: i.id, options: null, repo: "", branch: "", prompt: "", starting: false };
+  popover = { issueId: i.id, options: null, pr: null, repo: "", branch: "", prompt: "", promptEdited: false,
+    starting: false };
   ctx.render();
   try {
     const o = await api.periscopeOptions(i.id);
     if (popover?.issueId !== i.id) return;           // closed, or opened for another issue, meanwhile
-    popover = { ...popover, options: o, repo: o.repo ?? "", branch: o.branch, prompt: o.prompt };
+    popover = { ...popover, options: o, branch: o.branch };
+    selectPr(popover, o, o.prs[0] ?? null);
     ctx.render();
     const pop = document.querySelector<HTMLElement>(".pp-pop");
     pop?.scrollIntoView({ block: "nearest" });
@@ -80,9 +93,9 @@ async function openFor(i: Issue) {
   }
 }
 
-/** Start can run: a repo, a branch and a prompt, and no start already running. */
+/** Start can run: a repo, a PR or a branch, and a prompt, and no start already running. */
 function canStart(p: Popover): boolean {
-  return !p.starting && !!p.repo && !!p.branch.trim() && !!p.prompt.trim();
+  return !p.starting && !!p.repo && (p.pr !== null || !!p.branch.trim()) && !!p.prompt.trim();
 }
 
 async function start(i: Issue) {
@@ -91,7 +104,8 @@ async function start(i: Issue) {
   p.starting = true;
   ctx.render();
   try {
-    const r = await api.startInPeriscope(i.id, { repo: p.repo, branch: p.branch, prompt: p.prompt });
+    const target = p.pr !== null ? { pr: p.pr } : { branch: p.branch };
+    const r = await api.startInPeriscope(i.id, { repo: p.repo, prompt: p.prompt, ...target });
     if (popover === p) closePeriscope();
     ctx.toast(r.mode === "existing" ? `${i.identifier} is already open in periscope` : `Started ${i.identifier} in periscope`,
       { label: "Show", run: () => void api.showInPeriscope(r.pid).catch(ctx.fail) });
@@ -114,12 +128,28 @@ export function periscopePopover(i: Issue): HTMLElement | "" {
     return h("div", { class: "pp-pop", role: "dialog", "aria-label": label },
       h("div", { class: "pp-title" }, label), h("p", { class: "pp-wait" }, "Asking periscope…"));
   }
+  const pr = o.prs.find((x) => x.number === p.pr) ?? null;
+  const prSelect = o.prs.length ? h("select", {
+    class: "pp-input", "aria-label": "PR", "data-focus": "periscope-pr", disabled: p.starting,
+    onchange: (e: Event) => {
+      const value = (e.target as HTMLSelectElement).value;
+      selectPr(p, o, o.prs.find((x) => String(x.number) === value) ?? null);
+      ctx.render();
+    },
+  },
+    ...o.prs.map((x) => h("option", { value: String(x.number), selected: x.number === p.pr }, x.label)),
+    h("option", { value: "", selected: p.pr === null }, "None: start on the Linear branch")) : null;
+  const prHint = !pr ? ""
+    : pr.branch_worktrees.includes(p.repo) ? `A worktree is already on pr-${pr.number}.`
+    : "Periscope checks out the PR in a new worktree.";
+  // A PR's repos are the ones whose origin is the PR's repo: another repo would fetch another PR.
+  const repos = pr ? o.repos.filter((r) => pr.repos.includes(r.repo)) : o.repos;
   const repo = h("select", {
     class: "pp-input pp-repo", "aria-label": "Repo", "data-focus": "periscope-repo", disabled: p.starting,
     onchange: (e: Event) => { p.repo = (e.target as HTMLSelectElement).value; ctx.render(); },
   },
     !p.repo && h("option", { value: "", selected: true, disabled: true }, "Pick a repo"),
-    ...o.repos.map((r) => h("option", { value: r.repo, selected: r.repo === p.repo }, r.label)));
+    ...repos.map((r) => h("option", { value: r.repo, selected: r.repo === p.repo }, r.label)));
   const startButton = h("button", { type: "button", class: "td-btn primary pp-start", "data-focus": "periscope-start",
     onclick: () => void start(i) }, p.starting ? "Starting…" : "Start", h("kbd", {}, "↵"));
   const branchHint = h("p", { class: "pp-hint" });
@@ -139,9 +169,10 @@ export function periscopePopover(i: Issue): HTMLElement | "" {
   });
   const prompt = h("textarea", {
     class: "pp-input", rows: 4, value: p.prompt, "aria-label": "Prompt", "data-edit": "periscope-prompt",
-    readOnly: p.starting, oninput: (e: Event) => { p.prompt = (e.target as HTMLTextAreaElement).value; update(); },
+    readOnly: p.starting,
+    oninput: (e: Event) => { p.prompt = (e.target as HTMLTextAreaElement).value; p.promptEdited = true; update(); },
   });
-  const repoHint = p.repo && p.repo === o.repo ? o.hint : "";
+  const repoHint = !pr && p.repo && p.repo === o.repo ? o.hint : "";
   return h("div", {
     class: "pp-pop", role: "dialog", "aria-label": label,
     onkeydown: (e: KeyboardEvent) => {
@@ -154,10 +185,13 @@ export function periscopePopover(i: Issue): HTMLElement | "" {
     },
   },
     h("div", { class: "pp-title" }, label),
+    o.pr_hint ? h("p", { class: "pp-hint lead" }, o.pr_hint) : "",
+    prSelect ? h("label", { class: "pp-field" }, h("span", {}, "PR"), prSelect) : "",
+    prHint ? h("p", { class: "pp-hint" }, prHint) : "",
     h("label", { class: "pp-field" }, h("span", {}, "Repo"), repo),
     repoHint ? h("p", { class: "pp-hint" }, repoHint) : "",
-    h("label", { class: "pp-field" }, h("span", {}, "Branch"), branch),
-    branchHint,
+    pr ? "" : h("label", { class: "pp-field" }, h("span", {}, "Branch"), branch),
+    pr ? "" : branchHint,
     h("label", { class: "pp-field top" }, h("span", {}, "Prompt"), prompt),
     h("div", { class: "pp-acts" },
       h("button", { type: "button", class: "td-btn", "data-focus": "periscope-cancel", disabled: p.starting,
