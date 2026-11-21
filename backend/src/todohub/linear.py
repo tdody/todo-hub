@@ -132,14 +132,15 @@ class Linear:
     def team_meta(self, team_key: str, client_group: str) -> TeamMeta:
         data = self.gql(
             """
-            query($key: String!) {
+            query($key: String!, $group: String!) {
               viewer { id }
               teams(filter: { key: { eq: $key } }) {
                 nodes { id states { nodes { id name type position } } }
               }
+              issueLabels(filter: { name: { eq: $group } }) { nodes { id color isGroup team { id } } }
             }
             """,
-            {"key": team_key},
+            {"key": team_key, "group": client_group},
         )
         teams = data["teams"]["nodes"]
         if not teams:
@@ -157,24 +158,18 @@ class Linear:
             ["issueLabels"],
             {"group": client_group},
         )
-        groups = self.gql(
-            """
-            query($group: String!) {
-              issueLabels(filter: { name: { eq: $group } }) { nodes { id color isGroup team { id } } }
-            }
-            """,
-            {"group": client_group},
-        )["issueLabels"]["nodes"]
-        group = next((g for g in groups if g["isGroup"]), None)
         projects = self.team_projects(team["id"])
+        # The client label group: a workspace group or this team's. A plain label can have the same name.
+        node = next((g for g in data["issueLabels"]["nodes"]
+                     if g["isGroup"] and (g["team"] is None or g["team"]["id"] == team["id"])), None)
+        group = node and {"id": node["id"], "color": node["color"], "team_id": node["team"] and node["team"]["id"]}
         return TeamMeta(
             team_id=team["id"],
             states=in_linear_order(team["states"]["nodes"]),
             client_labels=sorted(labels, key=lambda l: l["name"].lower()),
             viewer_id=data["viewer"]["id"],
             projects=sorted(projects, key=lambda p: p["name"].lower()),
-            client_group={"id": group["id"], "color": group["color"], "team_id": (group.get("team") or {}).get("id")}
-            if group else None,
+            client_group=group,
         )
 
     def team_projects(self, team_id: str) -> list[dict]:
@@ -341,7 +336,7 @@ class Linear:
     def create_client_label(self, name: str, group: dict) -> dict:
         """Add a label to the client label group, with the group's color and team (none for a workspace group)."""
         fields = {"name": name, "parentId": group["id"], "color": group["color"]}
-        if group.get("team_id"):
+        if group["team_id"]:
             fields["teamId"] = group["team_id"]
         data = self.gql(
             """

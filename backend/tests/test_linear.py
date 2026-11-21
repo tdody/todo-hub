@@ -20,8 +20,12 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
         calls.append(body)
         assert request.headers["authorization"] == "lin_key"
         if "teams" in body["query"]:
+            assert body["variables"] == {"key": "ENG", "group": "client"}
             return httpx.Response(200, json={"data": {
                 "viewer": {"id": "me"},
+                "issueLabels": {"nodes": [
+                    {"id": "x", "color": "#aaaaaa", "isGroup": False, "team": None},       # a plain label with the same name
+                    {"id": "g1", "color": "#f7c8c1", "isGroup": True, "team": None}]},
                 "teams": {"nodes": [{"id": "t1", "states": {"nodes": [
                     {"id": "b", "name": "Todo", "type": "unstarted", "position": 2},
                     {"id": "a", "name": "Backlog", "type": "backlog", "position": 1}]}}]}}})
@@ -31,11 +35,6 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
             return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": [
                 {"id": "p1", "name": "Globex", "state": "started"},
                 {"id": "p2", "name": "Old thing", "state": "completed"}]}}}})
-        if "isGroup" in body["query"]:
-            assert body["variables"] == {"group": "client"}
-            return httpx.Response(200, json={"data": {"issueLabels": {"nodes": [
-                {"id": "x", "color": "#aaaaaa", "isGroup": False, "team": None},       # a plain label with the same name
-                {"id": "g1", "color": "#f7c8c1", "isGroup": True, "team": None}]}}})
         after = body["variables"]["after"]
         page = {"nodes": [{"id": "x", "name": "Vandelay"}], "pageInfo": {"hasNextPage": True, "endCursor": "c1"}} \
             if after is None else {"nodes": [{"id": "y", "name": "acme"}], "pageInfo": {"hasNextPage": False, "endCursor": None}}
@@ -44,9 +43,29 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
     meta = Linear("lin_key", transport=transport(handler)).team_meta("ENG", "client")
     assert [s["name"] for s in meta.states] == ["Backlog", "Todo"]
     assert [l["name"] for l in meta.client_labels] == ["acme", "Vandelay"]
-    assert meta.viewer_id == "me" and len(calls) == 6
+    assert meta.viewer_id == "me" and len(calls) == 5
     assert meta.projects == [{"id": "p1", "name": "Globex"}]
     assert meta.client_group == {"id": "g1", "color": "#f7c8c1", "team_id": None}
+
+
+def test_team_meta_client_group_is_the_workspace_or_this_teams_group():
+    def group_of(nodes):
+        def handler(request):
+            body = json.loads(request.content)
+            if "teams" in body["query"]:
+                return httpx.Response(200, json={"data": {"viewer": {"id": "me"},
+                    "teams": {"nodes": [{"id": "t1", "states": {"nodes": []}}]}, "issueLabels": {"nodes": nodes}}})
+            if "projects" in body["query"]:
+                return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": []}}}})
+            return httpx.Response(200, json={"data": {"issueLabels": {
+                "nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}})
+        return Linear("k", transport=transport(handler)).team_meta("ENG", "client").client_group
+
+    other_team = {"id": "g2", "color": "#000000", "isGroup": True, "team": {"id": "t2"}}
+    assert group_of([]) is None
+    assert group_of([other_team]) is None
+    assert group_of([other_team, {"id": "g1", "color": "#f7c8c1", "isGroup": True, "team": {"id": "t1"}}]) \
+        == {"id": "g1", "color": "#f7c8c1", "team_id": "t1"}
 
 
 def test_errors():
@@ -98,7 +117,8 @@ def test_team_meta_and_team_states_order_states_like_linear():
     def handler(request: httpx.Request):
         body = json.loads(request.content)
         if "teams" in body["query"]:
-            return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": [{"id": "t1", "states": states}]}}})
+            return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": [{"id": "t1", "states": states}]},
+                "issueLabels": {"nodes": []}}})
         if "projects" in body["query"]:
             return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": []}}}})
         if "states" in body["query"]:          # another team's statuses
