@@ -561,9 +561,9 @@ def test_review_prs_match_repos_by_origin_and_name_the_missing_ones():
     prs, hint = review_prs([("acme/web", 455), ("acme/api", 812)], SLUGGED, "Review {pr}.", issue)
     assert prs == [
         {"number": 455, "label": "acme/web#455", "url": "https://github.com/acme/web/pull/455",
-         "repos": ["/dev/web"], "worktree_repos": [], "prompt": "Review https://github.com/acme/web/pull/455."},
+         "repos": ["/dev/web"], "branch_worktrees": [], "prompt": "Review https://github.com/acme/web/pull/455."},
         {"number": 812, "label": "acme/api#812", "url": PR,
-         "repos": ["/dev/api"], "worktree_repos": ["/dev/api"], "prompt": f"Review {PR}."},
+         "repos": ["/dev/api"], "branch_worktrees": ["/dev/api"], "prompt": f"Review {PR}."},
     ]
     assert hint == ""
     assert review_prs([("acme/ios", 7), ("acme/infra", 9), ("acme/ios", 8)], SLUGGED, "Review {pr}.", issue) == (
@@ -621,8 +621,8 @@ def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue
         url = f"https://github.com/{slug}/pull/{number}"
         prs.append({
             "number": number, "label": f"{slug}#{number}", "url": url, "repos": repos,
-            "worktree_repos": sorted({w["repo"] for w in catalog["worktrees"]
-                                      if w["repo"] in repos and w["branch"] == f"pr-{number}"}),
+            "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"]
+                                        if w["repo"] in repos and w["branch"] == f"pr-{number}"}),
             "prompt": fill_prompt(template, issue, pr=url),
         })
     if prs or not missing:
@@ -828,7 +828,7 @@ def test_a_review_ticket_offers_its_pr(env, peri, linear):
     review_issue(linear, ["https://example.slack.com/archives/C1/p1", f"{PR}/files"])
     o = client.get("/api/issues/id-ENG-3/periscope").json()
     assert o["prs"] == [{"number": 812, "label": "acme/api#812", "url": PR, "repos": ["/dev/api"],
-                         "worktree_repos": ["/dev/api"], "prompt": REVIEW_PROMPT}]
+                         "branch_worktrees": ["/dev/api"], "prompt": REVIEW_PROMPT}]
     assert o["pr_hint"] == ""
     # The branch start stays, for "None: start on the Linear branch".
     assert o["branch"] == "me/eng-3" and o["prompt"].startswith("Read Linear ticket ENG-3")
@@ -1073,7 +1073,7 @@ export interface PeriscopePr {
   label: string;                                // "acme/api#812"
   url: string;
   repos: string[];                              // periscope's repos whose origin is the PR's repo
-  worktree_repos: string[];                     // the ones with a worktree already on pr-<N>
+  branch_worktrees: string[];                     // the ones with a worktree already on pr-<N>
   prompt: string;                               // the review prompt, filled in for this PR
 }
 ```
@@ -1248,7 +1248,7 @@ export function periscopePopover(i: Issue): HTMLElement | "" {
     ...o.prs.map((x) => h("option", { value: String(x.number), selected: x.number === p.pr }, x.label)),
     h("option", { value: "", selected: p.pr === null }, "None: start on the Linear branch")) : null;
   const prHint = !pr ? ""
-    : pr.worktree_repos.includes(p.repo) ? `A worktree is already on pr-${pr.number}.`
+    : pr.branch_worktrees.includes(p.repo) ? `A worktree is already on pr-${pr.number}.`
     : "Periscope checks out the PR in a new worktree.";
   // A PR's repos are the ones whose origin is the PR's repo: another repo would fetch another PR.
   const repos = pr ? o.repos.filter((r) => pr.repos.includes(r.repo)) : o.repos;
@@ -1458,3 +1458,4 @@ Ask before any push. The periscope branch goes to `origin` (`tomplex/periscope`)
 - The rules can give the type `review` to a ticket that is not a review. "None: start on the Linear branch" covers this.
 - A reused `pr-<N>` worktree can be behind the PR. A Linear ticket tracks the fix.
 - `fetch_pr_into_worktree` fetches `pull/<N>/head` from origin. That works because the matching repo's origin is the PR's repo.
+- The **PR** select lists the PRs in the order that Linear's API gives the links (`attachments(first: 100)` with no `orderBy`). This order can differ from the order in Linear's app.

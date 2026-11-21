@@ -108,8 +108,8 @@ class DaylightIn(BaseModel):
 
 
 class PeriscopePromptsIn(BaseModel):
-    prompt: str | None = Field(default=None, max_length=8000)          # empty: back to the default
-    review_prompt: str | None = Field(default=None, max_length=8000)   # left out: stays as it is
+    prompt: str | None = Field(default=None, max_length=8000)
+    review_prompt: str | None = Field(default=None, max_length=8000)
 
 
 class PeriscopeStartIn(BaseModel):

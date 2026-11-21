@@ -110,7 +110,7 @@ Tests, in periscope's `tests/routes/test_linear.py` and its catalog tests:
 
 - One function gives an issue's type: the type you approved, from `db.categories_by_identifier()`, else the rules. `GET /api/issues` and the popover route both use it.
 - `GET /api/issues/{issue_id}/periscope`: for a review ticket only, it reads the links with `Linear.attachment_urls` and keeps the PR URLs. The answer gets two fields:
-  - `prs`: one entry for each PR with a matching repo: `{number, label, url, repos, worktree_repos, prompt}`. `label` is `owner/name#N`. `repos` holds the matching repo paths. `worktree_repos` holds the ones with a worktree on `pr-<N>`. `prompt` is the review prompt filled in for the ticket and this PR.
+  - `prs`: one entry for each PR with a matching repo: `{number, label, url, repos, branch_worktrees, prompt}`. `label` is `owner/name#N`. `repos` holds the matching repo paths. `branch_worktrees` holds the ones with a worktree on `pr-<N>`. `prompt` is the review prompt filled in for the ticket and this PR.
   - `pr_hint`: the "No periscope repo has …" text when the ticket has PR links, the catalog's repos have `slug`, and no repo matches. Else `""`.
   - The other fields do not change.
   - A ticket that is not a review gets `prs: []` and `pr_hint: ""`, and todo-hub does not read its links.
@@ -150,7 +150,7 @@ Tests, in periscope's `tests/routes/test_linear.py` and its catalog tests:
 
 - `pr_links` keeps PR URLs in order, drops duplicates, and skips URLs that are not PRs (an issue, a commit, a Slack link).
 - `fill_prompt` fills `{pr}` when it is given, and keeps it as typed when it is not.
-- A review ticket with one PR link in a periscope repo gives one `prs` entry with its label, repos, `worktree_repos` and filled prompt.
+- A review ticket with one PR link in a periscope repo gives one `prs` entry with its label, repos, `branch_worktrees` and filled prompt.
 - Two PR links give two entries in Linear's order. The same link twice gives one entry.
 - A PR whose repo periscope does not have gives `prs: []` and a `pr_hint` with its `owner/name`. A repo whose `slug` differs only in case matches.
 - A ticket that is not a review gives `prs: []` and does not read the links.

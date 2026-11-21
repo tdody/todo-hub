@@ -26,10 +26,12 @@ CATALOG = {
     "roots": ["/dev"],
 }
 SPAWNED = {"mode": "spawned", "pid": "k", "path": "/dev/worktrees/api/me-eng-1", "reused": False}
-# The catalog of a periscope that sends each repo's slug. web's slug has capitals: GitHub ignores case.
+# The catalog of a periscope that sends each repo's slug. web's slug has capitals: GitHub ignores case. notes's
+# origin is not on GitHub.
 SLUGGED = {
     **CATALOG,
-    "repos": [{**CATALOG["repos"][0], "slug": "acme/api"}, {**CATALOG["repos"][1], "slug": "Acme/Web"}],
+    "repos": [{**CATALOG["repos"][0], "slug": "acme/api"}, {**CATALOG["repos"][1], "slug": "Acme/Web"},
+              {"repo": "/dev/notes", "label": "notes", "default_branch": "main", "branches": [], "slug": None}],
     "worktrees": [*CATALOG["worktrees"],
                   {"path": "/dev/worktrees/api/pr-812", "repo": "/dev/api", "branch": "pr-812", "is_main": False}],
 }
@@ -179,6 +181,7 @@ def test_pr_links_keeps_pull_requests_in_order_once():
         "https://github.com/acme/api/commit/abc123",
         f"{PR}/files",
         "https://github.com/acme/web/pull/455#discussion_r1",
+        "https://github.com/Acme/Web/pull/455",
     ]) == [("acme/web", 455), ("acme/api", 812)]
 
 
@@ -187,9 +190,9 @@ def test_review_prs_match_repos_by_origin_and_name_the_missing_ones():
     prs, hint = review_prs([("acme/web", 455), ("acme/api", 812)], SLUGGED, "Review {pr}.", issue)
     assert prs == [
         {"number": 455, "label": "acme/web#455", "url": "https://github.com/acme/web/pull/455",
-         "repos": ["/dev/web"], "worktree_repos": [], "prompt": "Review https://github.com/acme/web/pull/455."},
+         "repos": ["/dev/web"], "branch_worktrees": [], "prompt": "Review https://github.com/acme/web/pull/455."},
         {"number": 812, "label": "acme/api#812", "url": PR,
-         "repos": ["/dev/api"], "worktree_repos": ["/dev/api"], "prompt": f"Review {PR}."},
+         "repos": ["/dev/api"], "branch_worktrees": ["/dev/api"], "prompt": f"Review {PR}."},
     ]
     assert hint == ""
     assert review_prs([("acme/ios", 7), ("acme/infra", 9), ("acme/ios", 8)], SLUGGED, "Review {pr}.", issue) == (

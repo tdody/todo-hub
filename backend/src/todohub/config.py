@@ -5,7 +5,7 @@ Everything lives in one folder, ``~/Library/Application Support/TodoHub`` on mac
 
     config.toml      settings you can edit
     settings.json    what the app's Settings page changed (sources, schedule, Daylight place,
-                     the periscope prompt);
+                     the periscope prompts);
                      it wins over config.toml for those keys
     todohub.db       SQLite: candidate queue, runs, source status
     sweep/           the folder Claude Code runs in (so no repo .mcp.json is picked up)
@@ -121,7 +121,8 @@ def home() -> Path:
     return Path.home() / ".todohub"
 
 
-# Start in periscope: what the new Claude is told. {identifier}, {title} and {url} become the issue's.
+# Start in periscope: what the new Claude is told, on a branch or on a review ticket's PR. {identifier}, {title}
+# and {url} become the issue's, and {pr} in the review prompt becomes the PR's URL.
 DEFAULT_PERISCOPE_PROMPT = (
     "Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. "
     "Sum up the ask, then propose a plan. Do not change code until I agree."

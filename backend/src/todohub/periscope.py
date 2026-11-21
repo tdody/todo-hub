@@ -120,12 +120,14 @@ def fill_prompt(template: str, issue: dict, pr: str = "") -> str:
 
 
 def pr_links(urls: list[str]) -> list[tuple[str, int]]:
-    """The GitHub repo (``owner/name``) and number of each pull request in ``urls``, in order, each once."""
-    found: dict[tuple[str, int], None] = {}
+    """The GitHub repo (``owner/name``) and number of each pull request in ``urls``, in order, each once. GitHub
+    ignores the case of ``owner/name``, so the first spelling stays."""
+    found: dict[tuple[str, int], tuple[str, int]] = {}
     for url in urls:
         if m := _PR_URL.match(url):
-            found.setdefault((m.group(1), int(m.group(2))), None)
-    return list(found)
+            slug, number = m.group(1), int(m.group(2))
+            found.setdefault((slug.lower(), number), (slug, number))
+    return list(found.values())
 
 
 def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue: dict) -> tuple[list[dict], str]:
@@ -141,8 +143,8 @@ def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue
         url = f"https://github.com/{slug}/pull/{number}"
         prs.append({
             "number": number, "label": f"{slug}#{number}", "url": url, "repos": repos,
-            "worktree_repos": sorted({w["repo"] for w in catalog["worktrees"]
-                                      if w["repo"] in repos and w["branch"] == f"pr-{number}"}),
+            "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"]
+                                        if w["repo"] in repos and w["branch"] == f"pr-{number}"}),
             "prompt": fill_prompt(template, issue, pr=url),
         })
     if prs or not missing:
