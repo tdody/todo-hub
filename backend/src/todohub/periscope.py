@@ -22,7 +22,8 @@ LAST_REPO_KEY = "periscope_last_repo"    # meta: the repo last picked for any is
 QUICK_SECONDS = 15
 START_SECONDS = 120                      # a start fetches, makes the worktree, then waits for Claude's screen
 NAME_SECONDS = 30
-_TOKEN = re.compile(r"\{(identifier|title|url)\}")
+_TOKEN = re.compile(r"\{(identifier|title|url|pr)\}")
+_PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -109,9 +110,44 @@ def pane_name(settings: Settings, issue: dict) -> str:
     return "-".join([ident, *words])
 
 
-def fill_prompt(template: str, issue: dict) -> str:
-    """The template with {identifier}, {title} and {url} filled in; other braces stay as typed."""
-    return _TOKEN.sub(lambda m: issue[m.group(1)], template)
+def fill_prompt(template: str, issue: dict, pr: str = "") -> str:
+    """The template with {identifier}, {title} and {url} filled in, and {pr} when a PR's URL is given. Other
+    braces stay as typed."""
+    values = {"identifier": issue["identifier"], "title": issue["title"], "url": issue["url"]}
+    if pr:
+        values["pr"] = pr
+    return _TOKEN.sub(lambda m: values.get(m.group(1), m.group(0)), template)
+
+
+def pr_links(urls: list[str]) -> list[tuple[str, int]]:
+    """The GitHub repo (``owner/name``) and number of each pull request in ``urls``, in order, each once."""
+    found: dict[tuple[str, int], None] = {}
+    for url in urls:
+        if m := _PR_URL.match(url):
+            found.setdefault((m.group(1), int(m.group(2))), None)
+    return list(found)
+
+
+def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue: dict) -> tuple[list[dict], str]:
+    """The popover's PR options: each PR in ``links`` whose GitHub repo is the origin of a periscope repo, with
+    ``template`` filled in for it. When none is, the hint that names the PRs' repos."""
+    prs: list[dict] = []
+    missing: dict[str, None] = {}
+    for slug, number in links:
+        repos = [r["repo"] for r in catalog["repos"] if (r.get("slug") or "").lower() == slug.lower()]
+        if not repos:
+            missing.setdefault(slug, None)
+            continue
+        url = f"https://github.com/{slug}/pull/{number}"
+        prs.append({
+            "number": number, "label": f"{slug}#{number}", "url": url, "repos": repos,
+            "worktree_repos": sorted({w["repo"] for w in catalog["worktrees"]
+                                      if w["repo"] in repos and w["branch"] == f"pr-{number}"}),
+            "prompt": fill_prompt(template, issue, pr=url),
+        })
+    if prs or not missing:
+        return prs, ""
+    return [], f"No periscope repo has {' or '.join(missing)} as its origin. This starts on the Linear branch."
 
 
 def _memory_key(issue: dict) -> tuple[str, str] | None:

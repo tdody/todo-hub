@@ -13,7 +13,7 @@ from todohub.config import load_settings
 from todohub.db import DB
 from todohub.linear import LinearError
 from todohub.periscope import (LAST_REPO_KEY, REPOS_KEY, Periscope, PeriscopeError, default_repo, fill_prompt,
-                               pane_name, remember_repo)
+                               pane_name, pr_links, remember_repo, review_prs)
 from conftest import FakeLinear
 
 URL = "http://127.0.0.1:17374"
@@ -26,6 +26,14 @@ CATALOG = {
     "roots": ["/dev"],
 }
 SPAWNED = {"mode": "spawned", "pid": "k", "path": "/dev/worktrees/api/me-eng-1", "reused": False}
+# The catalog of a periscope that sends each repo's slug. web's slug has capitals: GitHub ignores case.
+SLUGGED = {
+    **CATALOG,
+    "repos": [{**CATALOG["repos"][0], "slug": "acme/api"}, {**CATALOG["repos"][1], "slug": "Acme/Web"}],
+    "worktrees": [*CATALOG["worktrees"],
+                  {"path": "/dev/worktrees/api/pr-812", "repo": "/dev/api", "branch": "pr-812", "is_main": False}],
+}
+PR = "https://github.com/acme/api/pull/812"
 
 
 @pytest.fixture
@@ -155,6 +163,40 @@ def test_fill_prompt_fills_three_tokens_and_keeps_other_braces():
     issue = {"identifier": "ENG-1", "title": "Fix {url} in {that}", "url": "https://linear.app/x/issue/ENG-1"}
     assert fill_prompt("Read {identifier}: {title} at {url}. Keep {this}.", issue) == \
         "Read ENG-1: Fix {url} in {that} at https://linear.app/x/issue/ENG-1. Keep {this}."
+
+
+def test_fill_prompt_fills_pr_only_when_it_is_given():
+    issue = {"identifier": "ENG-1", "title": "Fix", "url": "https://linear.app/x/issue/ENG-1"}
+    assert fill_prompt("Review {pr} for {identifier}.", issue, pr=PR) == f"Review {PR} for ENG-1."
+    assert fill_prompt("Review {pr} for {identifier}.", issue) == "Review {pr} for ENG-1."
+
+
+def test_pr_links_keeps_pull_requests_in_order_once():
+    assert pr_links([
+        "https://example.slack.com/archives/C1/p1",
+        "https://github.com/acme/web/pull/455",
+        "https://github.com/acme/api/issues/3",
+        "https://github.com/acme/api/commit/abc123",
+        f"{PR}/files",
+        "https://github.com/acme/web/pull/455#discussion_r1",
+    ]) == [("acme/web", 455), ("acme/api", 812)]
+
+
+def test_review_prs_match_repos_by_origin_and_name_the_missing_ones():
+    issue = {"identifier": "ENG-3", "title": "Review", "url": "https://linear.app/x/issue/ENG-3"}
+    prs, hint = review_prs([("acme/web", 455), ("acme/api", 812)], SLUGGED, "Review {pr}.", issue)
+    assert prs == [
+        {"number": 455, "label": "acme/web#455", "url": "https://github.com/acme/web/pull/455",
+         "repos": ["/dev/web"], "worktree_repos": [], "prompt": "Review https://github.com/acme/web/pull/455."},
+        {"number": 812, "label": "acme/api#812", "url": PR,
+         "repos": ["/dev/api"], "worktree_repos": ["/dev/api"], "prompt": f"Review {PR}."},
+    ]
+    assert hint == ""
+    assert review_prs([("acme/ios", 7), ("acme/infra", 9), ("acme/ios", 8)], SLUGGED, "Review {pr}.", issue) == (
+        [], "No periscope repo has acme/ios or acme/infra as its origin. This starts on the Linear branch.")
+    # One PR with a repo is enough: the others are not offered, and there is no hint.
+    prs, hint = review_prs([("acme/ios", 7), ("acme/api", 812)], SLUGGED, "Review {pr}.", issue)
+    assert [p["label"] for p in prs] == ["acme/api#812"] and hint == ""
 
 
 def test_default_repo_project_then_client_then_last():
