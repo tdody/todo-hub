@@ -150,13 +150,13 @@ function toast(message: string, action?: ToastAction | ToastAction[], error = fa
 // ---- undo -----------------------------------------------------------------------------------
 // Every action that changes Linear or takes a card out of the Inbox offers Undo in its banner,
 // and ⌘Z undoes the most recent ones, one at a time, for 10 minutes.
-export interface UndoEntry { done: string; run: () => Promise<void>; at: number; banner?: HTMLElement }
+export interface UndoEntry { done: string; run: () => Promise<string | null | void>; at: number; banner?: HTMLElement }
 const undoStack: UndoEntry[] = [];
 const UNDO_FOR_MS = 10 * 60_000;
 let undoing = false;
 
 /** Show the banner for an action and remember how to reverse it. */
-function offerUndo(message: string, done: string, run: () => Promise<void>, extra?: ToastAction): UndoEntry {
+function offerUndo(message: string, done: string, run: () => Promise<string | null | void>, extra?: ToastAction): UndoEntry {
   const entry: UndoEntry = { done, run, at: Date.now() };
   undoStack.push(entry);
   if (undoStack.length > 20) undoStack.shift();
@@ -178,8 +178,9 @@ async function undo(entry?: UndoEntry) {
   entry.banner?.remove();
   undoing = true;
   try {
-    await entry.run();
+    const note = await entry.run();
     toast(`Undone: ${entry.done}`);
+    if (note) toast(note);
   } catch (e) {
     undoStack.push(entry);        // keep it so ⌘Z can retry
     fail(e);
@@ -190,7 +191,7 @@ async function undo(entry?: UndoEntry) {
 }
 
 /** Undo approvals and drops: each candidate goes back to the Inbox. */
-async function undoDecisions(ids: number[], reloadIssues: boolean) {
+async function undoDecisions(ids: number[], reloadIssues: boolean): Promise<string | null> {
   const problems: string[] = [];
   const kept: string[] = [];
   for (const id of ids) {
@@ -205,7 +206,7 @@ async function undoDecisions(ids: number[], reloadIssues: boolean) {
   await loadCandidates();
   if (reloadIssues && state.issuesLoaded) await loadIssues().catch(() => undefined);
   for (const w of problems) toast(w, undefined, true);
-  if (kept.length) toast(`The client label${kept.length === 1 ? "" : "s"} ${kept.join(", ")} stay${kept.length === 1 ? "s" : ""} in Linear.`);
+  return kept.length ? `The client label${kept.length === 1 ? "" : "s"} ${kept.join(", ")} stay${kept.length === 1 ? "s" : ""} in Linear.` : null;
 }
 
 function fail(e: unknown) {
@@ -325,6 +326,10 @@ async function approve(c: Candidate, opts: { quiet?: boolean } = {}): Promise<st
     state.candidates = state.candidates.filter((x) => x.id !== c.id);
     // Bulk approvals skip the swipe so a batch doesn't take seconds.
     if (!opts.quiet) await swipeAway(c.id);
+    if (c.new_client_label) {
+      state.meta = await api.meta();
+      await loadCandidates();
+    }
     const added = new Set([issue.id, ...subtasks.map((s) => s.id)]);
     state.issues = [issue, ...subtasks, ...state.issues.filter((i) => !added.has(i.id))];
     const extra = (subtasks.length ? ` with ${subtasks.length} subtask${subtasks.length === 1 ? "" : "s"}` : "")
@@ -340,6 +345,7 @@ async function approve(c: Candidate, opts: { quiet?: boolean } = {}): Promise<st
     for (const w of warnings) toast(w, undefined, true);
     return created_label ?? null;
   } catch (e) {
+    void loadCandidates().then(render);
     if (opts.quiet) throw e;
     fail(e);
   } finally {
@@ -644,13 +650,13 @@ function priorityTag(p: number): HTMLElement | "" {
 /** The select's value for a candidate's proposed new client label (no label name has this character). */
 const NEW_CLIENT = "\u0001new";
 
-function clientSelect(value: string | null, onChange: (v: string | null) => void, newName: string | null = null) {
+function clientSelect(value: string | null, onChange: (v: string | null) => void, newName: string | null = null, focusKey?: string) {
   // A label newer than the loaded list (or none loaded) still shows as the issue's client.
   const known = state.meta?.client_labels ?? [];
   const labels = value && value !== NEW_CLIENT && !known.includes(value) ? [value, ...known] : known;
   return quietSelect(h(
     "select",
-    { class: "client", title: "Client label", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
+    { class: "client", title: "Client label", "data-focus": focusKey, onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
     newName ? h("option", { value: NEW_CLIENT, selected: value === NEW_CLIENT }, `${newName} (new)`) : "",
     h("option", { value: "", selected: !value }, "Dev / internal"),
     ...labels.map((l) => h("option", { value: l, selected: l === value }, l)),
@@ -658,11 +664,11 @@ function clientSelect(value: string | null, onChange: (v: string | null) => void
 }
 
 /** A candidate for a customer with no client label: approving creates the label first. */
-function newClientBox(name: string): HTMLElement {
+function newClientBox(name: string, verb: string): HTMLElement {
   return h("div", { class: "link-box new-client" },
     h("div", { class: "link-head" }, "New client label"),
     h("div", { class: "link-issue" }, h("strong", {}, name), " has no client label in Linear yet."),
-    h("div", { class: "link-facts" }, "Approve creates it in the client group, where everyone in the workspace sees it."));
+    h("div", { class: "link-facts" }, `${verb} creates it in the client label group, where everyone in the workspace sees it.`));
 }
 
 function projectSelect(value: string | null, onChange: (v: string | null) => void) {
@@ -836,7 +842,7 @@ async function bulk(action: "approve" | "drop", reason: DropReason = "other") {
   await loadCandidates();
   render();
   const message = `${action === "approve" ? "Approved" : "Dropped"} ${done.length} of ${picked.length}`
-    + (labels.length ? `. Created the client label${labels.length === 1 ? "" : "s"} ${labels.join(", ")}` : "");
+    + (labels.length ? `, created the client label${labels.length === 1 ? "" : "s"} ${labels.join(", ")}` : "");
   if (!done.length) { toast(message); return; }
   offerUndo(message, `${done.length} task${done.length === 1 ? "" : "s"} back in the Inbox`,
     () => undoDecisions(done, action === "approve"));
@@ -975,8 +981,8 @@ async function mute(key: MuteKey, alsoDrop: Candidate | null = null) {
       `${key.label} unmuted${back.length ? `, ${back.length} card${back.length === 1 ? "" : "s"} back in the Inbox` : ""}`,
       async () => {
         await api.deleteMute(rule.id);
-        if (back.length) await undoDecisions(back, false);
-        else await loadCandidates();
+        if (back.length) return await undoDecisions(back, false);
+        await loadCandidates();
       });
   } catch (e) {
     fail(e);
@@ -1406,6 +1412,14 @@ function decide(c: Candidate) {
   else void approve(c);
 }
 
+/** The client label that approving this card creates first: the proposed one, unless the card picked
+ *  a client, or its action creates no issue (close, update, a merge or drop plan). */
+function newClientLabel(c: Candidate, d: CandidateEdit): string | null {
+  if ("client_label" in d || c.kind === "close" || c.kind === "comment") return null;
+  if (isLinked(c) && linkChoice(c).pick !== "new") return null;
+  return c.new_client_label;
+}
+
 function candidateCardBody(c: Candidate): HTMLElement {
   const d = draft(c);
   const val = <K extends keyof CandidateEdit>(k: K) => (k in d ? d[k] : (c as unknown as CandidateEdit)[k]);
@@ -1419,8 +1433,7 @@ function candidateCardBody(c: Candidate): HTMLElement {
   const label = pick === "merge" ? `Merge into ${c.possible_duplicate}` : pick === "drop" ? "Drop"
     : pick === "new" && c.kind === "task" ? "Create issue"
     : { task: "Approve", waiting: "Track", close: `Close ${c.target_issue}`, comment: "Post update" }[c.kind];
-  // A customer with no client label yet, unless the card picked a label or Dev / internal instead.
-  const newClient = showFields && !("client_label" in d) ? c.new_client_label : null;
+  const newClient = newClientLabel(c, d);
   const action = newClient ? `${label}, add label` : label;
 
   const titleEl = acting
@@ -1473,14 +1486,14 @@ function candidateCardBody(c: Candidate): HTMLElement {
     }),
     linksRow(c),
     showFields && subtaskEditor(c, d),
-    newClient && newClientBox(newClient),
+    newClient && newClientBox(newClient, label),
     h(
       "div",
       { class: "card-actions" },
       showFields && clientSelect(newClient ? NEW_CLIENT : val("client_label") ?? null, (v) => {
         if (v === NEW_CLIENT) delete d.client_label; else d.client_label = v;
         render();          // the box, the button and the list chip follow the pick
-      }, c.new_client_label),
+      }, c.new_client_label, `client-${c.id}`),
       showFields && projectSelect(val("project") ?? null, (v) => { d.project = v; }),
       showFields && priorityPill(val("priority") ?? 0, (v) => { d.priority = v; }),
       showFields && c.kind === "waiting" && h("span", { class: "muted small" }, "Follow up"),
@@ -1532,7 +1545,7 @@ function inboxItem(c: Candidate, on: boolean): HTMLElement {
   const d = state.drafts.get(c.id) ?? {};
   const today = localToday();
   const client = "client_label" in d ? d.client_label : c.client_label;
-  const newClient = "client_label" in d ? null : c.new_client_label;
+  const newClient = newClientLabel(c, d);
   const priority = "priority" in d ? d.priority ?? 0 : c.priority;
   const due = "due_date" in d ? d.due_date ?? null : c.due_date;
   const chips: (HTMLElement | "")[] = [];

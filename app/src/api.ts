@@ -400,7 +400,7 @@ export interface ApproveResult {
   subtasks: Issue[];
   warnings: string[];
   /** The client label that approve created first, if any. */
-  created_label?: string | null;
+  created_label: string | null;
 }
 
 export interface IssueEdit {
