@@ -63,13 +63,15 @@ class Periscope:
         """Its repos and worktrees: {repos: [{repo, label, …}], worktrees: [{path, repo, branch, …}], roots}."""
         return self._call("GET", "/api/open/catalog")
 
-    def start(self, *, repo: str, branch: str, ticket: str, title: str, prompt: str, name: str) -> dict:
-        """{mode: "spawned", pid, path, reused, session_id, email}, or {mode: "existing", pid} when a Claude is
+    def start(self, *, repo: str, ticket: str, title: str, prompt: str, name: str, branch: str = "",
+              pr: int | None = None) -> dict:
+        """Start Claude on ``branch``, or on pull request ``pr``, which periscope checks out as ``pr-<N>``.
+        {mode: "spawned", pid, path, reused, session_id, email}, or {mode: "existing", pid} when a Claude is
         already on the branch. Periscope gives a spawned Claude ``name`` on its rail and pins it. ``email`` is None
         when periscope finds no email for the account, and an older periscope sends neither field."""
+        target = {"pr": pr} if pr is not None else {"branch": branch}
         return self._call("POST", "/api/linear/start",
-                          {"repo": repo, "branch": branch, "ticket": ticket, "title": title, "prompt": prompt,
-                           "name": name},
+                          {"repo": repo, **target, "ticket": ticket, "title": title, "prompt": prompt, "name": name},
                           START_SECONDS)
 
     def select(self, pid: str) -> None:

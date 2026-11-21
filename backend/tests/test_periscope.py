@@ -72,6 +72,13 @@ def test_client_calls(peri):
     ]
 
 
+def test_client_start_with_a_pr_sends_no_branch(peri):
+    Periscope(URL, transport=peri.transport).start(repo="/dev/api", pr=812, ticket="ENG-3", title="Review",
+                                                   prompt="Review it.", name="eng-3")
+    assert peri.calls == [("POST", "/api/linear/start", {"repo": "/dev/api", "pr": 812, "ticket": "ENG-3",
+                                                         "title": "Review", "prompt": "Review it.", "name": "eng-3"})]
+
+
 def test_client_errors(peri):
     client = Periscope(URL, transport=peri.transport)
     peri.answer = httpx.Response(409, json={"detail": "start already running"})
@@ -359,6 +366,20 @@ def test_start_sends_the_issue_and_its_name_and_remembers_the_repo(env, peri, li
     assert linear.comments == []
 
 
+def test_a_pr_start_sends_the_pr_and_keeps_the_remembered_repos(env, peri, linear):
+    client, db, _ = env
+    peri.answer = httpx.Response(200, json={**SPAWNED, "session_id": "3f2a9c1e-5b7d-4e2a-9f10-2c4d6e8a0b1c",
+                                            "email": "you@example.com"})
+    r = client.post("/api/issues/id-ENG-1/periscope", json={"repo": "/dev/api", "pr": 812, "prompt": "Review it."})
+    assert r.status_code == 200
+    assert peri.calls[-1] == ("POST", "/api/linear/start", {
+        "repo": "/dev/api", "pr": 812, "ticket": "ENG-1", "title": "Rebin Globex grades",
+        "prompt": "Review it.", "name": "eng-1-rebin"})
+    # The PR chose the repo, not you.
+    assert db.get_meta(REPOS_KEY) is None and db.get_meta(LAST_REPO_KEY) is None
+    assert len(linear.comments) == 1
+
+
 def test_a_claude_already_on_the_branch_is_answered_and_the_repo_remembered(env, peri, linear):
     client, db, _ = env
     peri.answer = httpx.Response(200, json={"mode": "existing", "pid": "p1"})
@@ -479,10 +500,11 @@ def test_meta_says_whether_periscope_is_on(peri):
         assert TestClient(app).get("/api/meta").json()["periscope"] is expected
 
 
-def test_a_blank_branch_is_a_400_and_periscope_is_not_asked(env, peri):
+@pytest.mark.parametrize("target", [{"branch": "me/eng-1", "pr": 812}, {}, {"branch": "   "}])
+def test_a_start_needs_a_branch_or_a_pr(env, peri, target):
     client, _, _ = env
-    r = client.post("/api/issues/id-ENG-1/periscope", json={**START, "branch": "   "})
-    assert r.status_code == 400 and r.json() == {"error": "The branch is empty"}
+    r = client.post("/api/issues/id-ENG-1/periscope", json={"repo": "/dev/api", "prompt": "Read.", **target})
+    assert r.status_code == 400 and r.json() == {"error": "Send a branch or a PR."}
     assert peri.calls == []
 
 

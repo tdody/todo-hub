@@ -114,7 +114,8 @@ class PeriscopePromptsIn(BaseModel):
 
 class PeriscopeStartIn(BaseModel):
     repo: str = Field(min_length=1, max_length=500)       # a repo path from periscope's catalog
-    branch: str = Field(min_length=1, max_length=250)
+    branch: str = Field(default="", max_length=250)       # the branch to start on, or
+    pr: int | None = Field(default=None, gt=0)            # a PR that periscope checks out as pr-<N>
     prompt: str = Field(min_length=1, max_length=8000)
 
 
@@ -987,23 +988,25 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.post("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
-        """Ask periscope to start Claude on the branch with the prompt and a name from Haiku, then remember the
-        repo for the issue's project (or client). A Claude already on the branch is answered as mode "existing".
-        A new Claude's session goes into a comment on the issue; a comment that fails is a warning."""
+        """Ask periscope to start Claude on the branch, or on the PR, with the prompt and a name from Haiku. A branch
+        start remembers the repo for the issue's project (or client); a PR start does not, because the PR chose
+        the repo. A Claude already on the branch is answered as mode "existing". A new Claude's session goes into
+        a comment on the issue; a comment that fails is a warning."""
         branch = body.branch.strip()
-        if not branch:
-            raise HTTPException(400, "The branch is empty")
+        if bool(branch) == (body.pr is not None):
+            raise HTTPException(400, "Send a branch or a PR.")
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
         name = name_claude(issue)
         try:
             result = periscope_call(lambda p: p.start(
-                repo=body.repo, branch=branch, ticket=issue["identifier"], title=issue["title"],
+                repo=body.repo, branch=branch, pr=body.pr, ticket=issue["identifier"], title=issue["title"],
                 prompt=body.prompt, name=name))
         except HTTPException as exc:
             if exc.status_code == 409:
                 raise HTTPException(409, f"Periscope is already starting {issue['identifier']}.")
             raise
-        remember_repo(db, issue, body.repo)
+        if body.pr is None:
+            remember_repo(db, issue, body.repo)
         warnings: list[str] = []
         if result.get("session_id"):
             comment = (f"- Started: {datetime.now(stats.TZ).replace(microsecond=0).isoformat()}\n"
