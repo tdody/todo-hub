@@ -114,8 +114,9 @@ class PeriscopePromptsIn(BaseModel):
 
 class PeriscopeStartIn(BaseModel):
     repo: str = Field(min_length=1, max_length=500)       # a repo path from periscope's catalog
-    branch: str = Field(default="", max_length=250)       # the branch to start on, or
-    pr: int | None = Field(default=None, gt=0)            # a PR that periscope checks out as pr-<N>
+    # Exactly one of: the branch to start on, or a PR that periscope checks out as pr-<N>.
+    branch: str = Field(default="", max_length=250)
+    pr: int | None = Field(default=None, gt=0)
     prompt: str = Field(min_length=1, max_length=8000)
 
 
