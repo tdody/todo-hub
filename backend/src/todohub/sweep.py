@@ -181,7 +181,8 @@ def source_sections(settings: Settings, since: datetime, mentions: str | None = 
             "propose a prep task: "
             '`signal` "meeting_prep", `source` "calendar", the event id as `source_id`, its htmlLink as '
             '`source_url`, title "Prep for the <client> call <weekday> <time>", `due_date` the meeting date, '
-            "`client_label` only when the company is a customer (see \"Filling the fields\"), and `subtasks`: one \"Check <identifier>: <title>\" for "
+            "`client_label` only when the company is a customer (see \"Filling the fields\"), "
+            "and `subtasks`: one \"Check <identifier>: <title>\" for "
             "each of his open issues with that client label (from the list below, up to 8), plus \"Review notes "
             'from the last <client> call" if Grain has one. Link the agenda or deck if the event has one. '
             "Skip internal meetings, declined events, and all-day events.\n"

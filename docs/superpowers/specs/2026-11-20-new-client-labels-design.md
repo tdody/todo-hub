@@ -70,7 +70,7 @@ When a candidate has a `new_client_label`, and the card's action creates an issu
 - **Box.** Above the fields, a box with the linked issue box's style (`link-box`): the heading "New client label", then "**Hooli** has no client label in Linear yet.", then, in 12px Pencil, "Approve creates it in the client label group, where everyone in the workspace sees it." The line names the button's verb: Approve, Track or Create issue.
 - **Select.** The client select's first option is "Hooli (new)", selected. Pick a label, and the new name, the box and the button suffix go. Pick "Dev / internal", and both fields go. Pick "Hooli (new)" again, and the card drops its client change.
 - **Button.** The primary button's name gets ", add label": "Approve, add label", "Track, add label", or "Create issue, add label" on a linked card. Its tooltip says "Creates the client label Hooli in Linear, then the issue. ⌘↩". When the row wraps, the button stays at the right edge. In the default 1120px window, Snooze and Drop leave 160px, and "Approve, add label" takes 156px, so it fits on their line.
-- **List.** The item shows the chip "Hooli (new)" in place of the client chip: the client chip's accent text, with a 1px accent outline in place of the fill.
+- **List.** The item shows the chip "Hooli (new)" in place of the client chip: the client chip's accent text, with a 1px accent-tinted outline in place of the fill. It shows only when the card's action creates an issue.
 
 While a merge or drop plan is open, the box and the suffix do not show, because merge creates no label.
 
