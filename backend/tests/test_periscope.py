@@ -7,14 +7,14 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from todohub import periscope
+from todohub import periscope, tools
 from todohub.api import create_app
 from todohub.config import load_settings
 from todohub.db import DB
 from todohub.linear import LinearError
 from todohub.periscope import (LAST_REPO_KEY, REPOS_KEY, Periscope, PeriscopeError, default_repo, fill_prompt,
                                pane_name, pr_links, remember_repo, review_prs)
-from conftest import FakeLinear
+from conftest import FakeLinear, make_issue
 
 URL = "http://127.0.0.1:17374"
 APP_ID = "com.example.periscope"
@@ -41,13 +41,13 @@ PR = "https://github.com/acme/api/pull/812"
 @pytest.fixture
 def peri():
     """Periscope behind an httpx MockTransport. ``calls`` holds (method, path, body); set ``answer`` to change
-    what POST /api/linear/start answers."""
-    p = SimpleNamespace(calls=[], answer=httpx.Response(200, json=SPAWNED))
+    what POST /api/linear/start answers, and ``catalog`` to change the catalog."""
+    p = SimpleNamespace(calls=[], answer=httpx.Response(200, json=SPAWNED), catalog=CATALOG)
 
     def handler(request: httpx.Request) -> httpx.Response:
         p.calls.append((request.method, request.url.path, json.loads(request.content) if request.content else None))
         if request.url.path == "/api/open/catalog":
-            return httpx.Response(200, json=CATALOG)
+            return httpx.Response(200, json=p.catalog)
         if request.url.path == "/api/linear/start":
             return p.answer
         if request.url.path == "/api/select":
@@ -280,7 +280,71 @@ def test_options_fill_the_popover(env):
         "branch_worktrees": ["/dev/web"],
         "prompt": "Read Linear ticket ENG-1 (https://linear.app/x/issue/ENG-1) and its comments with the Linear "
                   "tools. Sum up the ask, then propose a plan. Do not change code until I agree.",
+        "prs": [],
+        "pr_hint": "",
     }
+
+
+REVIEW_PROMPT = (f"Read Linear ticket ENG-3 (https://linear.app/x/issue/ENG-3) and its comments with the Linear tools. "
+                 f"Then review {PR} in this worktree: sum up the change and list the problems you find. "
+                 f"Do not post anything on GitHub.")
+
+
+def review_issue(linear, links, identifier="ENG-3", title="Review acme/api#812: Retry stuck uploads"):
+    """A review ticket with ``links``. make_issue's Bug label would make it a code ticket, so it has no label."""
+    issue = make_issue(identifier, title)
+    issue["labels"]["nodes"] = []
+    linear.issues.append(issue)
+    linear.existing_links = {issue["id"]: list(links)}
+    return issue
+
+
+def test_a_review_ticket_offers_its_pr(env, peri, linear):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    review_issue(linear, ["https://example.slack.com/archives/C1/p1", f"{PR}/files"])
+    o = client.get("/api/issues/id-ENG-3/periscope").json()
+    assert o["prs"] == [{"number": 812, "label": "acme/api#812", "url": PR, "repos": ["/dev/api"],
+                         "branch_worktrees": ["/dev/api"], "prompt": REVIEW_PROMPT}]
+    assert o["pr_hint"] == ""
+    # The branch start stays, for "None: start on the Linear branch".
+    assert o["branch"] == "me/eng-3" and o["prompt"].startswith("Read Linear ticket ENG-3")
+
+
+def test_a_review_ticket_whose_pr_has_no_repo_gets_a_hint(env, peri, linear):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    review_issue(linear, ["https://github.com/acme/ios/pull/7"])
+    o = client.get("/api/issues/id-ENG-3/periscope").json()
+    assert o["prs"] == []
+    assert o["pr_hint"] == "No periscope repo has acme/ios as its origin. This starts on the Linear branch."
+
+
+def test_a_ticket_that_is_not_a_review_does_not_read_its_links(env, peri, linear):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    linear.attachment_urls = lambda issue_id: pytest.fail("read the links of a code ticket")
+    o = client.get("/api/issues/id-ENG-1/periscope").json()
+    assert o["prs"] == [] and o["pr_hint"] == ""
+
+
+def test_a_ticket_you_approved_as_a_review_gets_its_pr(env, peri, linear):
+    client, db, _ = env
+    peri.catalog = SLUGGED
+    linear.existing_links = {"id-ENG-1": [PR]}       # ENG-1's Bug label makes it a code ticket by the rules
+    cid = tools.add_candidate(db, None, source="slack", source_id="C1:9", title="Rebin Globex grades",
+                              signal="ask", why="Sam asked.", excerpt="can you look", category="review",
+                              source_url="https://example.slack.com/archives/C1/p9")["id"]
+    db.decide(cid, "approved", "ENG-1", "https://linear.app/x/issue/ENG-1")
+    assert [p["label"] for p in client.get("/api/issues/id-ENG-1/periscope").json()["prs"]] == ["acme/api#812"]
+
+
+def test_an_older_periscope_gets_no_prs_and_no_hint(env, linear):
+    client, _, _ = env                                 # CATALOG has no slug: that periscope cannot take a pr
+    review_issue(linear, [PR])
+    linear.attachment_urls = lambda issue_id: pytest.fail("read the links for a periscope that cannot take a pr")
+    o = client.get("/api/issues/id-ENG-3/periscope").json()
+    assert o["prs"] == [] and o["pr_hint"] == ""
 
 
 def test_start_sends_the_issue_and_its_name_and_remembers_the_repo(env, peri, linear):

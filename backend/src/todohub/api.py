@@ -34,7 +34,7 @@ from .config import (DEFAULT_PERISCOPE_PROMPT, DEFAULT_PERISCOPE_REVIEW_PROMPT, 
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
 from .periscope import (Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, pane_name,
-                        remember_repo)
+                        pr_links, remember_repo, review_prs)
 from .selfcmd import self_command
 from .sources import SourceError
 from .sweep import _env, next_working_day
@@ -965,17 +965,24 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.get("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_options(issue_id: str) -> dict:
         """What the popover shows first: periscope's repos, the one to select and why, Linear's branch, the
-        repos with a worktree already on it, and the Settings page's prompt filled in for the issue."""
+        repos with a worktree already on it and the Settings page's prompt filled in for the issue. For a review
+        ticket, also its PRs that periscope can check out (``prs``), or why it has none (``pr_hint``)."""
         raw = linear_call(lambda l: l.get_issue(issue_id))
-        issue = shape_issue(raw, settings)
+        [issue] = shape_issues([raw])
         catalog = periscope_call(lambda p: p.catalog())
         repos = [{"repo": r["repo"], "label": r["label"]} for r in catalog["repos"]]
         repo, hint = default_repo(db, issue, [r["repo"] for r in repos])
         branch = raw["branchName"]
+        prs, pr_hint = [], ""
+        # An older periscope sends no slug, and cannot check out a PR.
+        if issue["category"] == "review" and any("slug" in r for r in catalog["repos"]):
+            urls = linear_call(lambda l: l.attachment_urls(issue["id"]))
+            prs, pr_hint = review_prs(pr_links(urls), catalog, settings.periscope_review_prompt, issue)
         return {
             "repos": repos, "repo": repo, "hint": hint, "branch": branch,
             "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"] if w["branch"] == branch}),
             "prompt": fill_prompt(settings.periscope_prompt, issue),
+            "prs": prs, "pr_hint": pr_hint,
         }
 
     @app.post("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
