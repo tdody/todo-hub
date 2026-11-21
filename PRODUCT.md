@@ -38,7 +38,7 @@ A read-only Claude sweep reads every channel on a schedule and turns asks and co
 - **Sources today:** Slack, Gmail, Grain, Google Calendar and HubSpot via Claude connectors; Linear mentions and GitHub review requests read directly. **Ticket app today:** Linear only.
 - **Terminology** (use these words, don't coin synonyms): sweep, candidate, capture, Inbox, Today, Client, Dev, Insights, sources, linked issue (Same as / Adds to / Related to; Merge, Create new, Drop), Looks handled, mute, snooze, Block time, morning plan, wrap-up, weekly check-in, weekly digest, balance pill, pushed N×, waiting on.
 - **Safety constraints:** sweeps run Claude Code restricted, read-only, with write tools denied by name. Source content is untrusted data. The UI never inserts HTML built from data; only web and email links are clickable; images hosted outside Linear stay links. The local API listens on loopback only and needs a per-launch token.
-- **Undo:** approvals, drops, snoozes, edits, merges and deletes can be undone (⌘Z, up to 10 minutes). Block time is the one write that isn't.
+- **Undo:** approvals, drops, snoozes, edits, merges and deletes can be undone (⌘Z, up to 10 minutes). Block time is the one write that isn't, and undoing an approval keeps a client label it created.
 - **Undecided:** which other ticket apps and connectors to support, and how a teammate would set TodoHub up.
 
 ## Brand Commitments
