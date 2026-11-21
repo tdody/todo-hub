@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -431,6 +432,40 @@ def client_labels_of(issue: dict, client_group: str) -> list[dict]:
 def client_label_of(issue: dict, client_group: str) -> str | None:
     found = client_labels_of(issue, client_group)
     return found[0]["name"] if found else None
+
+
+LEGAL_SUFFIXES = {"inc", "llc", "co", "corp", "corporation", "ltd", "company"}
+
+
+def _normalized(name: str) -> str:
+    """Lowercase letters and digits, without a last word that is a legal suffix ("Globex, Inc." -> "globex")."""
+    words = [w for w in (re.sub(r"[^a-z0-9]", "", w) for w in name.lower().split()) if w]
+    if len(words) > 1 and words[-1] in LEGAL_SUFFIXES:
+        words.pop()
+    return "".join(words)
+
+
+def _names_of(label: str) -> list[str]:
+    """A label's name and its other names: "A dba B", "A (fka B)" and "A (B)" also name A and B."""
+    names = [label]
+    for pattern in (r"(.+?)\s+dba\s+(.+)", r"(.+?)\s*\((?:fka\s+)?(.+?)\)\s*"):
+        m = re.fullmatch(pattern, label, re.IGNORECASE)
+        if m:
+            names += [m.group(1), m.group(2)]
+    return names
+
+
+def matching_client_label(name: str, labels: list[str]) -> str | None:
+    """The client label that ``name`` names, or None. Case, punctuation and a legal suffix don't count,
+    and a label's other names count. Of two matches, the label with the same name wins."""
+    key = _normalized(name)
+    if not key:
+        return None
+    found = [label for label in labels if any(_normalized(n) == key for n in _names_of(label))]
+    same = [label for label in found if label.lower() == name.strip().lower()]
+    if len(found) == 1:
+        return found[0]
+    return same[0] if len(same) == 1 else None
 
 
 def shape_issue(issue: dict, settings: Settings) -> dict:

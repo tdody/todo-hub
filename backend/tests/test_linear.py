@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from todohub.config import Settings
-from todohub.linear import Linear, LinearError, client_labels_of, shape_issue
+from todohub.linear import Linear, LinearError, client_labels_of, matching_client_label, shape_issue
 from conftest import make_issue
 
 
@@ -167,3 +167,33 @@ def test_issues_carry_linears_branch_name():
     from todohub.linear import ISSUE_FIELDS
 
     assert "branchName" in ISSUE_FIELDS.split()
+
+
+LABELS = ["Globex", "PiedPiper", "Initech dba Initrode", "Hooli (fka Nucleus)", "Umbrella (Cypress)",
+          "Acme Bolt Company", "Zinc"]
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("globex", "Globex"),
+    ("Globex, Inc.", "Globex"),
+    ("GLOBEX LLC", "Globex"),
+    ("Pied-Piper", "PiedPiper"),
+    ("Initrode", "Initech dba Initrode"),
+    ("initech", "Initech dba Initrode"),
+    ("Nucleus", "Hooli (fka Nucleus)"),
+    ("hooli", "Hooli (fka Nucleus)"),
+    ("Cypress", "Umbrella (Cypress)"),
+    ("Zinc", "Zinc"),
+    ("Zinc Inc", "Zinc"),
+    ("Globex Mining", None),     # no partial match
+    ("ABC", None),               # no initials ("Acme Bolt Company")
+    ("Inc.", None),
+    ("", None),
+])
+def test_matching_client_label(name, expected):
+    assert matching_client_label(name, LABELS) == expected
+
+
+def test_matching_client_label_with_two_matches():
+    assert matching_client_label("globex", ["Globex, Inc.", "Globex"]) == "Globex"   # the same name wins
+    assert matching_client_label("Globex Corp", ["Globex, Inc.", "Globex LLC"]) is None
