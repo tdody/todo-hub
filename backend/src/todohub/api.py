@@ -684,9 +684,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             source = SOURCE_NAMES.get(c["source"], c["source"])
             links = ([{"url": c["source_url"], "title": source}] if c.get("source_url") else []) + c["links"]
             try:
-                have = client.attachment_urls(target["id"]) if links else set()
+                have = client.attachment_urls(target["id"]) if links else []
             except LinearError:
-                have = set()
+                have = []
             for link in links:
                 if link["url"] in have:
                     continue          # already on the issue; leave it alone (and out of undo)

@@ -120,7 +120,7 @@ class FakeLinear:
         return self.due_history
 
     def attachment_urls(self, issue_id):
-        return set(self.existing_links.get(issue_id, []))
+        return list(self.existing_links.get(issue_id, []))
 
     def delete_attachment(self, attachment_id):
         self.deleted_attachments = getattr(self, "deleted_attachments", []) + [attachment_id]
