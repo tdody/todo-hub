@@ -28,9 +28,9 @@ from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
 from . import logos, mutes, pulls, schedule, stats, summary, tools
 from .categories import categorize
-from .config import (DEFAULT_PERISCOPE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST, SCHEDULE_LAST,
-                     SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides, source_state,
-                     write_overrides)
+from .config import (DEFAULT_PERISCOPE_PROMPT, DEFAULT_PERISCOPE_REVIEW_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY,
+                     SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings, get_linear_key, load_settings,
+                     read_overrides, source_state, write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, shape_issue
 from .periscope import (Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, pane_name,
@@ -107,8 +107,9 @@ class DaylightIn(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
-class PeriscopePromptIn(BaseModel):
-    prompt: str = Field(max_length=8000)       # empty: back to the default
+class PeriscopePromptsIn(BaseModel):
+    prompt: str | None = Field(default=None, max_length=8000)          # empty: back to the default
+    review_prompt: str | None = Field(default=None, max_length=8000)   # left out: stays as it is
 
 
 class PeriscopeStartIn(BaseModel):
@@ -380,7 +381,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     def save_override(section: str, value) -> None:
         data = read_overrides()
-        if isinstance(value, dict) and isinstance(data.get(section), dict) and section == "sources":
+        if isinstance(value, dict) and isinstance(data.get(section), dict) and section in ("sources", "periscope"):
             data[section] = {**data[section], **value}
         else:
             data[section] = value
@@ -396,7 +397,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "daylight": {"place": settings.daylight_place, "latitude": settings.daylight_latitude,
                          "longitude": settings.daylight_longitude},
             "periscope": {"enabled": settings.periscope_on, "prompt": settings.periscope_prompt,
-                          "default_prompt": DEFAULT_PERISCOPE_PROMPT},
+                          "default_prompt": DEFAULT_PERISCOPE_PROMPT,
+                          "review_prompt": settings.periscope_review_prompt,
+                          "default_review_prompt": DEFAULT_PERISCOPE_REVIEW_PROMPT},
         }
 
     @app.get("/api/settings", dependencies=auth)
@@ -444,9 +447,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return settings_body()
 
     @app.put("/api/settings/periscope", dependencies=auth)
-    def set_periscope(body: PeriscopePromptIn) -> dict:
-        """The prompt Start in periscope sends; an empty one goes back to the default."""
-        save_override("periscope", {"prompt": body.prompt.strip()})
+    def set_periscope(body: PeriscopePromptsIn) -> dict:
+        """The prompts Start in periscope sends. An empty one goes back to the default; one left out stays."""
+        save_override("periscope", {k: v.strip() for k, v in body.model_dump().items() if v is not None})
         return settings_body()
 
     # ---- review queue -----------------------------------------------------------------
