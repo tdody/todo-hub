@@ -479,6 +479,7 @@ def test_undo_approve_trashes_issues_and_returns_to_inbox(env):
     assert client.post(f"/api/candidates/{cid}/approve").status_code == 200
     r = client.post(f"/api/candidates/{cid}/undo")
     assert r.status_code == 200, r.text
+    assert r.json()["kept_label"] is None
     assert fake.deleted_issues == ["id-ENG-101", "id-ENG-100", "id-ENG-99"]   # subtasks first
     c = r.json()["candidate"]
     assert c["status"] == "pending" and c["linear_identifier"] is None
@@ -1132,3 +1133,128 @@ def test_recently_decided_lists_and_restores(env):
     assert client.post(f"/api/candidates/{a}/restore").status_code == 409
     assert [i["title"] for i in client.get("/api/decided").json()["items"]] == ["Send the deck"]
     assert {x["id"] for x in client.get("/api/candidates").json()} == {b, c}
+
+
+def test_approve_creates_the_new_client_label_first(env):
+    client, db, fake, _ = env
+    cid = seed(db, client_label="Hooli", subtasks=[{"title": "Pull the list"}])
+    assert db.get_candidate(cid)["new_client_label"] == "Hooli"
+    r = client.post(f"/api/candidates/{cid}/approve")
+    assert r.status_code == 200, r.text
+    assert fake.created_labels == [("Hooli", "g-client")]
+    assert [c["label_ids"] for c in fake.created] == [["l-Hooli"], ["l-Hooli"]]     # the issue and its subtask
+    body = r.json()
+    assert body["created_label"] == "Hooli"
+    assert body["candidate"]["client_label"] == "Hooli" and body["candidate"]["new_client_label"] is None
+    assert "Hooli" in db.get_meta("client_labels")
+
+
+def test_approve_uses_a_client_label_made_in_the_meantime(env):
+    client, db, fake, _ = env
+    cid = seed(db, client_label="Hooli")
+    assert client.get("/api/meta").status_code == 200       # fills the cache
+    fake.client_labels.append({"id": "l-hooli-inc", "name": "Hooli, Inc."})
+    r = client.post(f"/api/candidates/{cid}/approve")
+    assert r.status_code == 200, r.text
+    assert fake.created_labels == [] and fake.created[0]["label_ids"] == ["l-hooli-inc"]
+    assert r.json()["created_label"] is None and r.json()["candidate"]["client_label"] == "Hooli, Inc."
+
+
+def test_approve_creates_no_label_when_the_name_matches_two_labels_now(env):
+    client, db, fake, _ = env
+    cid = seed(db, client_label="Hooli")
+    fake.client_labels += [{"id": "l-hooli-inc", "name": "Hooli, Inc."}, {"id": "l-hooli-n", "name": "Hooli (Nucleus)"}]
+    r = client.post(f"/api/candidates/{cid}/approve")
+    assert r.status_code == 409
+    assert r.json()["error"] == ("Couldn't create the client label Hooli: it matches the labels 'Hooli, Inc.', "
+                                 "'Hooli (Nucleus)'. Pick one.")
+    assert fake.created_labels == [] and fake.created == []
+    c = db.get_candidate(cid)
+    assert c["status"] == "pending" and c["new_client_label"] == "Hooli"
+
+
+def test_a_refused_client_label_creates_no_issue(env):
+    client, db, fake, _ = env
+    cid = seed(db, client_label="Hooli")
+    fake.fail_label = True
+    r = client.post(f"/api/candidates/{cid}/approve")
+    assert r.status_code == 502
+    assert r.json()["error"] == "Couldn't create the client label Hooli: Only admins can create labels."
+    assert fake.created == []
+    c = db.get_candidate(cid)
+    assert c["status"] == "pending" and c["new_client_label"] == "Hooli"
+
+
+def test_a_label_made_before_a_refused_issue_is_used_on_the_next_try(env):
+    client, db, fake, _ = env
+    cid = seed(db, title="Book the Hooli kickoff", client_label="Hooli")
+    fake.fail_titles = {"Book the Hooli kickoff"}
+    assert client.post(f"/api/candidates/{cid}/approve").status_code == 502
+    assert fake.created_labels == [("Hooli", "g-client")]
+    assert db.get_candidate(cid)["client_label"] == "Hooli"           # the label exists now
+    fake.fail_titles = set()
+    r = client.post(f"/api/candidates/{cid}/approve")
+    assert r.status_code == 200, r.text
+    assert fake.created_labels == [("Hooli", "g-client")] and fake.created[0]["label_ids"] == ["l-Hooli"]
+
+
+def test_two_candidates_for_one_new_client_make_one_label(env):
+    client, db, fake, _ = env
+    first = seed(db, client_label="Hooli")
+    second = seed(db, source_id="C1:2.0", title="Book the Hooli kickoff", client_label="Hooli")
+    assert client.post(f"/api/candidates/{first}/approve").status_code == 200
+    assert client.post(f"/api/candidates/{second}/approve").status_code == 200
+    assert fake.created_labels == [("Hooli", "g-client")]
+    assert [c["label_ids"] for c in fake.created] == [["l-Hooli"], ["l-Hooli"]]
+
+
+def test_approve_gives_the_new_label_to_the_other_cards_for_the_customer(env):
+    client, db, fake, _ = env
+    first = seed(db, client_label="Hooli")
+    second = seed(db, source_id="C1:2.0", title="Book the Hooli kickoff", client_label="Hooli Inc")
+    other = seed(db, source_id="C1:3.0", title="Send Acme the deck", client_label="Acme")
+    assert client.post(f"/api/candidates/{first}/approve").status_code == 200
+    c = db.get_candidate(second)
+    assert c["client_label"] == "Hooli" and c["new_client_label"] is None
+    assert db.get_candidate(other)["new_client_label"] == "Acme"
+
+
+def test_approve_does_not_give_the_new_label_to_a_card_whose_name_matches_two_labels(env):
+    client, db, fake, _ = env
+    first = seed(db, client_label="Hooli (Nucleus)")
+    second = seed(db, source_id="C1:2.0", title="Book the Hooli kickoff", client_label="Hooli")
+    fake.client_labels.append({"id": "l-hooli-inc", "name": "Hooli, Inc."})
+    assert client.post(f"/api/candidates/{first}/approve").status_code == 200
+    c = db.get_candidate(second)
+    assert c["client_label"] is None and c["new_client_label"] == "Hooli"
+
+
+def test_setting_the_client_clears_the_new_client_label(env):
+    client, db, *_ = env
+    cid = seed(db, client_label="Hooli")
+    r = client.patch(f"/api/candidates/{cid}", json={"client_label": "Globex"})
+    assert r.json()["client_label"] == "Globex" and r.json()["new_client_label"] is None
+    cid = seed(db, source_id="C1:2.0", client_label="Hooli")
+    r = client.patch(f"/api/candidates/{cid}", json={"client_label": None})
+    assert r.json()["client_label"] is None and r.json()["new_client_label"] is None
+
+
+def test_undo_keeps_a_created_client_label(env):
+    client, db, fake, _ = env
+    cid = seed(db, client_label="Hooli")
+    assert client.post(f"/api/candidates/{cid}/approve").status_code == 200
+    r = client.post(f"/api/candidates/{cid}/undo")
+    assert r.status_code == 200, r.text
+    assert r.json()["kept_label"] == "Hooli" and fake.deleted_issues == ["id-ENG-99"]
+    c = r.json()["candidate"]
+    assert c["status"] == "pending" and c["client_label"] == "Hooli" and c["new_client_label"] is None
+
+
+def test_no_client_label_group_creates_no_issue(env):
+    client, db, fake, _ = env
+    cid = seed(db, client_label="Hooli")
+    fake.client_group = None
+    r = client.post(f"/api/candidates/{cid}/approve")
+    assert r.status_code == 502
+    assert r.json()["error"] == "Couldn't create the client label Hooli: Linear has no label group named 'client'."
+    assert fake.created == [] and db.get_candidate(cid)["new_client_label"] == "Hooli"

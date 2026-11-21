@@ -24,7 +24,7 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 - **Each candidate carries:**
   - a required link back to its source, plus the links mentioned in it;
   - subtasks when the source spells out steps;
-  - a suggested client label, project, priority and due date;
+  - a suggested client label (or, for a customer with no label yet, a new one that Approve creates), project, priority and due date;
   - a link to one of your open issues when that issue may already cover it (see below).
 
 **Linked issues**

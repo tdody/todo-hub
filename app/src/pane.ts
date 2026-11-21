@@ -77,23 +77,30 @@ interface PaneSnapshot {
 // the first re-render that shows it enabled, unless you moved on.
 let focusToRestore: string | null = null;
 
+const PANE = ".td-st, .tl-pane, .ib-pane";
+
+/** What the reading pane shows: an issue's label, or the Inbox card's id. */
+function paneIdent(pane: HTMLElement): string | null {
+  return pane.getAttribute("aria-label") ?? pane.querySelector<HTMLElement>(".card")?.dataset.id ?? null;
+}
+
 /** Before a re-render: the pane field holding the cursor or the data-focus control with the focus,
  *  and how far the reading pane is scrolled. */
 function snapshotPane(): PaneSnapshot {
   const a = document.activeElement as HTMLInputElement | null;
-  const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
+  const pane = document.querySelector<HTMLElement>(PANE);
   const edit = a?.dataset?.edit ?? null;
   const focus = a?.dataset?.focus ?? (!a || a === document.body ? focusToRestore : null);
   return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null, focus,
-    ident: pane?.getAttribute("aria-label") ?? null, scroll: pane?.scrollTop ?? 0 };
+    ident: pane ? paneIdent(pane) : null, scroll: pane?.scrollTop ?? 0 };
 }
 
 /** After a re-render: the same field gets the cursor back, the same data-focus control the focus,
  *  and the same issue's pane its scroll. */
 function restorePane(k: PaneSnapshot) {
   document.querySelectorAll<HTMLTextAreaElement>(".desc-input, .pane-title-input").forEach(fitHeight);
-  const pane = document.querySelector<HTMLElement>(".td-st, .tl-pane");
-  if (pane && k.ident && pane.getAttribute("aria-label") === k.ident) pane.scrollTop = k.scroll;
+  const pane = document.querySelector<HTMLElement>(PANE);
+  if (pane && k.ident && paneIdent(pane) === k.ident) pane.scrollTop = k.scroll;
   focusToRestore = null;
   if (k.focus) {
     const control = document.querySelector<HTMLElement>(`[data-focus="${CSS.escape(k.focus)}"]`);

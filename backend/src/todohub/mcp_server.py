@@ -115,7 +115,8 @@ def add_candidate(
         dashboards, Linear issues), with a short title. Don't repeat source_url.
     subtasks: the distinct steps, only when the source spells them out (2 to 10). Omit otherwise.
     who: the person who asked, or the meeting's other participants.
-    client_label: exactly one of the client label names given in the prompt, or omit.
+    client_label: one of the client label names given in the prompt; for a customer with no label, the
+        company's name (the prompt says how to find it); omit for development or internal work.
     due_date: YYYY-MM-DD only when a date is stated or clearly implied.
     priority: 0 none, 1 urgent, 2 high, 3 medium, 4 low.
     possible_duplicate: identifier of a similar open Linear issue from the prompt's list, e.g. ENG-123.

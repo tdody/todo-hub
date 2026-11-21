@@ -37,6 +37,10 @@ class FakeLinear:
         self.deleted_comments = []
         self.fail_delete = set()   # delete_issue raises for these ids
         self.fail_titles = set()   # create_issue raises for these titles
+        self.client_labels = [{"id": "l-Initech & Co", "name": "Initech & Co"}, {"id": "l-Globex", "name": "Globex"}]
+        self.created_labels = []   # (name, group id)
+        self.client_group = {"id": "g-client", "color": "#f7c8c1", "team_id": None}
+        self.fail_label = False    # create_client_label raises
         self.issues = [
             make_issue("ENG-1", "Rebin Globex grades", client="Globex"),
             make_issue("ENG-2", "Fix outcome report copy"),
@@ -51,8 +55,8 @@ class FakeLinear:
                 {"id": "s-Pending", "name": "Pending", "type": "unstarted", "position": 2},
                 {"id": "s-Done", "name": "Done", "type": "completed", "position": 3},
             ],
-            client_labels=[{"id": "l-Initech & Co", "name": "Initech & Co"},
-                           {"id": "l-Globex", "name": "Globex"}],
+            client_labels=list(self.client_labels),
+            client_group=self.client_group,
             viewer_id="me",
             projects=[{"id": "p-globex", "name": "Globex"}, {"id": "p-out", "name": "Improve our \"Forecast\" models"}],
         )
@@ -66,6 +70,15 @@ class FakeLinear:
 
     def my_closed_issues(self, since_iso):
         return getattr(self, "closed", [])
+
+    def create_client_label(self, name, group):
+        from todohub.linear import LinearError
+        if self.fail_label:
+            raise LinearError("Only admins can create labels.")
+        label = {"id": f"l-{name}", "name": name}
+        self.created_labels.append((name, group["id"]))
+        self.client_labels.append(label)
+        return label
 
     def create_issue(self, **kw):
         from todohub.linear import LinearError

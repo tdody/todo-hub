@@ -496,3 +496,15 @@ def test_connector_outage_reads_the_status_page_only_when_a_connector_source_fai
     monkeypatch.setattr(sweep.outage, "claude_code_incident", no_call)
     run = sweep.run_sweep(settings, "manual", only="slack")      # the fake reports Slack fine
     assert {s["source"]: s["detail"] for s in run["sources"]} == {"slack": "3 searches"}
+
+
+def test_client_rule_looks_up_hubspot_only_when_it_can(settings):
+    now = datetime.now(timezone.utc)
+    settings.hubspot_tools = list(DEFAULT_HUBSPOT_TOOLS)
+    for text in (sweep.build_prompt(settings, now, ["Globex"], [], []),
+                 sweep.build_capture_prompt(settings, "a note", ["Globex"], [])):
+        assert "`lifecyclestage` is `customer`" in text and "A prospect or a partner gets no client" in text
+    settings.hubspot_tools = []
+    for text in (sweep.build_prompt(settings, now, ["Globex"], [], []),
+                 sweep.build_capture_prompt(settings, "a note", ["Globex"], [])):
+        assert "lifecyclestage" not in text and "full name from the message, never its initials" in text

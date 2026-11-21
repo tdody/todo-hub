@@ -41,8 +41,9 @@ $watched
 
 ## Filling the fields
 
-- `client_label`: if the task is for a client, use exactly one name from this list, matching the company or its people. Otherwise leave it empty (development or internal work):
+- `client_label`: if the task is for a client, use the name from this list that matches the company or its people:
   $client_labels
+  $client_rule Otherwise leave it empty (development or internal work).
 - `project`: when the task clearly belongs to one of these active Linear projects, give its exact name; otherwise leave it empty. A client task often belongs to the project of that client's other open issues (shown in the list below).
   $projects
 - `category`: the kind of work, so Thibault can scan his list: `code`, `analysis`, `model`, `review`, `meeting`, `email`, `writing` or `admin` (see the tool's description).
