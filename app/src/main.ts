@@ -326,9 +326,9 @@ async function approve(c: Candidate, opts: { quiet?: boolean } = {}): Promise<st
     state.candidates = state.candidates.filter((x) => x.id !== c.id);
     // Bulk approvals skip the swipe so a batch doesn't take seconds.
     if (!opts.quiet) await swipeAway(c.id);
+    // Other cards for this customer have the label now. If this reload fails, the next refresh catches up.
     if (c.new_client_label) {
-      state.meta = await api.meta();
-      await loadCandidates();
+      await Promise.all([api.meta().then((m) => { state.meta = m; }), loadCandidates()]).catch(() => undefined);
     }
     const added = new Set([issue.id, ...subtasks.map((s) => s.id)]);
     state.issues = [issue, ...subtasks, ...state.issues.filter((i) => !added.has(i.id))];
