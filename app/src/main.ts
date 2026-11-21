@@ -192,10 +192,12 @@ async function undo(entry?: UndoEntry) {
 /** Undo approvals and drops: each candidate goes back to the Inbox. */
 async function undoDecisions(ids: number[], reloadIssues: boolean) {
   const problems: string[] = [];
+  const kept: string[] = [];
   for (const id of ids) {
     try {
-      const { warnings } = await api.undo(id);
+      const { warnings, kept_label } = await api.undo(id);
       problems.push(...warnings);
+      if (kept_label) kept.push(kept_label);
     } catch (e) {
       problems.push(e instanceof ApiError ? e.message : String(e));
     }
@@ -203,6 +205,7 @@ async function undoDecisions(ids: number[], reloadIssues: boolean) {
   await loadCandidates();
   if (reloadIssues && state.issuesLoaded) await loadIssues().catch(() => undefined);
   for (const w of problems) toast(w, undefined, true);
+  if (kept.length) toast(`The client label${kept.length === 1 ? "" : "s"} ${kept.join(", ")} stay${kept.length === 1 ? "s" : ""} in Linear.`);
 }
 
 function fail(e: unknown) {
@@ -309,22 +312,23 @@ function draft(c: Candidate): CandidateEdit {
   return state.drafts.get(c.id)!;
 }
 
-async function approve(c: Candidate, opts: { quiet?: boolean } = {}) {
+async function approve(c: Candidate, opts: { quiet?: boolean } = {}): Promise<string | null> {
   const key = `c${c.id}`;
-  if (state.busy.has(key)) return;
+  if (state.busy.has(key)) return null;
   state.busy.add(key);
   render();
   try {
     const edit = { ...(state.drafts.get(c.id) ?? {}) };
     if (edit.subtasks) edit.subtasks = edit.subtasks.filter((s) => s.title.trim());
-    const { candidate, issue, subtasks, warnings } = await api.approve(c.id, edit);
+    const { candidate, issue, subtasks, warnings, created_label } = await api.approve(c.id, edit);
     state.drafts.delete(c.id);
     state.candidates = state.candidates.filter((x) => x.id !== c.id);
     // Bulk approvals skip the swipe so a batch doesn't take seconds.
     if (!opts.quiet) await swipeAway(c.id);
     const added = new Set([issue.id, ...subtasks.map((s) => s.id)]);
     state.issues = [issue, ...subtasks, ...state.issues.filter((i) => !added.has(i.id))];
-    const extra = subtasks.length ? ` with ${subtasks.length} subtask${subtasks.length === 1 ? "" : "s"}` : "";
+    const extra = (subtasks.length ? ` with ${subtasks.length} subtask${subtasks.length === 1 ? "" : "s"}` : "")
+      + (created_label ? ` and the client label ${created_label}` : "");
     const verb = c.kind === "close" ? "Closed" : c.kind === "comment" ? "Updated" : "Created";
     if (c.kind === "close") state.issues = state.issues.filter((i) => i.id !== issue.id);
     const ident = candidate.linear_identifier;
@@ -334,6 +338,7 @@ async function approve(c: Candidate, opts: { quiet?: boolean } = {}) {
     if (!opts.quiet) offerUndo(`${verb} ${ident}${extra}`, done, () => undoDecisions([c.id], true),
       { label: "Open", run: () => void openUrl(candidate.linear_url!) });
     for (const w of warnings) toast(w, undefined, true);
+    return created_label ?? null;
   } catch (e) {
     if (opts.quiet) throw e;
     fail(e);
@@ -341,6 +346,7 @@ async function approve(c: Candidate, opts: { quiet?: boolean } = {}) {
     state.busy.delete(key);
     render();
   }
+  return null;
 }
 
 /** Merge a linked card into its open issue: the comment, the links, the subtasks as sub-issues,
@@ -635,16 +641,28 @@ function priorityTag(p: number): HTMLElement | "" {
 }
 
 
-function clientSelect(value: string | null, onChange: (v: string | null) => void) {
+/** The select's value for a candidate's proposed new client label (no label name has this character). */
+const NEW_CLIENT = "\u0001new";
+
+function clientSelect(value: string | null, onChange: (v: string | null) => void, newName: string | null = null) {
   // A label newer than the loaded list (or none loaded) still shows as the issue's client.
   const known = state.meta?.client_labels ?? [];
-  const labels = value && !known.includes(value) ? [value, ...known] : known;
+  const labels = value && value !== NEW_CLIENT && !known.includes(value) ? [value, ...known] : known;
   return quietSelect(h(
     "select",
     { class: "client", title: "Client label", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
+    newName ? h("option", { value: NEW_CLIENT, selected: value === NEW_CLIENT }, `${newName} (new)`) : "",
     h("option", { value: "", selected: !value }, "Dev / internal"),
     ...labels.map((l) => h("option", { value: l, selected: l === value }, l)),
   ));
+}
+
+/** A candidate for a customer with no client label: approving creates the label first. */
+function newClientBox(name: string): HTMLElement {
+  return h("div", { class: "link-box new-client" },
+    h("div", { class: "link-head" }, "New client label"),
+    h("div", { class: "link-issue" }, h("strong", {}, name), " has no client label in Linear yet."),
+    h("div", { class: "link-facts" }, "Approve creates it in the client group, where everyone in the workspace sees it."));
 }
 
 function projectSelect(value: string | null, onChange: (v: string | null) => void) {
@@ -802,10 +820,13 @@ async function bulk(action: "approve" | "drop", reason: DropReason = "other") {
   // A linked card's merge plan needs a look, so bulk Approve leaves it out.
   const picked = selectedCandidates().filter((c) => !(action === "approve" && isLinked(c)));
   const done: number[] = [];
+  const labels: string[] = [];
   for (const c of picked) {
     try {
-      if (action === "approve") await approve(c, { quiet: true });
-      else await api.drop(c.id, reason);
+      if (action === "approve") {
+        const label = await approve(c, { quiet: true });
+        if (label) labels.push(label);
+      } else await api.drop(c.id, reason);
       done.push(c.id);
     } catch (e) {
       fail(e);
@@ -814,7 +835,8 @@ async function bulk(action: "approve" | "drop", reason: DropReason = "other") {
   state.selected.clear();
   await loadCandidates();
   render();
-  const message = `${action === "approve" ? "Approved" : "Dropped"} ${done.length} of ${picked.length}`;
+  const message = `${action === "approve" ? "Approved" : "Dropped"} ${done.length} of ${picked.length}`
+    + (labels.length ? `. Created the client label${labels.length === 1 ? "" : "s"} ${labels.join(", ")}` : "");
   if (!done.length) { toast(message); return; }
   offerUndo(message, `${done.length} task${done.length === 1 ? "" : "s"} back in the Inbox`,
     () => undoDecisions(done, action === "approve"));
@@ -1397,6 +1419,9 @@ function candidateCardBody(c: Candidate): HTMLElement {
   const label = pick === "merge" ? `Merge into ${c.possible_duplicate}` : pick === "drop" ? "Drop"
     : pick === "new" && c.kind === "task" ? "Create issue"
     : { task: "Approve", waiting: "Track", close: `Close ${c.target_issue}`, comment: "Post update" }[c.kind];
+  // A customer with no client label yet, unless the card picked a label or Dev / internal instead.
+  const newClient = showFields && !("client_label" in d) ? c.new_client_label : null;
+  const action = newClient ? `${label}, add label` : label;
 
   const titleEl = acting
     ? h("div", { class: "title-static" },
@@ -1448,10 +1473,14 @@ function candidateCardBody(c: Candidate): HTMLElement {
     }),
     linksRow(c),
     showFields && subtaskEditor(c, d),
+    newClient && newClientBox(newClient),
     h(
       "div",
       { class: "card-actions" },
-      showFields && clientSelect(val("client_label") ?? null, (v) => { d.client_label = v; }),
+      showFields && clientSelect(newClient ? NEW_CLIENT : val("client_label") ?? null, (v) => {
+        if (v === NEW_CLIENT) delete d.client_label; else d.client_label = v;
+        render();          // the box, the button and the list chip follow the pick
+      }, c.new_client_label),
       showFields && projectSelect(val("project") ?? null, (v) => { d.project = v; }),
       showFields && priorityPill(val("priority") ?? 0, (v) => { d.priority = v; }),
       showFields && c.kind === "waiting" && h("span", { class: "muted small" }, "Follow up"),
@@ -1459,8 +1488,10 @@ function candidateCardBody(c: Candidate): HTMLElement {
       h("span", { class: "spacer" }),
       snoozeMenu(c, busy),
       !linked && dropMenu(c, busy),
-      h("button", { class: "primary", disabled: busy, title: "⌘↩", onclick: () => decide(c) },
-        busy ? "Working…" : label),
+      h("button", {
+        class: "primary", disabled: busy, onclick: () => decide(c),
+        title: newClient ? `Creates the client label ${newClient} in Linear, then the issue. ⌘↩` : "⌘↩",
+      }, busy ? "Working…" : action),
     ),
   );
 }
@@ -1499,13 +1530,15 @@ function inboxItem(c: Candidate, on: boolean): HTMLElement {
   const d = state.drafts.get(c.id) ?? {};
   const today = localToday();
   const client = "client_label" in d ? d.client_label : c.client_label;
+  const newClient = "client_label" in d ? null : c.new_client_label;
   const priority = "priority" in d ? d.priority ?? 0 : c.priority;
   const due = "due_date" in d ? d.due_date ?? null : c.due_date;
   const chips: (HTMLElement | "")[] = [];
   if (c.handled?.identifier) chips.push(h("span", { class: "ib-chip ok" }, "Looks handled"));
   else if (c.possible_duplicate) chips.push(h("span", { class: "ib-chip dup" },
     `${ADVICE_WORDS[c.duplicate_advice ?? "merge"]} ${c.possible_duplicate}`));
-  if (client) chips.push(h("span", { class: "ib-chip client" }, client));
+  if (newClient) chips.push(h("span", { class: "ib-chip client new" }, `${newClient} (new)`));
+  else if (client) chips.push(h("span", { class: "ib-chip client" }, client));
   if (priority === 1 || priority === 2) chips.push(priorityTag(priority));
   if (due) chips.push(h("span", { class: `ib-chip${due < today ? " late" : due === today ? " soon" : ""}` },
     `${c.kind === "waiting" ? "Follow up " : ""}${dateText(due)}`));
