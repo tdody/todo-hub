@@ -256,6 +256,17 @@ def meeting_prep_due(db: DB, now: datetime | None = None) -> bool:
     return datetime.fromisoformat(last).astimezone(TZ).date() < today
 
 
+def client_rule(settings: Settings) -> str:
+    """How a sweep or a capture names a customer that has no client label: from HubSpot when it can read it."""
+    if settings.hubspot_tools:
+        return ("If the task is for a customer that has no name in this list, look the company up in HubSpot "
+                "(`search_crm_objects`, objectType `COMPANY`, the company name as the query, properties `name` and "
+                "`lifecyclestage`) and give its `name`, but only when its `lifecyclestage` is `customer`. "
+                "A prospect or a partner gets no client.")
+    return ("If the task is for a customer that has no name in this list, give the company's full name from the "
+            "message, never its initials.")
+
+
 def build_prompt(settings: Settings, since: datetime, client_labels: list[str],
                  open_issues: list[dict], pending: list[dict], decisions: dict | None = None,
                  watched: list[dict] | None = None, projects: list[str] | None = None,
@@ -279,6 +290,7 @@ def build_prompt(settings: Settings, since: datetime, client_labels: list[str],
             mutes.prompt_section(muted or []), source_sections(settings, since, mentions, sinces, meeting_prep),
             plan_section, note_section, wrapup_section) if part),
         client_labels=", ".join(client_labels) or "(no client labels loaded)",
+        client_rule=client_rule(settings),
         projects=", ".join(projects or []) or "(no projects loaded)",
         open_issues=issues,
         pending=queue,
@@ -686,6 +698,7 @@ def build_capture_prompt(settings: Settings, text: str, client_labels: list[str]
         now_local=_fmt(datetime.now(timezone.utc)),
         input=text.replace("`", "'"),          # keep the pasted text inside its fence
         client_labels=", ".join(client_labels) or "(no client labels loaded)",
+        client_rule=client_rule(settings),
         open_issues=issues,
     )
 
