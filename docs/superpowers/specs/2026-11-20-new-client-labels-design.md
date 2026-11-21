@@ -47,13 +47,14 @@ For a `client_label` that is given, when the label list is loaded (with no list,
 
 1. It is a label, case not important: the candidate gets that label in `client_label`, as today.
 2. It is a near-match of a label: the candidate gets that label in `client_label`. The note says "client_label 'Globex Inc.' matched the label 'Globex'".
-3. There is no match: the candidate keeps the name in `new_client_label`. The note says "client_label 'Hooli' is not a label yet; proposed as a new client label".
+3. It matches two or more labels, and none has the same name: the client stays empty. The note says "client_label 'Globex Inc' matches the labels 'Globex', 'Globex (Cypress)'; left empty". You pick the label in the Inbox.
+4. There is no match: the candidate keeps the name in `new_client_label`. The note says "client_label 'Hooli' is not a label yet; proposed as a new client label".
 
 A candidate has a `client_label` or a `new_client_label`, never both.
 
 ### The near-match check
 
-`matching_client_label(name, labels) -> str | None` in `linear.py`, next to `client_label_of`. It returns the label that `name` names, or `None`. The tool and approve use it.
+`matching_client_labels(name, labels) -> list[str]` in `linear.py`, next to `client_label_of`. It returns the labels that `name` names: one, none, or more than one for an unclear name. The tool and approve use it.
 
 - **Normalize** both sides: lowercase, split into words, drop a last word that is a legal suffix (`inc`, `llc`, `co`, `corp`, `corporation`, `ltd`, `company`), then keep only letters and digits. So "Pied-Piper" matches "PiedPiper", "Globex, Inc." matches "Globex", and "Zinc" stays "zinc".
 - **Other names.** A label also matches by each of its other names:
@@ -61,7 +62,7 @@ A candidate has a `client_label` or a `new_client_label`, never both.
   - "Hooli (fka Nucleus)": "Hooli" and "Nucleus".
   - "Globex (Cypress)": "Globex" and "Cypress".
 - **No partial match.** "Globex" does not match "Globex Mining".
-- **Two matches.** If two labels match, a label with the same name (case not important) wins. Otherwise the result is `None`, and the name stays new.
+- **Two matches.** If two labels match, a label with the same name (case not important) wins. Otherwise the result holds all of them, and TodoHub never creates a third label.
 
 ### The Inbox
 
@@ -80,14 +81,14 @@ While a merge or drop plan is open, the box and the suffix do not show, because 
 
 When the candidate has a `new_client_label`, `approve_claimed`:
 
-1. Reads the labels from Linear again (`team_meta(refresh=True)`) and runs the near-match check. If a label matches now, for example from an earlier candidate in the same bulk approve, it uses that label.
+1. Reads the labels from Linear again (`team_meta(refresh=True)`) and runs the near-match check. If a label matches now, for example from an earlier candidate in the same bulk approve, it uses that label. If two or more labels match now, approve stops (see Errors).
 2. If not, it creates the label in the client label group, with the group's color and team (none for a workspace group), and reads the labels again, so the lists and the edit check know it.
 3. Saves the name in `client_label` and clears `new_client_label`.
 4. Creates the issue and its subtasks with the label, as today.
 
 Approves of new labels run one at a time, so two approves for one new client make one label.
 
-The other pending cards that propose the same label get it too, so their box goes.
+The other pending cards whose new name names this label, and no other label, get it too, so their box goes.
 
 The response gains `created_label` (the name, or `null`). One approve says "Created ENG-123 and the client label Hooli". Bulk approve says "Approved 3 of 3, created the client label Hooli".
 
@@ -105,7 +106,7 @@ Undo sends the issue to Linear's trash, as today, and keeps the label. The candi
 
 - `TeamMeta` gains `client_group: dict | None`: `{id, color, team_id}` of the label named `client_label_group` that has `isGroup` true. `team_meta` reads it with the labels.
 - `create_client_label(name, group) -> dict`: `issueLabelCreate` with `name`, `parentId`, `color` and `teamId` when the group has one. Raises `LinearError` if Linear refuses.
-- `matching_client_label(name, labels)`.
+- `matching_client_labels(name, labels)`.
 
 **`backend/src/todohub/db.py`**: the column `new_client_label TEXT`, added in the migrations and in the candidate fields. It is not in `EDITABLE_FIELDS`.
 
@@ -126,14 +127,16 @@ Undo sends the issue to Linear's trash, as today, and keeps the label. The candi
 - **Linear refuses the label** (no permission, or no group named `client_label_group`): approve stops before it creates the issue. The candidate stays in the Inbox, and the message says "Couldn't create the client label Hooli: <reason>".
 - **Linear creates the label, then refuses the issue:** the label stays, and the candidate holds it in `client_label`. The next approve uses it.
 - **Two candidates for the same customer in one bulk approve:** the second one finds the first one's label in step 1.
+- **Two labels that match the name were made after the sweep:** approve stops with a 409 before it creates a label or the issue. The message says "Couldn't create the client label Hooli: it matches the labels 'Hooli, Inc.', 'Hooli (Nucleus)'. Pick one." The Inbox reloads the labels, so the select lists them.
 
 ## Testing
 
-- `matching_client_label`: case and punctuation ("Pied-Piper" and "PiedPiper"); suffixes ("Globex, Inc.", and "Zinc" keeps its "inc"); `dba`, `(fka …)` and `(…)` names; no partial match ("Globex Mining"); no initials; of two matches, the same name wins, else `None`.
-- `add_candidate`: a label, a near-match and a new name, with their notes.
+- `matching_client_labels`: case and punctuation ("Pied-Piper" and "PiedPiper"); suffixes ("Globex, Inc.", and "Zinc" keeps its "inc"); `dba`, `(fka …)` and `(…)` names; no partial match ("Globex Mining"); no initials; of two matches, the same name wins, else both.
+- `add_candidate`: a label, a near-match, two matches and a new name, with their notes.
 - `PATCH /api/candidates/{id}`: setting `client_label` to a label or to `null` clears `new_client_label`; an unknown `client_label` is still refused.
 - Approve, with a fake Linear: the label is created and set on the issue and its subtasks; a label made in the meantime is used and nothing is created; a refused label leaves the candidate pending and creates no issue.
 - Two approves in a row for the same new name create one label.
+- Approve when two labels match the name now: a 409, and no label and no issue.
 - Undo after an approve that created a label: the issue is deleted, the label is not, and the response names the label.
 - `$client_rule`: the HubSpot text with `hubspot_tools`, the message text without.
 - The Inbox, in the app at 1120px and 760px, in Light and Dark: the box, "Hooli (new)" in the select, "Approve, add label" on the line of Snooze and Drop at 1120px, and the chip. Pick a label: the box and the suffix go.

@@ -1160,6 +1160,19 @@ def test_approve_uses_a_client_label_made_in_the_meantime(env):
     assert r.json()["created_label"] is None and r.json()["candidate"]["client_label"] == "Hooli, Inc."
 
 
+def test_approve_creates_no_label_when_the_name_matches_two_labels_now(env):
+    client, db, fake, _ = env
+    cid = seed(db, client_label="Hooli")
+    fake.client_labels += [{"id": "l-hooli-inc", "name": "Hooli, Inc."}, {"id": "l-hooli-n", "name": "Hooli (Nucleus)"}]
+    r = client.post(f"/api/candidates/{cid}/approve")
+    assert r.status_code == 409
+    assert r.json()["error"] == ("Couldn't create the client label Hooli: it matches the labels 'Hooli, Inc.', "
+                                 "'Hooli (Nucleus)'. Pick one.")
+    assert fake.created_labels == [] and fake.created == []
+    c = db.get_candidate(cid)
+    assert c["status"] == "pending" and c["new_client_label"] == "Hooli"
+
+
 def test_a_refused_client_label_creates_no_issue(env):
     client, db, fake, _ = env
     cid = seed(db, client_label="Hooli")
@@ -1204,6 +1217,16 @@ def test_approve_gives_the_new_label_to_the_other_cards_for_the_customer(env):
     c = db.get_candidate(second)
     assert c["client_label"] == "Hooli" and c["new_client_label"] is None
     assert db.get_candidate(other)["new_client_label"] == "Acme"
+
+
+def test_approve_does_not_give_the_new_label_to_a_card_whose_name_matches_two_labels(env):
+    client, db, fake, _ = env
+    first = seed(db, client_label="Hooli (Nucleus)")
+    second = seed(db, source_id="C1:2.0", title="Book the Hooli kickoff", client_label="Hooli")
+    fake.client_labels.append({"id": "l-hooli-inc", "name": "Hooli, Inc."})
+    assert client.post(f"/api/candidates/{first}/approve").status_code == 200
+    c = db.get_candidate(second)
+    assert c["client_label"] is None and c["new_client_label"] == "Hooli"
 
 
 def test_setting_the_client_clears_the_new_client_label(env):

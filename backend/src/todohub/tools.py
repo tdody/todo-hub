@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from . import categories, mutes
 from .db import DB, SOURCES, title_key
-from .linear import matching_client_label
+from .linear import matching_client_labels
 
 DUPLICATE_ADVICE = ("drop", "merge", "new")
 
@@ -203,11 +203,14 @@ def add_candidate(
     new_label = None
     if label:
         known = db.get_meta("client_labels", [])
-        found = matching_client_label(label, known)
-        if found:
-            if found.lower() != label.lower():
-                notes.append(f"client_label {label!r} matched the label {found!r}")
-            label = found
+        found = matching_client_labels(label, known)
+        if len(found) == 1:
+            if found[0].lower() != label.lower():
+                notes.append(f"client_label {label!r} matched the label {found[0]!r}")
+            label = found[0]
+        elif found:
+            notes.append(f"client_label {label!r} matches the labels {', '.join(map(repr, found))}; left empty")
+            label = None
         elif known:
             notes.append(f"client_label {label!r} is not a label yet; proposed as a new client label")
             label, new_label = None, label

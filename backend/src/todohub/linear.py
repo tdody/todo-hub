@@ -482,15 +482,14 @@ def _names_of(label: str) -> list[str]:
     return names
 
 
-def matching_client_label(name: str, labels: list[str]) -> str | None:
-    """The client label that ``name`` names, or None. Case, accents, punctuation and a legal suffix do not
-    count, and a label's other names count. Of two or more matches, the label with the same name wins."""
+def matching_client_labels(name: str, labels: list[str]) -> list[str]:
+    """The client labels that ``name`` names: one, none, or more than one for an unclear name. Case, accents,
+    punctuation and a legal suffix do not count, and a label's other names count. Of two or more matches, the
+    label with the same name wins."""
     key = _name_key(name)
     found = [label for label in labels if any(_name_key(n) == key for n in _names_of(label))]
-    if len(found) == 1:
-        return found[0]
     same = [label for label in found if label.lower() == name.strip().lower()]
-    return same[0] if len(same) == 1 else None
+    return same if len(same) == 1 else found
 
 
 def shape_issue(issue: dict, settings: Settings) -> dict:

@@ -345,7 +345,9 @@ async function approve(c: Candidate, opts: { quiet?: boolean } = {}): Promise<st
     for (const w of warnings) toast(w, undefined, true);
     return created_label ?? null;
   } catch (e) {
-    void loadCandidates().then(render);
+    // After a refused new client label, Linear can have labels that the select does not list yet.
+    const meta = c.new_client_label ? api.meta().then((m) => { state.meta = m; }) : null;
+    void Promise.allSettled([meta, loadCandidates()]).then(render);
     if (opts.quiet) throw e;
     fail(e);
   } finally {

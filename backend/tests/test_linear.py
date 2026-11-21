@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from todohub.config import Settings
-from todohub.linear import Linear, LinearError, client_labels_of, matching_client_label, shape_issue
+from todohub.linear import Linear, LinearError, client_labels_of, matching_client_labels, shape_issue
 from conftest import make_issue
 
 
@@ -200,33 +200,33 @@ LABELS = ["Globex", "PiedPiper", "Initech dba Initrode", "Hooli (fka Nucleus)", 
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("globex", "Globex"),
-    ("Globex, Inc.", "Globex"),
-    ("GLOBEX LLC", "Globex"),
-    ("Pied-Piper", "PiedPiper"),
-    ("Initrode", "Initech dba Initrode"),
-    ("initech", "Initech dba Initrode"),
-    ("Nucleus", "Hooli (fka Nucleus)"),
-    ("hooli", "Hooli (fka Nucleus)"),
-    ("Cypress", "Umbrella (Cypress)"),
-    ("Zinc", "Zinc"),
-    ("Zinc Inc", "Zinc"),
-    ("Kramerica", "Vandelay DBA Kramerica"),   # any case of dba
-    ("cafe nervosa", "Café Nervosa"),           # accents do not count
-    ("San", None),                              # dba needs a space on each side ("Sandbar")
-    ("EU", None),                               # other names come from parentheses at the end only
-    ("Globex Mining", None),     # no partial match
-    ("ABC", None),               # no initials ("Acme Bolt Company")
-    ("Inc.", None),
-    ("", None),
+    ("globex", ["Globex"]),
+    ("Globex, Inc.", ["Globex"]),
+    ("GLOBEX LLC", ["Globex"]),
+    ("Pied-Piper", ["PiedPiper"]),
+    ("Initrode", ["Initech dba Initrode"]),
+    ("initech", ["Initech dba Initrode"]),
+    ("Nucleus", ["Hooli (fka Nucleus)"]),
+    ("hooli", ["Hooli (fka Nucleus)"]),
+    ("Cypress", ["Umbrella (Cypress)"]),
+    ("Zinc", ["Zinc"]),
+    ("Zinc Inc", ["Zinc"]),
+    ("Kramerica", ["Vandelay DBA Kramerica"]),     # any case of dba
+    ("cafe nervosa", ["Café Nervosa"]),            # accents do not count
+    ("San", []),                                   # dba needs a space on each side ("Sandbar")
+    ("EU", []),                                    # other names come from parentheses at the end only
+    ("Globex Mining", []),      # no partial match
+    ("ABC", []),                # no initials ("Acme Bolt Company")
+    ("Inc.", []),
+    ("", []),
 ])
-def test_matching_client_label(name, expected):
-    assert matching_client_label(name, LABELS) == expected
+def test_matching_client_labels(name, expected):
+    assert matching_client_labels(name, LABELS) == expected
 
 
-def test_matching_client_label_with_two_matches():
-    assert matching_client_label("globex", ["Globex, Inc.", "Globex"]) == "Globex"   # the same name wins
-    assert matching_client_label("Globex Corp", ["Globex, Inc.", "Globex LLC"]) is None
+def test_matching_client_labels_with_two_matches():
+    assert matching_client_labels("globex", ["Globex, Inc.", "Globex"]) == ["Globex"]   # the same name wins
+    assert matching_client_labels("Globex Corp", ["Globex, Inc.", "Globex LLC"]) == ["Globex, Inc.", "Globex LLC"]
 
 
 def test_create_client_label_uses_the_groups_color_and_team():

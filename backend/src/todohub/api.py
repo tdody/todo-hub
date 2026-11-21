@@ -32,7 +32,7 @@ from .config import (DEFAULT_PERISCOPE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SC
                      SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides, source_state,
                      write_overrides)
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_label, shape_issue
+from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, shape_issue
 from .periscope import (Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, pane_name,
                         remember_repo)
 from .selfcmd import self_command
@@ -292,12 +292,16 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     def ensure_client_label(name: str) -> tuple[dict, bool]:
         """The client label ``name`` names, from Linear's labels as they are now, created in the client
-        label group if there is none. Returns the label and whether it was created."""
+        label group if there is none. Returns the label and whether it was created. A 409 if ``name`` names
+        two or more labels."""
         with label_lock:
             m = team_meta(refresh=True)
-            found = matching_client_label(name, [label["name"] for label in m.client_labels])
+            found = matching_client_labels(name, [label["name"] for label in m.client_labels])
+            if len(found) == 1:
+                return next(label for label in m.client_labels if label["name"] == found[0]), False
             if found:
-                return next(label for label in m.client_labels if label["name"] == found), False
+                raise HTTPException(409, f"Couldn't create the client label {name}: it matches the labels "
+                                         f"{', '.join(map(repr, found))}. Pick one.")
             if not m.client_group:
                 raise HTTPException(502, f"Couldn't create the client label {name}: Linear has no label group "
                                          f"named {settings.client_label_group!r}.")
@@ -594,9 +598,10 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             created_label = label["name"] if created else None
             c = db.update_candidate(cid, client_label=label["name"])     # also clears new_client_label
             # Other cards for this customer use the label now.
+            names = [l["name"] for l in team_meta().client_labels]
             for other in db.list_candidates("pending"):
                 if other["id"] != cid and other.get("new_client_label") \
-                        and matching_client_label(other["new_client_label"], [label["name"]]):
+                        and matching_client_labels(other["new_client_label"], names) == [label["name"]]:
                     db.update_candidate(other["id"], client_label=label["name"])
         project_id = next((p["id"] for p in m.projects if p["name"] == c.get("project")), None)
         priority = chosen_priority if chosen_priority is not None else (c["priority"] or settings.default_priority)

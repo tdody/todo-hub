@@ -57,6 +57,14 @@ def test_client_label_near_match_and_new_label(db):
     assert r["notes"] == ["client_label 'Hooli' is not a label yet; proposed as a new client label"]
 
 
+def test_a_name_that_matches_two_labels_gets_no_client(db):
+    db.set_meta("client_labels", ["Globex", "Globex (Cypress)"])
+    r = add(db, client_label="Globex Inc")
+    c = db.get_candidate(r["id"])
+    assert c["client_label"] is None and c["new_client_label"] is None
+    assert r["notes"] == ["client_label 'Globex Inc' matches the labels 'Globex', 'Globex (Cypress)'; left empty"]
+
+
 def test_no_new_client_label_without_the_label_list(db):
     db.set_meta("client_labels", [])
     r = add(db, client_label="Hooli")
