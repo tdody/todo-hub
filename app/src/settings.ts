@@ -304,8 +304,11 @@ function periscopeSection(ctx: SettingsCtx): HTMLElement {
     "aria-label": "Review prompt" });
   const saveBtn = h("button", {
     type: "button", class: "ghost small-btn", disabled: busy === "periscope",
-    onclick: () => void save("periscope", ctx,
-      () => api.setPeriscopePrompts({ prompt: box.value, review_prompt: reviewBox.value }), "Prompts saved"),
+    // Only a prompt you changed is sent: the other one keeps following its default.
+    onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompts({
+      ...(box.value !== p.prompt ? { prompt: box.value } : {}),
+      ...(reviewBox.value !== p.review_prompt ? { review_prompt: reviewBox.value } : {}),
+    }), "Prompts saved"),
   }, busy === "periscope" ? "Saving…" : "Save");
   // Each reset sends only its own prompt, so the other one keeps its saved text.
   const reset = (changed: boolean, prompts: { prompt?: string; review_prompt?: string }, done: string) =>
@@ -315,7 +318,8 @@ function periscopeSection(ctx: SettingsCtx): HTMLElement {
     }, "Reset to default") : "");
   return card("periscope", "Periscope",
     "Start in periscope (⋯ or p on an issue) sends the prompt to the new Claude. {identifier}, {title} and {url} " +
-      "become the issue's. A review ticket with a GitHub PR link gets the review prompt, where {pr} becomes the PR's link.",
+      "become the issue's. A review ticket whose GitHub PR is in a periscope repo gets the review prompt, where {pr} " +
+      "becomes the PR's link.",
     "",
     h("label", { class: "set-label" }, "Prompt"), box,
     reset(p.prompt !== p.default_prompt, { prompt: "" }, "Prompt back to the default"),

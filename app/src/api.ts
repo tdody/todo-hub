@@ -566,8 +566,7 @@ export const api = {
   issuePreview: (ident: string) => call<IssuePreview>("GET", `/api/issues/${encodeURIComponent(ident)}/preview`),
   periscopeOptions: (issueId: string) =>
     call<PeriscopeOptions>("GET", `/api/issues/${encodeURIComponent(issueId)}/periscope`),
-  /** Start on Linear's branch (``branch``) or on a PR (``pr``), never both. */
-  startInPeriscope: (issueId: string, body: { repo: string; prompt: string; branch?: string; pr?: number }) =>
+  startInPeriscope: (issueId: string, body: { repo: string; prompt: string } & ({ branch: string } | { pr: number })) =>
     call<PeriscopeStart>("POST", `/api/issues/${encodeURIComponent(issueId)}/periscope`, body),
   showInPeriscope: (pid: string) => call<{ ok: boolean }>("POST", "/api/periscope/show", { pid }),
   mutes: () => call<MuteRule[]>("GET", "/api/mutes"),

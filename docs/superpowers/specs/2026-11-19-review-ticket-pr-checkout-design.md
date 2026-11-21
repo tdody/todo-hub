@@ -51,9 +51,9 @@ The popover uses PR mode for a review ticket when at least one of its PRs has a 
 >
 > `Cancel esc` `Start ↵`
 
-- **PR** is a select. Its options are the ticket's PRs that have a periscope repo, in the order Linear lists the links, with no duplicates. The first one is selected. The last option is always "None: start on the Linear branch".
+- **PR** is a select. Its options are the ticket's PRs that have a periscope repo, in the order Linear lists the links, with no duplicates. The first one is selected. The select knows each PR by its URL, because two repos can have a PR with the same number. The last option is always "None: start on the Linear branch".
 - The hint under **PR** says "A worktree is already on pr-812." when the selected repo has a worktree on `pr-<N>`. Else it says "Periscope checks out the PR in a new worktree."
-- **Repo** lists only the periscope repos that match the selected PR. The first one is selected.
+- **Repo** lists only the periscope repos that match the selected PR. It selects the one with a worktree already on `pr-<N>`, else the first one.
 - PR mode has no **Branch** field. Periscope uses the branch `pr-<N>`.
 - **Prompt** holds the review prompt, filled in for the ticket and the selected PR. It follows the **PR** select until you edit it.
 - **None: start on the Linear branch** shows the popover as it is without PR mode: all the repos, the remembered repo and its hint, Linear's branch and the normal prompt.

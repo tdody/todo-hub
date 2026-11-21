@@ -15,7 +15,7 @@ export interface PeriscopeCtx {
 interface Popover {
   issueId: string;
   options: PeriscopeOptions | null;     // null while periscope is asked
-  pr: number | null;                    // the selected PR; null starts on the branch
+  pr: PeriscopePr | null;               // the selected PR; null starts on the branch
   repo: string;
   branch: string;
   prompt: string;
@@ -65,11 +65,11 @@ export function periscopeItem(i: Issue): HTMLElement {
   }, "Start in periscope", h("kbd", {}, "p"));
 }
 
-/** Select ``pr`` (null: Linear's branch): its first repo and its prompt, or the remembered repo and the
- *  normal prompt. A prompt you typed stays. */
+/** Select ``pr`` (null: Linear's branch): its repo with a worktree already on pr-<N>, else its first repo,
+ *  and its prompt; or the remembered repo and the normal prompt. A prompt you typed stays. */
 function selectPr(p: Popover, o: PeriscopeOptions, pr: PeriscopePr | null) {
-  p.pr = pr?.number ?? null;
-  p.repo = pr ? pr.repos[0] : o.repo ?? "";
+  p.pr = pr;
+  p.repo = pr ? pr.branch_worktrees[0] ?? pr.repos[0] : o.repo ?? "";
   if (!p.promptEdited) p.prompt = pr ? pr.prompt : o.prompt;
 }
 
@@ -104,7 +104,7 @@ async function start(i: Issue) {
   p.starting = true;
   ctx.render();
   try {
-    const target = p.pr !== null ? { pr: p.pr } : { branch: p.branch };
+    const target = p.pr ? { pr: p.pr.number } : { branch: p.branch };
     const r = await api.startInPeriscope(i.id, { repo: p.repo, prompt: p.prompt, ...target });
     if (popover === p) closePeriscope();
     ctx.toast(r.mode === "existing" ? `${i.identifier} is already open in periscope` : `Started ${i.identifier} in periscope`,
@@ -128,18 +128,18 @@ export function periscopePopover(i: Issue): HTMLElement | "" {
     return h("div", { class: "pp-pop", role: "dialog", "aria-label": label },
       h("div", { class: "pp-title" }, label), h("p", { class: "pp-wait" }, "Asking periscope…"));
   }
-  const pr = o.prs.find((x) => x.number === p.pr) ?? null;
+  const pr = p.pr;
   const prSelect = o.prs.length ? h("select", {
     class: "pp-input", "aria-label": "PR", "data-focus": "periscope-pr", disabled: p.starting,
     onchange: (e: Event) => {
       const value = (e.target as HTMLSelectElement).value;
-      selectPr(p, o, o.prs.find((x) => String(x.number) === value) ?? null);
+      selectPr(p, o, o.prs.find((x) => x.url === value) ?? null);
       ctx.render();
     },
   },
-    ...o.prs.map((x) => h("option", { value: String(x.number), selected: x.number === p.pr }, x.label)),
+    ...o.prs.map((x) => h("option", { value: x.url, selected: x === pr }, x.label)),
     h("option", { value: "", selected: p.pr === null }, "None: start on the Linear branch")) : null;
-  const prHint = !pr ? ""
+  const worktreeHint = !pr ? ""
     : pr.branch_worktrees.includes(p.repo) ? `A worktree is already on pr-${pr.number}.`
     : "Periscope checks out the PR in a new worktree.";
   // A PR's repos are the ones whose origin is the PR's repo: another repo would fetch another PR.
@@ -187,7 +187,7 @@ export function periscopePopover(i: Issue): HTMLElement | "" {
     h("div", { class: "pp-title" }, label),
     o.pr_hint ? h("p", { class: "pp-hint lead" }, o.pr_hint) : "",
     prSelect ? h("label", { class: "pp-field" }, h("span", {}, "PR"), prSelect) : "",
-    prHint ? h("p", { class: "pp-hint" }, prHint) : "",
+    worktreeHint ? h("p", { class: "pp-hint" }, worktreeHint) : "",
     h("label", { class: "pp-field" }, h("span", {}, "Repo"), repo),
     repoHint ? h("p", { class: "pp-hint" }, repoHint) : "",
     pr ? "" : h("label", { class: "pp-field" }, h("span", {}, "Branch"), branch),
