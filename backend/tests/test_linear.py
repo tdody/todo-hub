@@ -170,7 +170,7 @@ def test_issues_carry_linears_branch_name():
 
 
 LABELS = ["Globex", "PiedPiper", "Initech dba Initrode", "Hooli (fka Nucleus)", "Umbrella (Cypress)",
-          "Acme Bolt Company", "Zinc"]
+          "Acme Bolt Company", "Zinc", "Vandelay DBA Kramerica", "Café Nervosa", "Sandbar", "Stark (EU) Holdings"]
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -185,6 +185,10 @@ LABELS = ["Globex", "PiedPiper", "Initech dba Initrode", "Hooli (fka Nucleus)", 
     ("Cypress", "Umbrella (Cypress)"),
     ("Zinc", "Zinc"),
     ("Zinc Inc", "Zinc"),
+    ("Kramerica", "Vandelay DBA Kramerica"),   # any case of dba
+    ("cafe nervosa", "Café Nervosa"),           # accents do not count
+    ("San", None),                              # dba needs a space on each side ("Sandbar")
+    ("EU", None),                               # other names come from parentheses at the end only
     ("Globex Mining", None),     # no partial match
     ("ABC", None),               # no initials ("Acme Bolt Company")
     ("Inc.", None),
