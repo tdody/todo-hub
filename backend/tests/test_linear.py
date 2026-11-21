@@ -31,6 +31,11 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
             return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": [
                 {"id": "p1", "name": "Globex", "state": "started"},
                 {"id": "p2", "name": "Old thing", "state": "completed"}]}}}})
+        if "isGroup" in body["query"]:
+            assert body["variables"] == {"group": "client"}
+            return httpx.Response(200, json={"data": {"issueLabels": {"nodes": [
+                {"id": "x", "color": "#aaaaaa", "isGroup": False, "team": None},       # a plain label with the same name
+                {"id": "g1", "color": "#f7c8c1", "isGroup": True, "team": None}]}}})
         after = body["variables"]["after"]
         page = {"nodes": [{"id": "x", "name": "Vandelay"}], "pageInfo": {"hasNextPage": True, "endCursor": "c1"}} \
             if after is None else {"nodes": [{"id": "y", "name": "acme"}], "pageInfo": {"hasNextPage": False, "endCursor": None}}
@@ -39,8 +44,9 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
     meta = Linear("lin_key", transport=transport(handler)).team_meta("ENG", "client")
     assert [s["name"] for s in meta.states] == ["Backlog", "Todo"]
     assert [l["name"] for l in meta.client_labels] == ["acme", "Vandelay"]
-    assert meta.viewer_id == "me" and len(calls) == 5
+    assert meta.viewer_id == "me" and len(calls) == 6
     assert meta.projects == [{"id": "p1", "name": "Globex"}]
+    assert meta.client_group == {"id": "g1", "color": "#f7c8c1", "team_id": None}
 
 
 def test_errors():
@@ -201,3 +207,28 @@ def test_matching_client_label(name, expected):
 def test_matching_client_label_with_two_matches():
     assert matching_client_label("globex", ["Globex, Inc.", "Globex"]) == "Globex"   # the same name wins
     assert matching_client_label("Globex Corp", ["Globex, Inc.", "Globex LLC"]) is None
+
+
+def test_create_client_label_uses_the_groups_color_and_team():
+    sent = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        sent.append(body["variables"]["input"])
+        return httpx.Response(200, json={"data": {"issueLabelCreate": {
+            "success": True, "issueLabel": {"id": "l9", "name": "Hooli"}}}})
+
+    linear = Linear("k", transport=transport(handler))
+    assert linear.create_client_label("Hooli", {"id": "g1", "color": "#f7c8c1", "team_id": None}) \
+        == {"id": "l9", "name": "Hooli"}
+    linear.create_client_label("Hooli", {"id": "g2", "color": "#000000", "team_id": "t1"})
+    assert sent == [{"name": "Hooli", "parentId": "g1", "color": "#f7c8c1"},
+                    {"name": "Hooli", "parentId": "g2", "color": "#000000", "teamId": "t1"}]
+
+
+def test_create_client_label_refused():
+    def handler(request):
+        return httpx.Response(200, json={"errors": [{"message": "Only admins can create labels"}]})
+
+    with pytest.raises(LinearError, match="Only admins"):
+        Linear("k", transport=transport(handler)).create_client_label("Hooli", {"id": "g1", "color": "#fff", "team_id": None})

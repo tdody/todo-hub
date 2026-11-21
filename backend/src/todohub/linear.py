@@ -55,6 +55,7 @@ class TeamMeta:
     client_labels: list[dict]   # [{id, name}], children of the client label group
     viewer_id: str
     projects: list[dict] = field(default_factory=list)   # [{id, name}], not completed or canceled
+    client_group: dict | None = None   # {id, color, team_id} of the client label group; None if Linear has none
 
 
 class Linear:
@@ -156,6 +157,15 @@ class Linear:
             ["issueLabels"],
             {"group": client_group},
         )
+        groups = self.gql(
+            """
+            query($group: String!) {
+              issueLabels(filter: { name: { eq: $group } }) { nodes { id color isGroup team { id } } }
+            }
+            """,
+            {"group": client_group},
+        )["issueLabels"]["nodes"]
+        group = next((g for g in groups if g["isGroup"]), None)
         projects = self.team_projects(team["id"])
         return TeamMeta(
             team_id=team["id"],
@@ -163,6 +173,8 @@ class Linear:
             client_labels=sorted(labels, key=lambda l: l["name"].lower()),
             viewer_id=data["viewer"]["id"],
             projects=sorted(projects, key=lambda p: p["name"].lower()),
+            client_group={"id": group["id"], "color": group["color"], "team_id": (group.get("team") or {}).get("id")}
+            if group else None,
         )
 
     def team_projects(self, team_id: str) -> list[dict]:
@@ -325,6 +337,24 @@ class Linear:
         if not result["success"]:
             raise LinearError("Linear did not create the issue.")
         return result["issue"]
+
+    def create_client_label(self, name: str, group: dict) -> dict:
+        """Add a label to the client label group, with the group's color and team (none for a workspace group)."""
+        fields = {"name": name, "parentId": group["id"], "color": group["color"]}
+        if group.get("team_id"):
+            fields["teamId"] = group["team_id"]
+        data = self.gql(
+            """
+            mutation($input: IssueLabelCreateInput!) {
+              issueLabelCreate(input: $input) { success issueLabel { id name } }
+            }
+            """,
+            {"input": fields},
+        )
+        result = data["issueLabelCreate"]
+        if not result["success"]:
+            raise LinearError("Linear did not create the label.")
+        return result["issueLabel"]
 
     def get_issue(self, id_or_identifier: str) -> dict:
         """Look an issue up by UUID or by identifier such as ENG-123."""
