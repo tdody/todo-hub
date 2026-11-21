@@ -1486,12 +1486,14 @@ function candidateCardBody(c: Candidate): HTMLElement {
       showFields && c.kind === "waiting" && h("span", { class: "muted small" }, "Follow up"),
       showFields && dateInput(val("due_date") ?? null, (v) => { d.due_date = v; }),
       h("span", { class: "spacer" }),
-      snoozeMenu(c, busy),
-      !linked && dropMenu(c, busy),
-      h("button", {
-        class: "primary", disabled: busy, onclick: () => decide(c),
-        title: newClient ? `Creates the client label ${newClient} in Linear, then the issue. ⌘↩` : "⌘↩",
-      }, busy ? "Working…" : action),
+      h("span", { class: "card-decide" },
+        snoozeMenu(c, busy),
+        !linked && dropMenu(c, busy),
+        h("button", {
+          class: "primary", disabled: busy, onclick: () => decide(c),
+          title: newClient ? `Creates the client label ${newClient} in Linear, then the issue. ⌘↩` : "⌘↩",
+        }, busy ? "Working…" : action),
+      ),
     ),
   );
 }
@@ -3089,7 +3091,7 @@ function matches(x: Candidate | Issue): boolean {
   const q = state.filter.toLowerCase();
   const hay = "identifier" in x
     ? [x.identifier, x.title, x.client, x.project]
-    : [x.title, x.client_label, x.who, x.excerpt];
+    : [x.title, x.client_label, x.new_client_label, x.who, x.excerpt];
   return hay.some((s) => s?.toLowerCase().includes(q));
 }
 
