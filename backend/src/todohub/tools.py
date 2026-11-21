@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from . import categories, mutes
 from .db import DB, SOURCES, title_key
+from .linear import matching_client_label
 
 DUPLICATE_ADVICE = ("drop", "merge", "new")
 
@@ -198,13 +199,20 @@ def add_candidate(
         else:
             raise ToolError(f"source_url is required. {MISSING_URL_HELP[src]}")
 
-    label = (client_label or "").strip() or None
+    label = _clip(client_label, 80)
+    new_label = None
     if label:
-        known = {l.lower(): l for l in db.get_meta("client_labels", [])}
-        if label.lower() in known:
-            label = known[label.lower()]
-        else:
-            notes.append(f"client_label {label!r} is not a known client label; left empty")
+        known = db.get_meta("client_labels", [])
+        found = matching_client_label(label, known)
+        if found:
+            if found.lower() != label.lower():
+                notes.append(f"client_label {label!r} matched the label {found!r}")
+            label = found
+        elif known:
+            notes.append(f"client_label {label!r} is not a label yet; proposed as a new client label")
+            label, new_label = None, label
+        else:  # labels never read from Linear (a new install, or no client label group)
+            notes.append(f"client_label {label!r} left empty: no client labels are loaded")
             label = None
 
     proj = (project or "").strip() or None
@@ -270,7 +278,7 @@ def add_candidate(
         run_id,
         source=src, source_id=sid, source_url=url, title=clean_title, signal=sig,
         why=_clip(why, MAX_TEXT), excerpt=_clip(excerpt, MAX_TEXT), who=_clip(who, MAX_TITLE),
-        client_label=label, due_date=due, priority=prio, possible_duplicate=dup,
+        client_label=label, new_client_label=new_label, due_date=due, priority=prio, possible_duplicate=dup,
         links=clean_links(links, url, notes), subtasks=clean_subtasks(subtasks, notes), kind=kind,
         project=proj, duplicate_advice=advice, duplicate_reason=reason,
         sender=clean_sender, channel=clean_channel,
