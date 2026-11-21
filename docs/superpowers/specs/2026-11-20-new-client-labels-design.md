@@ -42,7 +42,7 @@ The `client_label` rule in `sweep_prompt.md` and `capture_prompt.md` changes:
 
 ### `add_candidate`
 
-For a `client_label` that is given:
+For a `client_label` that is given, when the label list is loaded (with no list, the client stays empty, as today, and a note says why):
 
 1. It is a label, case not important: the candidate gets that label in `client_label`, as today.
 2. It is a near-match of a label: the candidate gets that label in `client_label`. The note says "client_label 'Globex Inc.' matched the label 'Globex'".
@@ -59,7 +59,8 @@ A candidate has a `client_label` or a `new_client_label`, never both.
   - "Initech dba Initrode": "Initech" and "Initrode" (any case of `dba`).
   - "Hooli (fka Nucleus)": "Hooli" and "Nucleus".
   - "Globex (Cypress)": "Globex" and "Cypress".
-- **No partial match.** "Globex" does not match "Globex Mining". If two labels match, the result is `None`, and the name stays new.
+- **No partial match.** "Globex" does not match "Globex Mining".
+- **Two matches.** If two labels match, a label with the same name (case not important) wins. Otherwise the result is `None`, and the name stays new.
 
 ### The Inbox
 
@@ -71,7 +72,8 @@ When a candidate has a `new_client_label`, and the card's action creates an issu
 - **List.** The item shows the chip "Hooli (new)" in place of the client chip: the client chip's accent text, with a 1px accent outline in place of the fill.
 
 While a merge or drop plan is open, the box and the suffix do not show, because merge creates no label.
-- **Edit API.** `CandidateEdit` does not change: the Inbox never sends a new name. An edit that sets `client_label`, to a label or to `null`, also clears `new_client_label`. `client_label` keeps its check: it must be a label.
+
+**Edit API.** `CandidateEdit` does not change: the Inbox never sends a new name. An edit that sets `client_label`, to a label or to `null`, also clears `new_client_label` (`db.update_candidate` does this). `client_label` keeps its check: it must be a label.
 
 ### Approve ("Create new")
 
@@ -122,7 +124,7 @@ Undo sends the issue to Linear's trash, as today, and keeps the label. The candi
 
 ## Testing
 
-- `matching_client_label`: case and punctuation ("Pied-Piper" and "PiedPiper"); suffixes ("Globex, Inc.", and "Zinc" keeps its "inc"); `dba`, `(fka …)` and `(…)` names; no partial match ("Globex Mining"); no initials; two matches give `None`.
+- `matching_client_label`: case and punctuation ("Pied-Piper" and "PiedPiper"); suffixes ("Globex, Inc.", and "Zinc" keeps its "inc"); `dba`, `(fka …)` and `(…)` names; no partial match ("Globex Mining"); no initials; of two matches, the same name wins, else `None`.
 - `add_candidate`: a label, a near-match and a new name, with their notes.
 - `PATCH /api/candidates/{id}`: setting `client_label` to a label or to `null` clears `new_client_label`; an unknown `client_label` is still refused.
 - Approve, with a fake Linear: the label is created and set on the issue and its subtasks; a label made in the meantime is used and nothing is created; a refused label leaves the candidate pending and creates no issue.
