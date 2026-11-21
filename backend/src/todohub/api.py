@@ -558,7 +558,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         undo["comments"] = [x for x in undo["comments"] if x]
         db.set_undo(c["id"], undo)
         return {"candidate": updated, "issue": shape_issue(issue, settings),
-                "subtasks": [], "warnings": warnings}
+                "subtasks": [], "warnings": warnings, "created_label": None}
 
     @app.post("/api/candidates/{cid}/approve", dependencies=auth)
     def approve(cid: int, edit: CandidateEdit | None = None) -> dict:
@@ -593,6 +593,11 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             label_ids = [label["id"]]
             created_label = label["name"] if created else None
             c = db.update_candidate(cid, client_label=label["name"])     # also clears new_client_label
+            # Other cards for this customer use the label now.
+            for other in db.list_candidates("pending"):
+                if other["id"] != cid and other.get("new_client_label") \
+                        and matching_client_label(other["new_client_label"], [label["name"]]):
+                    db.update_candidate(other["id"], client_label=label["name"])
         project_id = next((p["id"] for p in m.projects if p["name"] == c.get("project")), None)
         priority = chosen_priority if chosen_priority is not None else (c["priority"] or settings.default_priority)
         issue = linear_call(lambda l: l.create_issue(

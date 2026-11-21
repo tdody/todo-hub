@@ -1195,6 +1195,17 @@ def test_two_candidates_for_one_new_client_make_one_label(env):
     assert [c["label_ids"] for c in fake.created] == [["l-Hooli"], ["l-Hooli"]]
 
 
+def test_approve_gives_the_new_label_to_the_other_cards_for_the_customer(env):
+    client, db, fake, _ = env
+    first = seed(db, client_label="Hooli")
+    second = seed(db, source_id="C1:2.0", title="Book the Hooli kickoff", client_label="Hooli Inc")
+    other = seed(db, source_id="C1:3.0", title="Send Acme the deck", client_label="Acme")
+    assert client.post(f"/api/candidates/{first}/approve").status_code == 200
+    c = db.get_candidate(second)
+    assert c["client_label"] == "Hooli" and c["new_client_label"] is None
+    assert db.get_candidate(other)["new_client_label"] == "Acme"
+
+
 def test_setting_the_client_clears_the_new_client_label(env):
     client, db, *_ = env
     cid = seed(db, client_label="Hooli")
