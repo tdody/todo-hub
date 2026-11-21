@@ -474,7 +474,7 @@ Soft and friendly, small and calm.
 
 - **Style:** full-pill, Shaded Paper, 12px at 500. Source chips color only their text. Warning chips use Morning Amber; the kind chip (Close, Update) uses the accent fill.
 - **Issue chips:** every issue Claude names in its text is a chip, not a link: a 6px rounded box in Shaded Paper with a Hairline border, the ID at 12px tabular in a softened Pencil, then a short label at 13px. Hover tints the border 45% toward the accent; an issue already done is struck through in Pencil and not clickable. On a sky the chip turns light-on-dark: 12% white fill, 30% white border, white text.
-- **New client chip:** in an Inbox list item, "Hooli (new)": the client chip's accent text, with a 1px accent outline in place of its fill.
+- **New client chip:** in an Inbox list item, "Hooli (new)": the client chip's accent text, with a 1px accent-tinted outline in place of its fill. It shows only when the card's action creates an issue.
 
 ### Cards (Inbox)
 
@@ -497,10 +497,11 @@ A card linked to one of your open issues shows the issue, a switch, and the plan
 
 A card for a customer that has no client label yet. Approving it creates the label first.
 
-- **Box:** the linked issue box's style, above the fields: the heading "New client label", the name at 600 and "has no client label in Linear yet.", then a 12px Pencil line that says everyone in the workspace sees the new label.
+- **Box:** the linked issue box's style, above the fields: the heading "New client label", the name at 600 and "has no client label in Linear yet.", then a 12px Pencil line: "Approve creates it in the client label group, where everyone in the workspace sees it." (the button's verb: Approve, Track or Create issue).
 - **Select:** the first option is "Hooli (new)". Picking a label or "Dev / internal" removes the box and the suffix.
 - **Button:** the primary button's name ends with ", add label" ("Approve, add label").
-- **Decision group:** in every Inbox card, Snooze ▾, Drop ▾ and the primary button stay together at the right edge. When they do not fit on one line, the primary button goes to the next line, also at the right edge.
+- **Decision group:** in every Inbox card, Snooze ▾, Drop ▾ (when the card has it) and the primary button stay together at the right edge. When they do not fit on one line, the primary button goes to the next line, also at the right edge.
+- **Other cards:** when approve creates or finds the label, the other cards for that customer get it, and their box goes.
 
 ### List items and the reading pane
 

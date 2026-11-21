@@ -37,6 +37,7 @@ The `client_label` rule in `sweep_prompt.md` and `capture_prompt.md` changes:
   - With HubSpot tools: search `COMPANY` by name. Give the company's `name` only when its `lifecyclestage` is `customer`. Otherwise leave the client empty: prospects and partners get no label.
   - Without HubSpot tools: give the company's full name from the message, not initials.
 - Otherwise leave it empty (development or internal work).
+- The meeting-prep instruction gives `client_label` only for a customer.
 
 `sweep.py` writes this rule once, as `$client_rule`, from `settings.hubspot_tools`. Both prompts use it.
 
@@ -66,7 +67,7 @@ A candidate has a `client_label` or a `new_client_label`, never both.
 
 When a candidate has a `new_client_label`, and the card's action creates an issue:
 
-- **Box.** Above the fields, a box with the linked issue box's style (`link-box`): the heading "New client label", then "**Hooli** has no client label in Linear yet.", then, in 12px Pencil, "Approve creates it in the client group, where everyone in the workspace sees it."
+- **Box.** Above the fields, a box with the linked issue box's style (`link-box`): the heading "New client label", then "**Hooli** has no client label in Linear yet.", then, in 12px Pencil, "Approve creates it in the client label group, where everyone in the workspace sees it." The line names the button's verb: Approve, Track or Create issue.
 - **Select.** The client select's first option is "Hooli (new)", selected. Pick a label, and the new name, the box and the button suffix go. Pick "Dev / internal", and both fields go. Pick "Hooli (new)" again, and the card drops its client change.
 - **Button.** The primary button's name gets ", add label": "Approve, add label", "Track, add label", or "Create issue, add label" on a linked card. Its tooltip says "Creates the client label Hooli in Linear, then the issue. ⌘↩". When the row wraps, the button stays at the right edge. In the default 1120px window, Snooze and Drop leave 160px, and "Approve, add label" takes 156px, so it fits on their line.
 - **List.** The item shows the chip "Hooli (new)" in place of the client chip: the client chip's accent text, with a 1px accent outline in place of the fill.
@@ -86,7 +87,9 @@ When the candidate has a `new_client_label`, `approve_claimed`:
 
 Approves of new labels run one at a time, so two approves for one new client make one label.
 
-The response gains `created_label` (the name, or `null`). One approve says "Created the client label Hooli." Bulk approve adds the names of the labels it created to its "Approved N of M" message.
+The other pending cards that propose the same label get it too, so their box goes.
+
+The response gains `created_label` (the name, or `null`). One approve says "Created ENG-123 and the client label Hooli". Bulk approve says "Approved 3 of 3, created the client label Hooli".
 
 **Merge** adds to an issue that already exists, so it creates no label. Subtasks from a merge get a client label only if `client_label` is set, as today.
 
@@ -94,7 +97,7 @@ The response gains `created_label` (the name, or `null`). One approve says "Crea
 
 Undo sends the issue to Linear's trash, as today, and keeps the label. The candidate goes back to the Inbox with the label in `client_label`, so another approve uses it. The approve's undo record holds `created_label`. The undo response gains `kept_label`, and the undo message adds: "The client label Hooli stays in Linear."
 
-`PRODUCT.md`: "Block time is the one write that isn't" becomes "Block time and a new client label are the writes that undo leaves".
+`PRODUCT.md`: "Block time is the one write that isn't" becomes "Block time is not undone, and undoing an approval keeps a client label it created".
 
 ## Changes
 
