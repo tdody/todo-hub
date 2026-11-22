@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from todohub.config import Settings
-from todohub.linear import Linear, LinearError, client_labels_of, shape_issue
+from todohub.linear import Linear, LinearError, client_labels_of, matching_client_labels, shape_issue
 from conftest import make_issue
 
 
@@ -20,8 +20,12 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
         calls.append(body)
         assert request.headers["authorization"] == "lin_key"
         if "teams" in body["query"]:
+            assert body["variables"] == {"key": "ENG", "group": "client"}
             return httpx.Response(200, json={"data": {
                 "viewer": {"id": "me"},
+                "issueLabels": {"nodes": [
+                    {"id": "x", "color": "#aaaaaa", "isGroup": False, "team": None},       # a plain label with the same name
+                    {"id": "g1", "color": "#f7c8c1", "isGroup": True, "team": None}]},
                 "teams": {"nodes": [{"id": "t1", "states": {"nodes": [
                     {"id": "b", "name": "Todo", "type": "unstarted", "position": 2},
                     {"id": "a", "name": "Backlog", "type": "backlog", "position": 1}]}}]}}})
@@ -41,6 +45,27 @@ def test_team_meta_paginates_labels_and_sends_raw_key():
     assert [l["name"] for l in meta.client_labels] == ["acme", "Vandelay"]
     assert meta.viewer_id == "me" and len(calls) == 5
     assert meta.projects == [{"id": "p1", "name": "Globex"}]
+    assert meta.client_group == {"id": "g1", "color": "#f7c8c1", "team_id": None}
+
+
+def test_team_meta_client_group_is_the_workspace_or_this_teams_group():
+    def group_of(nodes):
+        def handler(request):
+            body = json.loads(request.content)
+            if "teams" in body["query"]:
+                return httpx.Response(200, json={"data": {"viewer": {"id": "me"},
+                    "teams": {"nodes": [{"id": "t1", "states": {"nodes": []}}]}, "issueLabels": {"nodes": nodes}}})
+            if "projects" in body["query"]:
+                return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": []}}}})
+            return httpx.Response(200, json={"data": {"issueLabels": {
+                "nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}})
+        return Linear("k", transport=transport(handler)).team_meta("ENG", "client").client_group
+
+    other_team = {"id": "g2", "color": "#000000", "isGroup": True, "team": {"id": "t2"}}
+    assert group_of([]) is None
+    assert group_of([other_team]) is None
+    assert group_of([other_team, {"id": "g1", "color": "#f7c8c1", "isGroup": True, "team": {"id": "t1"}}]) \
+        == {"id": "g1", "color": "#f7c8c1", "team_id": "t1"}
 
 
 def test_errors():
@@ -92,7 +117,8 @@ def test_team_meta_and_team_states_order_states_like_linear():
     def handler(request: httpx.Request):
         body = json.loads(request.content)
         if "teams" in body["query"]:
-            return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": [{"id": "t1", "states": states}]}}})
+            return httpx.Response(200, json={"data": {"viewer": {"id": "me"}, "teams": {"nodes": [{"id": "t1", "states": states}]},
+                "issueLabels": {"nodes": []}}})
         if "projects" in body["query"]:
             return httpx.Response(200, json={"data": {"team": {"projects": {"nodes": []}}}})
         if "states" in body["query"]:          # another team's statuses
@@ -167,3 +193,62 @@ def test_issues_carry_linears_branch_name():
     from todohub.linear import ISSUE_FIELDS
 
     assert "branchName" in ISSUE_FIELDS.split()
+
+
+LABELS = ["Globex", "PiedPiper", "Initech dba Initrode", "Hooli (fka Nucleus)", "Umbrella (Cypress)",
+          "Acme Bolt Company", "Zinc", "Vandelay DBA Kramerica", "Café Nervosa", "Sandbar", "Stark (EU) Holdings"]
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("globex", ["Globex"]),
+    ("Globex, Inc.", ["Globex"]),
+    ("GLOBEX LLC", ["Globex"]),
+    ("Pied-Piper", ["PiedPiper"]),
+    ("Initrode", ["Initech dba Initrode"]),
+    ("initech", ["Initech dba Initrode"]),
+    ("Nucleus", ["Hooli (fka Nucleus)"]),
+    ("hooli", ["Hooli (fka Nucleus)"]),
+    ("Cypress", ["Umbrella (Cypress)"]),
+    ("Zinc", ["Zinc"]),
+    ("Zinc Inc", ["Zinc"]),
+    ("Kramerica", ["Vandelay DBA Kramerica"]),     # any case of dba
+    ("cafe nervosa", ["Café Nervosa"]),            # accents do not count
+    ("San", []),                                   # dba needs a space on each side ("Sandbar")
+    ("EU", []),                                    # other names come from parentheses at the end only
+    ("Globex Mining", []),      # no partial match
+    ("ABC", []),                # no initials ("Acme Bolt Company")
+    ("Inc.", []),
+    ("", []),
+])
+def test_matching_client_labels(name, expected):
+    assert matching_client_labels(name, LABELS) == expected
+
+
+def test_matching_client_labels_with_two_matches():
+    assert matching_client_labels("globex", ["Globex, Inc.", "Globex"]) == ["Globex"]   # the same name wins
+    assert matching_client_labels("Globex Corp", ["Globex, Inc.", "Globex LLC"]) == ["Globex, Inc.", "Globex LLC"]
+
+
+def test_create_client_label_uses_the_groups_color_and_team():
+    sent = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        sent.append(body["variables"]["input"])
+        return httpx.Response(200, json={"data": {"issueLabelCreate": {
+            "success": True, "issueLabel": {"id": "l9", "name": "Hooli"}}}})
+
+    linear = Linear("k", transport=transport(handler))
+    assert linear.create_client_label("Hooli", {"id": "g1", "color": "#f7c8c1", "team_id": None}) \
+        == {"id": "l9", "name": "Hooli"}
+    linear.create_client_label("Hooli", {"id": "g2", "color": "#000000", "team_id": "t1"})
+    assert sent == [{"name": "Hooli", "parentId": "g1", "color": "#f7c8c1"},
+                    {"name": "Hooli", "parentId": "g2", "color": "#000000", "teamId": "t1"}]
+
+
+def test_create_client_label_refused():
+    def handler(request):
+        return httpx.Response(200, json={"errors": [{"message": "Only admins can create labels"}]})
+
+    with pytest.raises(LinearError, match="Only admins"):
+        Linear("k", transport=transport(handler)).create_client_label("Hooli", {"id": "g1", "color": "#fff", "team_id": None})

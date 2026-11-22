@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -53,6 +55,7 @@ class TeamMeta:
     client_labels: list[dict]   # [{id, name}], children of the client label group
     viewer_id: str
     projects: list[dict] = field(default_factory=list)   # [{id, name}], not completed or canceled
+    client_group: dict | None = None   # {id, color, team_id} of the client label group; None if Linear has none
 
 
 class Linear:
@@ -129,14 +132,15 @@ class Linear:
     def team_meta(self, team_key: str, client_group: str) -> TeamMeta:
         data = self.gql(
             """
-            query($key: String!) {
+            query($key: String!, $group: String!) {
               viewer { id }
               teams(filter: { key: { eq: $key } }) {
                 nodes { id states { nodes { id name type position } } }
               }
+              issueLabels(filter: { name: { eq: $group } }) { nodes { id color isGroup team { id } } }
             }
             """,
-            {"key": team_key},
+            {"key": team_key, "group": client_group},
         )
         teams = data["teams"]["nodes"]
         if not teams:
@@ -155,12 +159,17 @@ class Linear:
             {"group": client_group},
         )
         projects = self.team_projects(team["id"])
+        # The client label group: a workspace group or this team's. A plain label can have the same name.
+        node = next((g for g in data["issueLabels"]["nodes"]
+                     if g["isGroup"] and (g["team"] is None or g["team"]["id"] == team["id"])), None)
+        group = node and {"id": node["id"], "color": node["color"], "team_id": node["team"] and node["team"]["id"]}
         return TeamMeta(
             team_id=team["id"],
             states=in_linear_order(team["states"]["nodes"]),
             client_labels=sorted(labels, key=lambda l: l["name"].lower()),
             viewer_id=data["viewer"]["id"],
             projects=sorted(projects, key=lambda p: p["name"].lower()),
+            client_group=group,
         )
 
     def team_projects(self, team_id: str) -> list[dict]:
@@ -324,6 +333,24 @@ class Linear:
             raise LinearError("Linear did not create the issue.")
         return result["issue"]
 
+    def create_client_label(self, name: str, group: dict) -> dict:
+        """Add a label to the client label group, with the group's color and team (none for a workspace group)."""
+        fields = {"name": name, "parentId": group["id"], "color": group["color"]}
+        if group["team_id"]:
+            fields["teamId"] = group["team_id"]
+        data = self.gql(
+            """
+            mutation($input: IssueLabelCreateInput!) {
+              issueLabelCreate(input: $input) { success issueLabel { id name } }
+            }
+            """,
+            {"input": fields},
+        )
+        result = data["issueLabelCreate"]
+        if not result["success"]:
+            raise LinearError("Linear did not create the label.")
+        return result["issueLabel"]
+
     def get_issue(self, id_or_identifier: str) -> dict:
         """Look an issue up by UUID or by identifier such as ENG-123."""
         data = self.gql(f"query($id: String!) {{ issue(id: $id) {{ {ISSUE_FIELDS} }} }}", {"id": id_or_identifier})
@@ -432,6 +459,38 @@ def client_labels_of(issue: dict, client_group: str) -> list[dict]:
 def client_label_of(issue: dict, client_group: str) -> str | None:
     found = client_labels_of(issue, client_group)
     return found[0]["name"] if found else None
+
+
+LEGAL_SUFFIXES = {"inc", "llc", "co", "corp", "corporation", "ltd", "company"}
+
+
+def _name_key(name: str) -> str:
+    """Lowercase letters and digits without accents, and without a last word that is a legal suffix
+    ("Globex, Inc." -> "globex", "Café" -> "cafe")."""
+    words = [w for w in (re.sub(r"[\W_]", "", unicodedata.normalize("NFKD", w)) for w in name.lower().split()) if w]
+    if len(words) > 1 and words[-1] in LEGAL_SUFFIXES:
+        words.pop()
+    return "".join(words)
+
+
+def _names_of(label: str) -> list[str]:
+    """A label's name and its other names: "A dba B", "A (fka B)" and "A (B)" also name A and B."""
+    names = [label]
+    for pattern in (r"(.+?)\s+dba\s+(.+)", r"(.+?)\s*\((?:fka\s+)?(.+?)\)\s*"):
+        m = re.fullmatch(pattern, label, re.IGNORECASE)
+        if m:
+            names += [m.group(1), m.group(2)]
+    return names
+
+
+def matching_client_labels(name: str, labels: list[str]) -> list[str]:
+    """The client labels that ``name`` names: one, none, or more than one for an unclear name. Case, accents,
+    punctuation and a legal suffix do not count, and a label's other names count. Of two or more matches, the
+    label with the same name wins."""
+    key = _name_key(name)
+    found = [label for label in labels if any(_name_key(n) == key for n in _names_of(label))]
+    same = [label for label in found if label.lower() == name.strip().lower()]
+    return same if len(same) == 1 else found
 
 
 def shape_issue(issue: dict, settings: Settings) -> dict:
