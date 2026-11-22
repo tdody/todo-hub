@@ -68,7 +68,9 @@ class Periscope:
         """Start Claude on ``branch``, or on pull request ``pr``, which periscope checks out as ``pr-<N>``.
         {mode: "spawned", pid, path, reused, session_id, email}, or {mode: "existing", pid} when a Claude is
         already on the branch. Periscope gives a spawned Claude ``name`` on its rail and pins it. ``email`` is None
-        when periscope finds no email for the account, and an older periscope sends neither field."""
+        when periscope finds no email for the account, and an older periscope sends neither field. A spawned start
+        also has ``warning`` when a worktree problem did not stop it, for example a PR worktree that stays behind
+        the PR."""
         target = {"pr": pr} if pr is not None else {"branch": branch}
         return self._call("POST", "/api/linear/start",
                           {"repo": repo, **target, "ticket": ticket, "title": title, "prompt": prompt, "name": name},

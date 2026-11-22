@@ -429,6 +429,15 @@ def test_a_comment_that_fails_is_a_warning_not_an_error(env, peri, linear):
     assert db.get_meta(LAST_REPO_KEY) == "/dev/api"
 
 
+def test_periscopes_warning_goes_into_the_warnings(env, peri, linear):
+    # Claude starts on a PR worktree that periscope could not bring up to the PR's latest commit.
+    client, _, _ = env
+    behind = "pr-812 may be behind PR #812: the worktree has local changes"
+    peri.answer = httpx.Response(200, json={**WITH_SESSION, "reused": True, "warning": behind})
+    r = client.post("/api/issues/id-ENG-1/periscope", json={"repo": "/dev/api", "pr": 812, "prompt": "Review it."})
+    assert r.status_code == 200 and r.json() == {**WITH_SESSION, "reused": True, "warnings": [behind]}
+
+
 def test_a_start_periscope_refuses_says_it_is_already_starting(env, peri):
     client, db, _ = env
     peri.answer = httpx.Response(409, json={"detail": "start already running"})

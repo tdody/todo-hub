@@ -991,8 +991,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
         """Ask periscope to start Claude on the branch, or on the PR, with the prompt and a name from Haiku. A branch
         start remembers the repo for the issue's project (or client); a PR start does not, because the PR chose
-        the repo. A Claude already on the branch is answered as mode "existing". A new Claude's session goes into
-        a comment on the issue; a comment that fails is a warning."""
+        the repo. A Claude already on the branch is answered as mode "existing". Periscope's warning is the first
+        warning. A new Claude's session goes into a comment on the issue; a comment that fails is a warning."""
         branch = body.branch.strip()
         if bool(branch) == (body.pr is not None):
             raise HTTPException(400, "Send a branch or a PR.")
@@ -1008,7 +1008,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             raise
         if body.pr is None:
             remember_repo(db, issue, body.repo)
-        warnings: list[str] = []
+        warning = result.pop("warning", None)
+        warnings: list[str] = [warning] if warning else []
         if result.get("session_id"):
             comment = (f"- Started: {datetime.now(stats.TZ).replace(microsecond=0).isoformat()}\n"
                        f"- Claude account: {result.get('email') or 'unknown'}\n"
