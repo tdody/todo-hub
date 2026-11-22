@@ -543,7 +543,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         updated = db.decide(c["id"], "approved", issue["identifier"], issue["url"])
         undo["comments"] = [x for x in undo["comments"] if x]
         db.set_undo(c["id"], undo)
-        return {"candidate": updated, "issue": shape_issue(issue, settings),
+        return {"candidate": updated, "issue": shape_issues([issue])[0],
                 "subtasks": [], "warnings": warnings}
 
     @app.post("/api/candidates/{cid}/approve", dependencies=auth)
@@ -616,7 +616,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
         return {
             "candidate": updated,
-            "issue": shape_issue(issue, settings),
+            "issue": shape_issues([issue])[0],
             "subtasks": created,
             "warnings": warnings,
         }
@@ -724,7 +724,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                             warnings.append(f"Subtask not created ({sub['title']}): {exc}")
         finally:
             client.close()
-        return {"candidate": updated, "issue": shape_issue(target, settings), "subtasks": created,
+        return {"candidate": updated, "issue": shape_issues([target])[0], "subtasks": created,
                 "warnings": warnings}
 
     save_draft = draft_fn or (lambda message_id, body: gmail_draft.save_reply_draft(settings, message_id, body))
@@ -1150,7 +1150,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                     return current
             return l.update_issue(issue_id, changes | labels)
 
-        return shape_issue(linear_call(run), settings)
+        return shape_issues([linear_call(run)])[0]
 
     @app.delete("/api/issues/{issue_id}", dependencies=auth)
     def delete_issue(issue_id: str) -> dict:
@@ -1176,7 +1176,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             ids = [i["issue_id"] for i in db.get_today(day) if i["issue_id"] != issue_id]
             ids.insert(min(body.today_position, len(ids)), issue_id)
             db.set_today(day, ids)
-        return shape_issue(issue, settings)
+        return shape_issues([issue])[0]
 
     @app.post("/api/issues/{issue_id}/comments", dependencies=auth)
     def add_comment(issue_id: str, body: CommentIn) -> dict:
@@ -1276,8 +1276,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         start = datetime.combine(date.fromisoformat(day), datetime.min.time(), tzinfo=stats.TZ)
         since = start.astimezone(timezone.utc).replace(microsecond=0).isoformat()
         try:
-            done = [shape_issue(i, settings) for i in linear_call(lambda l: l.my_completed_issues(since))
-                    if (i.get("completedAt") or "") and datetime.fromisoformat(i["completedAt"].replace("Z", "+00:00")) >= start]
+            done = shape_issues([i for i in linear_call(lambda l: l.my_completed_issues(since))
+                                 if (i.get("completedAt") or "") and datetime.fromisoformat(i["completedAt"].replace("Z", "+00:00")) >= start])
             done.sort(key=lambda i: i.get("completed_at") or "", reverse=True)
             error = None
         except HTTPException as exc:
