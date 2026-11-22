@@ -14,7 +14,7 @@ $input
    - `source_url` is required: the Slack permalink, the Grain link from `resolve_urls`, or "" for email.
    - `links`: the documents, files, PRs and dashboards the task needs.
    - `subtasks`: only when the steps are spelled out.
-   - `client_label`: one of: $client_labels (or empty for dev/internal work).
+   - `client_label`: one of: $client_labels. $client_rule Otherwise leave it empty (development or internal work).
    - `due_date` only when stated; `priority` 2 when a client is waiting, 3 normal, 4 small.
 4. Don't call `is_seen` or `mark_seen`; this is a one-off.
 

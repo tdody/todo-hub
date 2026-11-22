@@ -22,3 +22,16 @@ def test_source_overview_counts_failures_in_a_row(tmp_path):
     assert over["grain"]["fail_streak"] == 0 and over["grain"]["ok"] is None
     run("2026-11-07T15:00:00+00:00", True)
     assert db.source_overview(["gmail"])[0]["fail_streak"] == 0
+
+
+def test_new_client_label_and_setting_the_client(tmp_path):
+    db = DB(tmp_path / "t.db")
+    _, cid = db.add_candidate(None, source="slack", source_id="C1:1", title="Send Sam the deck", signal="ask",
+                              new_client_label="Hooli")
+    assert db.get_candidate(cid)["new_client_label"] == "Hooli"
+    db.update_candidate(cid, priority=2)                     # another field leaves it
+    assert db.get_candidate(cid)["new_client_label"] == "Hooli"
+    c = db.update_candidate(cid, client_label="Globex")      # a client, or None, replaces it
+    assert c["client_label"] == "Globex" and c["new_client_label"] is None
+    db.update_candidate(cid, new_client_label="Pied Piper")  # not an editable field
+    assert db.get_candidate(cid)["new_client_label"] is None

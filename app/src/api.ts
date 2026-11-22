@@ -62,6 +62,8 @@ export interface Candidate {
   excerpt: string | null;
   who: string | null;
   client_label: string | null;
+  /** A client label to create on approve: a customer with no label yet. Never set with client_label. */
+  new_client_label: string | null;
   due_date: string | null;
   priority: number;
   possible_duplicate: string | null;
@@ -415,6 +417,8 @@ export interface ApproveResult {
   issue: Issue;
   subtasks: Issue[];
   warnings: string[];
+  /** The client label that approve created first, if any. */
+  created_label: string | null;
 }
 
 export interface IssueEdit {
@@ -605,7 +609,8 @@ export const api = {
   restore: (id: number) => call<Candidate>("POST", `/api/candidates/${id}/restore`),
   decided: (days = 30) => call<{ days: number; more: boolean; items: DecidedItem[] }>("GET", `/api/decided?days=${days}`),
   /** Back to the Inbox, reversing what an approval did in Linear. */
-  undo: (id: number) => call<{ candidate: Candidate; warnings: string[] }>("POST", `/api/candidates/${id}/undo`),
+  undo: (id: number) =>
+    call<{ candidate: Candidate; warnings: string[]; kept_label: string | null }>("POST", `/api/candidates/${id}/undo`),
   issues: () => call<Issue[]>("GET", "/api/issues"),
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
   pulls: (refresh = false) => call<Pulls>("GET", `/api/pulls${refresh ? "?refresh=true" : ""}`),
