@@ -22,7 +22,8 @@ LAST_REPO_KEY = "periscope_last_repo"    # meta: the repo last picked for any is
 QUICK_SECONDS = 15
 START_SECONDS = 120                      # a start fetches, makes the worktree, then waits for Claude's screen
 NAME_SECONDS = 30
-_TOKEN = re.compile(r"\{(identifier|title|url)\}")
+_TOKEN = re.compile(r"\{(identifier|title|url|pr)\}")
+_PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -62,13 +63,17 @@ class Periscope:
         """Its repos and worktrees: {repos: [{repo, label, …}], worktrees: [{path, repo, branch, …}], roots}."""
         return self._call("GET", "/api/open/catalog")
 
-    def start(self, *, repo: str, branch: str, ticket: str, title: str, prompt: str, name: str) -> dict:
-        """{mode: "spawned", pid, path, reused, session_id, email}, or {mode: "existing", pid} when a Claude is
+    def start(self, *, repo: str, ticket: str, title: str, prompt: str, name: str, branch: str = "",
+              pr: int | None = None) -> dict:
+        """Start Claude on ``branch``, or on pull request ``pr``, which periscope checks out as ``pr-<N>``.
+        {mode: "spawned", pid, path, reused, session_id, email}, or {mode: "existing", pid} when a Claude is
         already on the branch. Periscope gives a spawned Claude ``name`` on its rail and pins it. ``email`` is None
-        when periscope finds no email for the account, and an older periscope sends neither field."""
+        when periscope finds no email for the account, and an older periscope sends neither field. A spawned start
+        also has ``warning`` when a worktree problem did not stop it, for example a PR worktree that stays behind
+        the PR."""
+        target = {"pr": pr} if pr is not None else {"branch": branch}
         return self._call("POST", "/api/linear/start",
-                          {"repo": repo, "branch": branch, "ticket": ticket, "title": title, "prompt": prompt,
-                           "name": name},
+                          {"repo": repo, **target, "ticket": ticket, "title": title, "prompt": prompt, "name": name},
                           START_SECONDS)
 
     def select(self, pid: str) -> None:
@@ -109,9 +114,46 @@ def pane_name(settings: Settings, issue: dict) -> str:
     return "-".join([ident, *words])
 
 
-def fill_prompt(template: str, issue: dict) -> str:
-    """The template with {identifier}, {title} and {url} filled in; other braces stay as typed."""
-    return _TOKEN.sub(lambda m: issue[m.group(1)], template)
+def fill_prompt(template: str, issue: dict, pr: str = "") -> str:
+    """The template with {identifier}, {title} and {url} filled in, and {pr} when a PR's URL is given. Other
+    braces stay as typed."""
+    values = {"identifier": issue["identifier"], "title": issue["title"], "url": issue["url"]}
+    if pr:
+        values["pr"] = pr
+    return _TOKEN.sub(lambda m: values.get(m.group(1), m.group(0)), template)
+
+
+def pr_links(urls: list[str]) -> list[tuple[str, int]]:
+    """The GitHub repo (``owner/name``) and number of each pull request in ``urls``, in order, each once. GitHub
+    ignores the case of ``owner/name``, so the first spelling stays."""
+    found: dict[tuple[str, int], tuple[str, int]] = {}
+    for url in urls:
+        if m := _PR_URL.match(url):
+            slug, number = m.group(1), int(m.group(2))
+            found.setdefault((slug.lower(), number), (slug, number))
+    return list(found.values())
+
+
+def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue: dict) -> tuple[list[dict], str]:
+    """The popover's PR options: each PR in ``links`` whose GitHub repo is the origin of a periscope repo, with
+    ``template`` filled in for it. When none is, the hint that names the PRs' repos."""
+    prs: list[dict] = []
+    missing: dict[str, None] = {}
+    for slug, number in links:
+        repos = [r["repo"] for r in catalog["repos"] if (r.get("slug") or "").lower() == slug.lower()]
+        if not repos:
+            missing.setdefault(slug, None)
+            continue
+        url = f"https://github.com/{slug}/pull/{number}"
+        prs.append({
+            "number": number, "label": f"{slug}#{number}", "url": url, "repos": repos,
+            "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"]
+                                        if w["repo"] in repos and w["branch"] == f"pr-{number}"}),
+            "prompt": fill_prompt(template, issue, pr=url),
+        })
+    if prs or not missing:
+        return prs, ""
+    return [], f"No periscope repo has {' or '.join(missing)} as its origin. This starts on the Linear branch."
 
 
 def _memory_key(issue: dict) -> tuple[str, str] | None:

@@ -138,6 +138,15 @@ def test_periscope_prompt_from_the_settings_page():
     assert load_settings().periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
 
 
+def test_periscope_review_prompt_from_the_settings_page():
+    assert load_settings().periscope_review_prompt == config.DEFAULT_PERISCOPE_REVIEW_PROMPT
+    config.write_overrides({"periscope": {"review_prompt": "Review {pr}."}})
+    s = load_settings()
+    assert s.periscope_review_prompt == "Review {pr}." and s.periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
+    config.write_overrides({"periscope": {"review_prompt": "   "}})
+    assert load_settings().periscope_review_prompt == config.DEFAULT_PERISCOPE_REVIEW_PROMPT
+
+
 def test_periscope_is_off_by_default():
     s = load_settings()
     assert s.periscope_url == "" and s.periscope_app_id == "" and not s.periscope_on
@@ -153,10 +162,17 @@ def test_periscope_url_and_app_id_from_config_toml(tmp_home):
     assert s.periscope_app_id == "com.example.periscope"
 
 
-def test_settings_api_periscope_prompt():
+def test_settings_api_periscope_prompts():
     client, _, _ = client_for()
-    default = {"enabled": False, "prompt": config.DEFAULT_PERISCOPE_PROMPT, "default_prompt": config.DEFAULT_PERISCOPE_PROMPT}
+    default = {"enabled": False,
+               "prompt": config.DEFAULT_PERISCOPE_PROMPT, "default_prompt": config.DEFAULT_PERISCOPE_PROMPT,
+               "review_prompt": config.DEFAULT_PERISCOPE_REVIEW_PROMPT,
+               "default_review_prompt": config.DEFAULT_PERISCOPE_REVIEW_PROMPT}
     assert client.get("/api/settings").json()["periscope"] == default
-    r = client.put("/api/settings/periscope", json={"prompt": "Read {identifier}."})
-    assert r.status_code == 200 and r.json()["periscope"]["prompt"] == "Read {identifier}."
-    assert client.put("/api/settings/periscope", json={"prompt": ""}).json()["periscope"] == default
+    r = client.put("/api/settings/periscope", json={"prompt": "Read {identifier}.", "review_prompt": "Review {pr}."})
+    assert r.status_code == 200
+    assert r.json()["periscope"] == {**default, "prompt": "Read {identifier}.", "review_prompt": "Review {pr}."}
+    # One prompt back to its default: the other stays as it was.
+    assert client.put("/api/settings/periscope", json={"prompt": ""}).json()["periscope"] == \
+        {**default, "review_prompt": "Review {pr}."}
+    assert client.put("/api/settings/periscope", json={"review_prompt": ""}).json()["periscope"] == default

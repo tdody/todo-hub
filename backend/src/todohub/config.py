@@ -5,7 +5,7 @@ Everything lives in one folder, ``~/Library/Application Support/TodoHub`` on mac
 
     config.toml      settings you can edit
     settings.json    what the app's Settings page changed (sources, schedule, Daylight place,
-                     the periscope prompt);
+                     the periscope prompts);
                      it wins over config.toml for those keys
     todohub.db       SQLite: candidate queue, runs, source status
     sweep/           the folder Claude Code runs in (so no repo .mcp.json is picked up)
@@ -121,10 +121,16 @@ def home() -> Path:
     return Path.home() / ".todohub"
 
 
-# Start in periscope: what the new Claude is told. {identifier}, {title} and {url} become the issue's.
+# Start in periscope: what the new Claude is told, on a branch or on a review ticket's PR. {identifier}, {title}
+# and {url} become the issue's, and {pr} in the review prompt becomes the PR's URL.
 DEFAULT_PERISCOPE_PROMPT = (
     "Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. "
     "Sum up the ask, then propose a plan. Do not change code until I agree."
+)
+DEFAULT_PERISCOPE_REVIEW_PROMPT = (
+    "Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. "
+    "Then review {pr} in this worktree: sum up the change and list the problems you find. "
+    "Do not post anything on GitHub."
 )
 
 
@@ -165,6 +171,7 @@ class Settings:
     periscope_url: str = ""
     periscope_app_id: str = ""
     periscope_prompt: str = DEFAULT_PERISCOPE_PROMPT
+    periscope_review_prompt: str = DEFAULT_PERISCOPE_REVIEW_PROMPT
     # Settings page: each source's state ("on", "paused", "removed"); a source not listed follows
     # config.toml. And when the sweep runs on its own.
     source_states: dict[str, str] = field(default_factory=dict)
@@ -354,8 +361,10 @@ def apply_overrides(s: Settings, data: dict) -> None:
         s.daylight_latitude = _coord(day.get("latitude"), 90)
         s.daylight_longitude = _coord(day.get("longitude"), 180)
     peri = data.get("periscope")
-    if isinstance(peri, dict) and isinstance(peri.get("prompt"), str) and peri["prompt"].strip():
-        s.periscope_prompt = peri["prompt"]
+    if isinstance(peri, dict):
+        for key, attr in (("prompt", "periscope_prompt"), ("review_prompt", "periscope_review_prompt")):
+            if isinstance(peri.get(key), str) and peri[key].strip():
+                setattr(s, attr, peri[key])
 
 
 def source_state(s: Settings, key: str) -> str:

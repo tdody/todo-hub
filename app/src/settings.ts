@@ -300,17 +300,32 @@ function scheduleSection(s: Schedule, ctx: SettingsCtx): HTMLElement {
 function periscopeSection(ctx: SettingsCtx): HTMLElement {
   const p = data!.periscope;
   const box = h("textarea", { class: "set-input set-prompt", rows: 4, value: p.prompt, "aria-label": "Prompt" });
+  const reviewBox = h("textarea", { class: "set-input set-prompt", rows: 4, value: p.review_prompt,
+    "aria-label": "Review prompt" });
   const saveBtn = h("button", {
     type: "button", class: "ghost small-btn", disabled: busy === "periscope",
-    onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompt(box.value), "Prompt saved"),
+    // Only a prompt you changed is sent: the other one keeps following its default.
+    onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompts({
+      ...(box.value !== p.prompt ? { prompt: box.value } : {}),
+      ...(reviewBox.value !== p.review_prompt ? { review_prompt: reviewBox.value } : {}),
+    }), "Prompts saved"),
   }, busy === "periscope" ? "Saving…" : "Save");
-  const reset = p.prompt !== p.default_prompt ? h("button", {
-    type: "button", class: "link-btn small",
-    onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompt(""), "Prompt back to the default"),
-  }, "Reset to default") : "";
+  // Each reset sends only its own prompt, so the other one keeps its saved text.
+  const reset = (changed: boolean, prompts: { prompt?: string; review_prompt?: string }, done: string) =>
+    h("div", { class: "set-row-inline" }, changed ? h("button", {
+      type: "button", class: "link-btn small",
+      onclick: () => void save("periscope", ctx, () => api.setPeriscopePrompts(prompts), done),
+    }, "Reset to default") : "");
   return card("periscope", "Periscope",
-    "Start in periscope (⋯ or p on an issue) sends this prompt to the new Claude. {identifier}, {title} and {url} become the issue's.",
-    "", box, h("div", { class: "set-row-inline" }, saveBtn, reset));
+    "Start in periscope (⋯ or p on an issue) sends the prompt to the new Claude. {identifier}, {title} and {url} " +
+      "become the issue's. A review ticket whose GitHub PR is in a periscope repo gets the review prompt, where {pr} " +
+      "becomes the PR's link.",
+    "",
+    h("label", { class: "set-label" }, "Prompt"), box,
+    reset(p.prompt !== p.default_prompt, { prompt: "" }, "Prompt back to the default"),
+    h("label", { class: "set-label" }, "Review prompt"), reviewBox,
+    reset(p.review_prompt !== p.default_review_prompt, { review_prompt: "" }, "Review prompt back to the default"),
+    h("div", { class: "set-row-inline" }, saveBtn));
 }
 
 // ---- updates ------------------------------------------------------------------------------------
