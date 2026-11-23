@@ -1822,6 +1822,7 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
 .start-input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 textarea.start-input { resize: vertical; line-height: 1.5; }
 .start-hint { margin: -4px 0 2px 64px; font-size: 12px; color: var(--muted); }
+.start-hint.lead { margin-left: 0; }
 .start-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .set-prompt { display: block; width: 100%; max-width: 640px; box-sizing: border-box; resize: vertical; font: inherit; line-height: 1.5; }
 /* Settings → Start Claude: the repo rows, the + Add field and the two prompts. .set-label gives each part its top

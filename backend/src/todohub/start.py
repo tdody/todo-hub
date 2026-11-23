@@ -17,7 +17,7 @@ log = logging.getLogger("todohub.start")
 REPOS_KEY = "start_repos"            # meta: {"project:<name>" or "client:<label>": repo path}
 LAST_REPO_KEY = "start_last_repo"    # meta: the repo last picked for any issue
 NAME_SECONDS = 30
-_TOKEN = re.compile(r"\{(identifier|title|url)\}")
+_TOKEN = re.compile(r"\{(identifier|title|url|pr)\}")
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -52,9 +52,13 @@ def claude_name(settings: Settings, issue: dict) -> str:
     return "-".join([ident, *words])
 
 
-def fill_prompt(template: str, issue: dict) -> str:
-    """The template with {identifier}, {title} and {url} filled in; other braces stay as typed."""
-    return _TOKEN.sub(lambda m: issue[m.group(1)], template)
+def fill_prompt(template: str, issue: dict, pr: str = "") -> str:
+    """The template with {identifier}, {title} and {url} filled in, and {pr} when a PR's URL is given. Other
+    braces stay as typed."""
+    values = {"identifier": issue["identifier"], "title": issue["title"], "url": issue["url"]}
+    if pr:
+        values["pr"] = pr
+    return _TOKEN.sub(lambda m: values.get(m.group(1), m.group(0)), template)
 
 
 def _memory_key(issue: dict) -> tuple[str, str] | None:

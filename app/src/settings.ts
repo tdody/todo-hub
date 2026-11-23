@@ -300,7 +300,7 @@ function scheduleSection(s: Schedule, ctx: SettingsCtx): HTMLElement {
 // ---- start claude -------------------------------------------------------------------------------
 let repoPath = "";                   // the + Add field's text, kept across re-renders
 let repoError = "";                  // why the last + Add failed, shown under the field
-const promptDrafts: Partial<Record<"code" | "chat", string>> = {};   // typed, not saved yet; kept across re-renders
+const promptDrafts: Partial<Record<"code" | "review" | "chat", string>> = {};   // typed, not saved yet; kept across re-renders
 
 async function addRepo(ctx: SettingsCtx) {
   if (!repoPath.trim() || busy) return;
@@ -327,9 +327,13 @@ function removeRepo(r: { repo: string; label: string }, ctx: SettingsCtx) {
   }, `${r.label} removed`);
 }
 
-function promptField(kind: "code" | "chat", title: string, hint: string, ctx: SettingsCtx): HTMLElement {
+function promptField(kind: "code" | "review" | "chat", title: string, hint: string, ctx: SettingsCtx): HTMLElement {
   const s = data!.start;
-  const [value, fallback] = kind === "code" ? [s.code_prompt, s.default_code_prompt] : [s.chat_prompt, s.default_chat_prompt];
+  const [value, fallback] = {
+    code: [s.code_prompt, s.default_code_prompt],
+    review: [s.review_prompt, s.default_review_prompt],
+    chat: [s.chat_prompt, s.default_chat_prompt],
+  }[kind];
   const key = `prompt-${kind}`;
   const box = h("textarea", {
     class: "set-input set-prompt", rows: 4, value: promptDrafts[kind] ?? value, "aria-label": title, "data-edit": key, readOnly: busy === key,
@@ -387,6 +391,8 @@ function startSection(ctx: SettingsCtx): HTMLElement {
           busy === "repo-add" ? "Adding…" : "+ Add")),
       repoError ? h("p", { class: "set-sub bad", role: "alert" }, repoError) : ""),
     promptField("code", "Code prompt", "Start in periscope and Start in Claude Code send it to the new Claude.", ctx),
+    promptField("review", "Review prompt",
+      "Start in periscope sends it for a review ticket whose GitHub PR is in a periscope repo. {pr} becomes the PR's link.", ctx),
     promptField("chat", "Chat prompt", "Start in Claude Desktop puts it in a new chat. It cannot start with /.", ctx));
 }
 

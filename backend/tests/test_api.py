@@ -463,6 +463,27 @@ def test_categories_in_candidates_and_issues(env):
     assert client.patch(f"/api/candidates/{seed(db, title='x')}", json={"category": "nope"}).status_code == 422
 
 
+def test_issue_answers_keep_the_type_you_approved(env):
+    from datetime import datetime as dt, timezone as tz
+    client, db, fake, _ = env
+    cid = seed(db, title="Draft the Globex readout deck", category="analysis")
+    issue = client.post(f"/api/candidates/{cid}/approve").json()["issue"]
+    assert (issue["identifier"], issue["category"]) == ("ENG-99", "analysis")     # the Bug label's rule gives "code"
+    fake.issues.append(make_issue("ENG-99", "Draft the Globex readout deck"))
+    assert client.patch("/api/issues/id-ENG-99", json={"priority": 2}).json()["category"] == "analysis"
+    assert client.post("/api/issues/id-ENG-99/restore").json()["category"] == "analysis"
+    db.set_meta("open_issues", [{"identifier": "ENG-99", "title": "Draft the Globex readout deck"}])
+    db.set_meta("open_issue_identifiers", ["ENG-99"])
+    upd = tools.propose_update(db, None, source="slack", source_id="C1:2", source_url="https://x/p2",
+                               target_issue="ENG-99", comment="Readout moved.", why="w", excerpt="e")["id"]
+    assert client.post(f"/api/candidates/{upd}/approve").json()["issue"]["category"] == "analysis"
+    dup = seed(db, source_id="C1:3", title="Add the lift chart", possible_duplicate="ENG-99", category="analysis")
+    assert client.post(f"/api/candidates/{dup}/merge", json={"comment": "More."}).json()["issue"]["category"] == "analysis"
+    fake.completed = [make_issue("ENG-99", "Draft the Globex readout deck", state="Done",
+                                 completed=dt.now(tz.utc).isoformat())]
+    assert client.get("/api/brief").json()["completed_today"][0]["category"] == "analysis"
+
+
 def test_logos_endpoint(env, monkeypatch):
     from todohub import logos
     client, *_ = env

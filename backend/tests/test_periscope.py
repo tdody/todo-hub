@@ -7,14 +7,14 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from todohub import periscope
+from todohub import periscope, tools
 from todohub.api import create_app
 from todohub.config import load_settings
 from todohub.db import DB
 from todohub.linear import LinearError
-from todohub.periscope import Periscope, PeriscopeError
+from todohub.periscope import Periscope, PeriscopeError, pr_links, review_prs
 from todohub.start import LAST_REPO_KEY, REPOS_KEY
-from conftest import FakeLinear
+from conftest import FakeLinear, make_issue
 
 URL = "http://127.0.0.1:17374"
 APP_ID = "com.example.periscope"
@@ -26,18 +26,28 @@ CATALOG = {
     "roots": ["/dev"],
 }
 SPAWNED = {"mode": "spawned", "pid": "k", "path": "/dev/worktrees/api/me-eng-1", "reused": False}
+# The catalog of a periscope that sends each repo's slug. web's slug has capitals: GitHub ignores case. notes's
+# origin is not on GitHub.
+SLUGGED = {
+    **CATALOG,
+    "repos": [{**CATALOG["repos"][0], "slug": "acme/api"}, {**CATALOG["repos"][1], "slug": "Acme/Web"},
+              {"repo": "/dev/notes", "label": "notes", "default_branch": "main", "branches": [], "slug": None}],
+    "worktrees": [*CATALOG["worktrees"],
+                  {"path": "/dev/worktrees/api/pr-812", "repo": "/dev/api", "branch": "pr-812", "is_main": False}],
+}
+PR = "https://github.com/acme/api/pull/812"
 
 
 @pytest.fixture
 def peri():
     """Periscope behind an httpx MockTransport. ``calls`` holds (method, path, body); set ``answer`` to change
-    what POST /api/linear/start answers."""
-    p = SimpleNamespace(calls=[], answer=httpx.Response(200, json=SPAWNED))
+    what POST /api/linear/start answers, and ``catalog`` to change the catalog."""
+    p = SimpleNamespace(calls=[], answer=httpx.Response(200, json=SPAWNED), catalog=CATALOG)
 
     def handler(request: httpx.Request) -> httpx.Response:
         p.calls.append((request.method, request.url.path, json.loads(request.content) if request.content else None))
         if request.url.path == "/api/open/catalog":
-            return httpx.Response(200, json=CATALOG)
+            return httpx.Response(200, json=p.catalog)
         if request.url.path == "/api/linear/start":
             return p.answer
         if request.url.path == "/api/select":
@@ -60,6 +70,13 @@ def test_client_calls(peri):
                                        "prompt": "Read.", "name": "eng-1-fix"}),
         ("POST", "/api/select", {"pid": "k"}),
     ]
+
+
+def test_client_start_with_a_pr_sends_no_branch(peri):
+    Periscope(URL, transport=peri.transport).start(repo="/dev/api", pr=812, ticket="ENG-3", title="Review",
+                                                   prompt="Review it.", name="eng-3")
+    assert peri.calls == [("POST", "/api/linear/start", {"repo": "/dev/api", "pr": 812, "ticket": "ENG-3",
+                                                         "title": "Review", "prompt": "Review it.", "name": "eng-3"})]
 
 
 def test_client_errors(peri):
@@ -91,6 +108,35 @@ def test_client_when_periscope_is_down_or_slow():
     with pytest.raises(PeriscopeError, match="Periscope didn't answer in 120 s. It may still start Claude."):
         Periscope(URL, transport=httpx.MockTransport(slow)).start(
             repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p", name="eng-1")
+
+
+def test_pr_links_keeps_pull_requests_in_order_once():
+    assert pr_links([
+        "https://example.slack.com/archives/C1/p1",
+        "https://github.com/acme/web/pull/455",
+        "https://github.com/acme/api/issues/3",
+        "https://github.com/acme/api/commit/abc123",
+        f"{PR}/files",
+        "https://github.com/acme/web/pull/455#discussion_r1",
+        "https://github.com/Acme/Web/pull/455",
+    ]) == [("acme/web", 455), ("acme/api", 812)]
+
+
+def test_review_prs_match_repos_by_origin_and_name_the_missing_ones():
+    issue = {"identifier": "ENG-3", "title": "Review", "url": "https://linear.app/x/issue/ENG-3"}
+    prs, hint = review_prs([("acme/web", 455), ("acme/api", 812)], SLUGGED, "Review {pr}.", issue)
+    assert prs == [
+        {"number": 455, "label": "acme/web#455", "url": "https://github.com/acme/web/pull/455",
+         "repos": ["/dev/web"], "branch_worktrees": [], "prompt": "Review https://github.com/acme/web/pull/455."},
+        {"number": 812, "label": "acme/api#812", "url": PR,
+         "repos": ["/dev/api"], "branch_worktrees": ["/dev/api"], "prompt": f"Review {PR}."},
+    ]
+    assert hint == ""
+    assert review_prs([("acme/ios", 7), ("acme/infra", 9), ("acme/ios", 8)], SLUGGED, "Review {pr}.", issue) == (
+        [], "No periscope repo has acme/ios or acme/infra as its origin. This starts on the Linear branch.")
+    # One PR with a repo is enough: the others are not offered, and there is no hint.
+    prs, hint = review_prs([("acme/ios", 7), ("acme/api", 812)], SLUGGED, "Review {pr}.", issue)
+    assert [p["label"] for p in prs] == ["acme/api#812"] and hint == ""
 
 
 def test_bring_to_front_opens_the_app_by_its_id(monkeypatch):
@@ -148,7 +194,71 @@ def test_options_fill_the_popover(env):
         "branch_worktrees": ["/dev/web"],
         "prompt": "Read Linear ticket ENG-1 (https://linear.app/x/issue/ENG-1) and its comments with the Linear "
                   "tools. Sum up the ask, then propose a plan. Do not change code until I agree.",
+        "prs": [],
+        "pr_hint": "",
     }
+
+
+REVIEW_PROMPT = (f"Read Linear ticket ENG-3 (https://linear.app/x/issue/ENG-3) and its comments with the Linear tools. "
+                 f"Then review {PR} in this worktree: sum up the change and list the problems you find. "
+                 f"Do not post anything on GitHub.")
+
+
+def review_issue(linear, links, identifier="ENG-3", title="Review acme/api#812: Retry stuck uploads"):
+    """A review ticket with ``links``. make_issue's Bug label would make it a code ticket, so it has no label."""
+    issue = make_issue(identifier, title)
+    issue["labels"]["nodes"] = []
+    linear.issues.append(issue)
+    linear.existing_links = {issue["id"]: list(links)}
+    return issue
+
+
+def test_a_review_ticket_offers_its_pr(env, peri, linear):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    review_issue(linear, ["https://example.slack.com/archives/C1/p1", f"{PR}/files"])
+    o = client.get("/api/issues/id-ENG-3/periscope").json()
+    assert o["prs"] == [{"number": 812, "label": "acme/api#812", "url": PR, "repos": ["/dev/api"],
+                         "branch_worktrees": ["/dev/api"], "prompt": REVIEW_PROMPT}]
+    assert o["pr_hint"] == ""
+    # The branch start stays, for "None: start on the Linear branch".
+    assert o["branch"] == "me/eng-3" and o["prompt"].startswith("Read Linear ticket ENG-3")
+
+
+def test_a_review_ticket_whose_pr_has_no_repo_gets_a_hint(env, peri, linear):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    review_issue(linear, ["https://github.com/acme/ios/pull/7"])
+    o = client.get("/api/issues/id-ENG-3/periscope").json()
+    assert o["prs"] == []
+    assert o["pr_hint"] == "No periscope repo has acme/ios as its origin. This starts on the Linear branch."
+
+
+def test_a_ticket_that_is_not_a_review_does_not_read_its_links(env, peri, linear):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    linear.attachment_urls = lambda issue_id: pytest.fail("read the links of a code ticket")
+    o = client.get("/api/issues/id-ENG-1/periscope").json()
+    assert o["prs"] == [] and o["pr_hint"] == ""
+
+
+def test_a_ticket_you_approved_as_a_review_gets_its_pr(env, peri, linear):
+    client, db, _ = env
+    peri.catalog = SLUGGED
+    linear.existing_links = {"id-ENG-1": [PR]}       # ENG-1's Bug label makes it a code ticket by the rules
+    cid = tools.add_candidate(db, None, source="slack", source_id="C1:9", title="Rebin Globex grades",
+                              signal="ask", why="Sam asked.", excerpt="can you look", category="review",
+                              source_url="https://example.slack.com/archives/C1/p9")["id"]
+    db.decide(cid, "approved", "ENG-1", "https://linear.app/x/issue/ENG-1")
+    assert [p["label"] for p in client.get("/api/issues/id-ENG-1/periscope").json()["prs"]] == ["acme/api#812"]
+
+
+def test_an_older_periscope_gets_no_prs_and_no_hint(env, linear):
+    client, _, _ = env                                 # CATALOG has no slug: that periscope cannot take a pr
+    review_issue(linear, [PR])
+    linear.attachment_urls = lambda issue_id: pytest.fail("read the links for a periscope that cannot take a pr")
+    o = client.get("/api/issues/id-ENG-3/periscope").json()
+    assert o["prs"] == [] and o["pr_hint"] == ""
 
 
 def test_start_sends_the_issue_and_its_name_and_remembers_the_repo(env, peri, linear):
@@ -161,6 +271,20 @@ def test_start_sends_the_issue_and_its_name_and_remembers_the_repo(env, peri, li
     assert db.get_meta(REPOS_KEY) == {"client:Globex": "/dev/api"}
     assert db.get_meta(LAST_REPO_KEY) == "/dev/api"
     assert linear.comments == []
+
+
+def test_a_pr_start_sends_the_pr_and_keeps_the_remembered_repos(env, peri, linear):
+    client, db, _ = env
+    peri.answer = httpx.Response(200, json={**SPAWNED, "session_id": "3f2a9c1e-5b7d-4e2a-9f10-2c4d6e8a0b1c",
+                                            "email": "you@example.com"})
+    r = client.post("/api/issues/id-ENG-1/periscope", json={"repo": "/dev/api", "pr": 812, "prompt": "Review it."})
+    assert r.status_code == 200
+    assert peri.calls[-1] == ("POST", "/api/linear/start", {
+        "repo": "/dev/api", "pr": 812, "ticket": "ENG-1", "title": "Rebin Globex grades",
+        "prompt": "Review it.", "name": "eng-1-rebin"})
+    # The PR chose the repo, not you.
+    assert db.get_meta(REPOS_KEY) is None and db.get_meta(LAST_REPO_KEY) is None
+    assert len(linear.comments) == 1
 
 
 def test_a_claude_already_on_the_branch_is_answered_and_the_repo_remembered(env, peri, linear):
@@ -210,6 +334,15 @@ def test_a_comment_that_fails_is_a_warning_not_an_error(env, peri, linear):
     assert r.status_code == 200
     assert r.json()["warnings"] == ["The Claude session was not added to ENG-1: Can't reach Linear"]
     assert db.get_meta(LAST_REPO_KEY) == "/dev/api"
+
+
+def test_periscopes_warning_goes_into_the_warnings(env, peri, linear):
+    # Claude starts on a PR worktree that periscope could not bring up to the PR's latest commit.
+    client, _, _ = env
+    behind = "pr-812 may be behind PR #812: the worktree has local changes"
+    peri.answer = httpx.Response(200, json={**WITH_SESSION, "reused": True, "warning": behind})
+    r = client.post("/api/issues/id-ENG-1/periscope", json={"repo": "/dev/api", "pr": 812, "prompt": "Review it."})
+    assert r.status_code == 200 and r.json() == {**WITH_SESSION, "reused": True, "warnings": [behind]}
 
 
 def test_a_start_periscope_refuses_says_it_is_already_starting(env, peri):
@@ -283,10 +416,11 @@ def test_meta_says_whether_periscope_is_on(peri):
         assert TestClient(app).get("/api/meta").json()["periscope"] is expected
 
 
-def test_a_blank_branch_is_a_400_and_periscope_is_not_asked(env, peri):
+@pytest.mark.parametrize("target", [{"branch": "me/eng-1", "pr": 812}, {}, {"branch": "   "}])
+def test_a_start_needs_a_branch_or_a_pr(env, peri, target):
     client, _, _ = env
-    r = client.post("/api/issues/id-ENG-1/periscope", json={**START, "branch": "   "})
-    assert r.status_code == 400 and r.json() == {"error": "The branch is empty"}
+    r = client.post("/api/issues/id-ENG-1/periscope", json={"repo": "/dev/api", "prompt": "Read.", **target})
+    assert r.status_code == 400 and r.json() == {"error": "Send a branch or a PR."}
     assert peri.calls == []
 
 

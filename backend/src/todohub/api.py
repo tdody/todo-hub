@@ -29,12 +29,12 @@ from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
 from . import claude_code, claude_desktop, logos, mutes, pulls, schedule, stats, summary, tools
 from .categories import categorize
-from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY, SCHEDULE_FIRST,
-                     SCHEDULE_LAST, SOURCE_FIELDS, Settings, get_linear_key, load_settings, read_overrides,
-                     source_state, write_overrides)
+from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, DEFAULT_REVIEW_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY,
+                     SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings, get_linear_key, load_settings,
+                     read_overrides, source_state, write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, shape_issue
-from .periscope import Periscope, PeriscopeError, bring_to_front
+from .periscope import Periscope, PeriscopeError, bring_to_front, pr_links, review_prs
 from .selfcmd import self_command
 from .sources import SourceError
 from .start import StartError, claude_name, default_repo, fill_prompt, remember_repo
@@ -117,8 +117,16 @@ class RepoIn(BaseModel):
 
 
 class StartIn(BaseModel):
-    repo: str = Field(min_length=1, max_length=500)       # a repo path from periscope's catalog or the Settings list
+    repo: str = Field(min_length=1, max_length=500)       # a repo path from the Settings list
     branch: str = Field(min_length=1, max_length=250)
+    prompt: str = Field(min_length=1, max_length=8000)
+
+
+class PeriscopeStartIn(BaseModel):
+    repo: str = Field(min_length=1, max_length=500)       # a repo path from periscope's catalog
+    # Exactly one of: the branch to start on, or a PR that periscope checks out as pr-<N>.
+    branch: str = Field(default="", max_length=250)
+    pr: int | None = Field(default=None, gt=0)
     prompt: str = Field(min_length=1, max_length=8000)
 
 
@@ -444,8 +452,10 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "schedule": schedule.describe(settings, scheduler.installed()) | {"supported": scheduler.supported()},
             "daylight": {"place": settings.daylight_place, "latitude": settings.daylight_latitude,
                          "longitude": settings.daylight_longitude},
-            "start": {"repos": repo_labels(), "code_prompt": settings.code_prompt, "chat_prompt": settings.chat_prompt,
-                      "default_code_prompt": DEFAULT_CODE_PROMPT, "default_chat_prompt": DEFAULT_CHAT_PROMPT},
+            "start": {"repos": repo_labels(), "code_prompt": settings.code_prompt,
+                      "review_prompt": settings.review_prompt, "chat_prompt": settings.chat_prompt,
+                      "default_code_prompt": DEFAULT_CODE_PROMPT, "default_review_prompt": DEFAULT_REVIEW_PROMPT,
+                      "default_chat_prompt": DEFAULT_CHAT_PROMPT},
         }
 
     @app.get("/api/settings", dependencies=auth)
@@ -493,9 +503,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return settings_body()
 
     @app.put("/api/settings/prompts/{kind}", dependencies=auth)
-    def set_prompt(kind: Literal["code", "chat"], body: PromptIn) -> dict:
-        """Save the code prompt (periscope and Claude Code) or the chat prompt (Claude Desktop).
-        An empty prompt goes back to the default."""
+    def set_prompt(kind: Literal["code", "review", "chat"], body: PromptIn) -> dict:
+        """Save the code prompt (periscope and Claude Code), the review prompt (periscope, for a review ticket's
+        PR) or the chat prompt (Claude Desktop). An empty prompt goes back to the default."""
         prompt = body.prompt.strip()
         if kind == "chat" and prompt.startswith("/"):
             raise HTTPException(400, "The chat prompt cannot start with /.")    # Claude Desktop refuses that link
@@ -607,7 +617,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         updated = db.decide(c["id"], "approved", issue["identifier"], issue["url"])
         undo["comments"] = [x for x in undo["comments"] if x]
         db.set_undo(c["id"], undo)
-        return {"candidate": updated, "issue": shape_issue(issue, settings),
+        return {"candidate": updated, "issue": shape_issues([issue])[0],
                 "subtasks": [], "warnings": warnings, "created_label": None}
 
     @app.post("/api/candidates/{cid}/approve", dependencies=auth)
@@ -694,7 +704,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
         return {
             "candidate": updated,
-            "issue": shape_issue(issue, settings),
+            "issue": shape_issues([issue])[0],
             "subtasks": created,
             "warnings": warnings,
             "created_label": created_label,
@@ -768,9 +778,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             source = SOURCE_NAMES.get(c["source"], c["source"])
             links = ([{"url": c["source_url"], "title": source}] if c.get("source_url") else []) + c["links"]
             try:
-                have = client.attachment_urls(target["id"]) if links else set()
+                have = client.attachment_urls(target["id"]) if links else []
             except LinearError:
-                have = set()
+                have = []
             for link in links:
                 if link["url"] in have:
                     continue          # already on the issue; leave it alone (and out of undo)
@@ -803,7 +813,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                             warnings.append(f"Subtask not created ({sub['title']}): {exc}")
         finally:
             client.close()
-        return {"candidate": updated, "issue": shape_issue(target, settings), "subtasks": created,
+        return {"candidate": updated, "issue": shape_issues([target])[0], "subtasks": created,
                 "warnings": warnings}
 
     save_draft = draft_fn or (lambda message_id, body: gmail_draft.save_reply_draft(settings, message_id, body))
@@ -981,16 +991,17 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return db.decide(cid, "pending")
 
     # ---- Linear lists -----------------------------------------------------------------
+    def shape_issues(raw: list[dict]) -> list[dict]:
+        """Linear issues shaped for the app. The issues TodoHub created keep the type you approved."""
+        known = db.categories_by_identifier()
+        shaped = [shape_issue(i, settings) for i in raw]
+        for issue in shaped:
+            issue["category"] = known.get(issue["identifier"], issue["category"])
+        return shaped
+
     @app.get("/api/issues", dependencies=auth)
     def issues() -> list[dict]:
-        raw = linear_call(lambda l: l.my_open_issues())
-        known = db.categories_by_identifier()    # issues TodoHub created keep the type you approved
-        out = []
-        for i in raw:
-            shaped = shape_issue(i, settings)
-            shaped["category"] = known.get(shaped["identifier"], shaped["category"])
-            out.append(shaped)
-        return out
+        return shape_issues(linear_call(lambda l: l.my_open_issues()))
 
     images: dict[str, tuple[bytes, str]] = {}     # recent Linear images, oldest first
 
@@ -1048,40 +1059,51 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.get("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_options(issue_id: str) -> dict:
         """What the popover shows first: periscope's repos, the one to select and why, Linear's branch, the
-        repos with a worktree already on it, and the code prompt filled in for the issue."""
+        repos with a worktree already on it, and the code prompt filled in for the issue. For a review ticket, also
+        its PRs that periscope can check out (``prs``), or why it has none (``pr_hint``)."""
         raw = linear_call(lambda l: l.get_issue(issue_id))
-        issue = shape_issue(raw, settings)
+        [issue] = shape_issues([raw])
         catalog = periscope_call(lambda p: p.catalog())
         repos = [{"repo": r["repo"], "label": r["label"]} for r in catalog["repos"]]
         repo, hint = default_repo(db, issue, [r["repo"] for r in repos])
         branch = raw["branchName"]
+        prs, pr_hint = [], ""
+        # An older periscope sends no slug, and cannot check out a PR.
+        if issue["category"] == "review" and any("slug" in r for r in catalog["repos"]):
+            urls = linear_call(lambda l: l.attachment_urls(issue["id"]))
+            prs, pr_hint = review_prs(pr_links(urls), catalog, settings.review_prompt, issue)
         return {
             "repos": repos, "repo": repo, "hint": hint, "branch": branch,
             "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"] if w["branch"] == branch}),
             "prompt": fill_prompt(settings.code_prompt, issue),
+            "prs": prs, "pr_hint": pr_hint,
         }
 
     @app.post("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
-    def periscope_start(issue_id: str, body: StartIn) -> dict:
-        """Ask periscope to start Claude on the branch with the prompt and a name from Haiku, then remember the
-        repo for the issue's project (or client). A Claude already on the branch is answered as mode "existing".
-        A new Claude's session goes into a comment on the issue; a comment that fails is a warning."""
+    def periscope_start(issue_id: str, body: PeriscopeStartIn) -> dict:
+        """Ask periscope to start Claude on the branch, or on the PR, with the prompt and a name from Haiku. A branch
+        start remembers the repo for the issue's project (or client); a PR start does not, because the PR chose
+        the repo. A Claude already on the branch is answered as mode "existing". Periscope's warning is the first
+        warning. A new Claude's session goes into a comment on the issue; a comment that fails is a warning."""
         branch = body.branch.strip()
-        if not branch:
-            raise HTTPException(400, "The branch is empty")
+        if bool(branch) == (body.pr is not None):
+            raise HTTPException(400, "Send a branch or a PR.")
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
         name = name_claude(issue)
         try:
             result = periscope_call(lambda p: p.start(
-                repo=body.repo, branch=branch, ticket=issue["identifier"], title=issue["title"],
+                repo=body.repo, branch=branch, pr=body.pr, ticket=issue["identifier"], title=issue["title"],
                 prompt=body.prompt, name=name))
         except HTTPException as exc:
             if exc.status_code == 409:
                 raise HTTPException(409, f"Periscope is already starting {issue['identifier']}.")
             raise
-        remember_repo(db, issue, body.repo)
-        warnings = add_session_comment(issue, result.get("email"), result["session_id"]) \
-            if result.get("session_id") else []
+        if body.pr is None:
+            remember_repo(db, issue, body.repo)
+        warning = result.pop("warning", None)
+        warnings = [warning] if warning else []
+        if result.get("session_id"):
+            warnings += add_session_comment(issue, result.get("email"), result["session_id"])
         return {**result, "warnings": warnings}
 
     @app.post("/api/periscope/show", dependencies=periscope_auth)
@@ -1271,7 +1293,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                     return current
             return l.update_issue(issue_id, changes | labels)
 
-        return shape_issue(linear_call(run), settings)
+        return shape_issues([linear_call(run)])[0]
 
     @app.delete("/api/issues/{issue_id}", dependencies=auth)
     def delete_issue(issue_id: str) -> dict:
@@ -1297,7 +1319,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             ids = [i["issue_id"] for i in db.get_today(day) if i["issue_id"] != issue_id]
             ids.insert(min(body.today_position, len(ids)), issue_id)
             db.set_today(day, ids)
-        return shape_issue(issue, settings)
+        return shape_issues([issue])[0]
 
     @app.post("/api/issues/{issue_id}/comments", dependencies=auth)
     def add_comment(issue_id: str, body: CommentIn) -> dict:
@@ -1397,8 +1419,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         start = datetime.combine(date.fromisoformat(day), datetime.min.time(), tzinfo=stats.TZ)
         since = start.astimezone(timezone.utc).replace(microsecond=0).isoformat()
         try:
-            done = [shape_issue(i, settings) for i in linear_call(lambda l: l.my_completed_issues(since))
-                    if (i.get("completedAt") or "") and datetime.fromisoformat(i["completedAt"].replace("Z", "+00:00")) >= start]
+            done = shape_issues([i for i in linear_call(lambda l: l.my_completed_issues(since))
+                                 if (i.get("completedAt") or "") and datetime.fromisoformat(i["completedAt"].replace("Z", "+00:00")) >= start])
             done.sort(key=lambda i: i.get("completed_at") or "", reverse=True)
             error = None
         except HTTPException as exc:

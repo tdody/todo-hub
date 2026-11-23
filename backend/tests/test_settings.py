@@ -132,13 +132,15 @@ def test_install_keeps_the_program_of_an_existing_schedule(tmp_path, monkeypatch
 
 def test_start_settings_from_the_settings_page():
     s = load_settings()
-    assert (s.code_prompt, s.chat_prompt, s.repos) == (config.DEFAULT_CODE_PROMPT, config.DEFAULT_CHAT_PROMPT, [])
+    assert (s.code_prompt, s.review_prompt, s.chat_prompt, s.repos) == \
+        (config.DEFAULT_CODE_PROMPT, config.DEFAULT_REVIEW_PROMPT, config.DEFAULT_CHAT_PROMPT, [])
     assert not s.claude_code_on
     config.write_overrides({"start": {"repos": ["/code/api", 7], "code_prompt": "Read {identifier}.",
-                                      "chat_prompt": "   "}})
+                                      "review_prompt": "Review {pr}.", "chat_prompt": "   "}})
     s = load_settings()
     assert s.repos == ["/code/api"] and s.claude_code_on
-    assert s.code_prompt == "Read {identifier}." and s.chat_prompt == config.DEFAULT_CHAT_PROMPT
+    assert s.code_prompt == "Read {identifier}." and s.review_prompt == "Review {pr}."
+    assert s.chat_prompt == config.DEFAULT_CHAT_PROMPT
 
 
 def test_periscope_is_off_by_default():
@@ -160,12 +162,16 @@ def test_settings_api_prompts():
     client, _, _ = client_for()
     start = client.get("/api/settings").json()["start"]
     assert start["code_prompt"] == start["default_code_prompt"] == config.DEFAULT_CODE_PROMPT
+    assert start["review_prompt"] == start["default_review_prompt"] == config.DEFAULT_REVIEW_PROMPT
     assert start["chat_prompt"] == start["default_chat_prompt"] == config.DEFAULT_CHAT_PROMPT
     r = client.put("/api/settings/prompts/chat", json={"prompt": " Help with {identifier}. "})
     assert r.status_code == 200 and r.json()["start"]["chat_prompt"] == "Help with {identifier}."
     r = client.put("/api/settings/prompts/code", json={"prompt": "Read {identifier}."})
     assert r.json()["start"]["code_prompt"] == "Read {identifier}."
-    assert r.json()["start"]["chat_prompt"] == "Help with {identifier}."        # one save keeps the other
+    assert r.json()["start"]["chat_prompt"] == "Help with {identifier}."        # one save keeps the others
+    r = client.put("/api/settings/prompts/review", json={"prompt": "Review {pr}."})
+    assert r.json()["start"]["review_prompt"] == "Review {pr}."
+    assert r.json()["start"]["code_prompt"] == "Read {identifier}."
     r = client.put("/api/settings/prompts/chat", json={"prompt": ""})
     assert r.json()["start"]["chat_prompt"] == config.DEFAULT_CHAT_PROMPT
     assert client.put("/api/settings/prompts/other", json={"prompt": "x"}).status_code == 422

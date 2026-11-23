@@ -16,7 +16,7 @@ In:
 - **Start in Claude Code**: a popover like periscope's (repo, branch, prompt), a worktree next to the repo, a `.command` script that the Mac's default app for `.command` files runs, the Haiku name and the session comment.
 - **Start in Claude Desktop**: a link that opens a new chat with the prompt. No popover.
 - One popover module for periscope and Claude Code, and one repo memory for both.
-- A **Start Claude** section on the Settings page: the repo list, the code prompt and the chat prompt.
+- A **Start Claude** section on the Settings page: the repo list, the code prompt, the review prompt and the chat prompt.
 
 Out:
 
@@ -111,6 +111,9 @@ The **Periscope** section becomes **Start Claude**. It always shows, so the page
 > **Code prompt** — Start in periscope and Start in Claude Code send it.
 > `[text area]` **Save** · **Reset to default**
 >
+> **Review prompt** — Start in periscope sends it for a review ticket's PR.
+> `[text area]` **Save** · **Reset to default**
+>
 > **Chat prompt** — Start in Claude Desktop puts it in a new chat.
 > `[text area]` **Save** · **Reset to default**
 
@@ -119,6 +122,10 @@ The **Periscope** section becomes **Start Claude**. It always shows, so the page
 - **The code prompt** default is the periscope default, unchanged:
 
   > Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. Sum up the ask, then propose a plan. Do not change code until I agree.
+
+- **The review prompt** is the prompt that Start in periscope sends when it starts on a review ticket's PR. `{pr}` becomes the PR's link. Its default:
+
+  > Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. Then review {pr} in this worktree: sum up the change and list the problems you find. Do not post anything on GitHub.
 
 - **The chat prompt** default is:
 
@@ -150,12 +157,12 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 
 **New `backend/src/todohub/start.py`**: what every start item shares, moved from `periscope.py`.
 
-- `fill_prompt(template, issue)`, unchanged.
+- `fill_prompt(template, issue, pr="")`: also fills `{pr}` when a PR's link is given.
 - `claude_name(settings, issue)`: the Haiku name. It was `pane_name`. The name now also names a Claude Code session, not only a periscope pane.
 - `default_repo(db, issue, repos)` and `remember_repo(db, issue, repo)`, unchanged. Their meta keys become `start_repos` and `start_last_repo`. The old `periscope_repos` and `periscope_last_repo` are not copied: you pick the repo again one time for each project.
 - `StartError(message)`: a start that cannot go on. The routes give it as a 502 with its message.
 
-**`backend/src/todohub/periscope.py`**: only `Periscope`, `PeriscopeError` and `bring_to_front`.
+**`backend/src/todohub/periscope.py`**: only `Periscope`, `PeriscopeError`, `bring_to_front`, and `pr_links` and `review_prs` for a review ticket's PRs.
 
 **New `backend/src/todohub/claude_code.py`**
 
@@ -177,9 +184,10 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 **`backend/src/todohub/config.py`**
 
 - `periscope_prompt` becomes `code_prompt`. `DEFAULT_PERISCOPE_PROMPT` becomes `DEFAULT_CODE_PROMPT`.
+- `periscope_review_prompt` becomes `review_prompt`, and `DEFAULT_PERISCOPE_REVIEW_PROMPT` becomes `DEFAULT_REVIEW_PROMPT`.
 - New: `chat_prompt` with `DEFAULT_CHAT_PROMPT`, and `repos: list[str]`.
 - `claude_code_on` answers "is the repo list not empty?", as `periscope_on` does for periscope.
-- `settings.json` holds the three under one key: `{"start": {"repos": [...], "code_prompt": "...", "chat_prompt": "..."}}`. The `periscope` key goes away. No migration: nobody has it saved.
+- `settings.json` holds the four under one key: `{"start": {"repos": [...], "code_prompt": "...", "review_prompt": "...", "chat_prompt": "..."}}`. The `periscope` key goes away. No migration: nobody has it saved.
 
 **`backend/src/todohub/api.py`**
 
@@ -188,9 +196,9 @@ Each one is an error toast. An error at **Start** leaves the popover open. A war
 - `POST /api/issues/{issue_id}/claude-code` with `{repo, branch, prompt}` → `{path, reused, session_id, warnings}`.
 - `POST /api/issues/{issue_id}/claude-desktop` → `{ok: true}`.
 - `GET /api/meta` adds `claude_code` and `claude_desktop`.
-- The settings body: `start: {repos: [{repo, label}], code_prompt, chat_prompt, default_code_prompt, default_chat_prompt}` replaces `periscope`.
+- The settings body: `start: {repos: [{repo, label}], code_prompt, review_prompt, chat_prompt, default_code_prompt, default_review_prompt, default_chat_prompt}` replaces `periscope`.
 - `POST /api/settings/repos` with `{path}` adds a repo. `DELETE /api/settings/repos?repo=<path>` removes one.
-- `PUT /api/settings/prompts/{kind}` with `{prompt}`, where `kind` is `code` or `chat`, replaces `PUT /api/settings/periscope`.
+- `PUT /api/settings/prompts/{kind}` with `{prompt}`, where `kind` is `code`, `review` or `chat`, replaces `PUT /api/settings/periscope`.
 - A dependency answers 404 for each new route that is off, before any Linear or git call, as `require_periscope` does.
 
 **`app/src/periscope.ts` becomes `app/src/start.ts`**

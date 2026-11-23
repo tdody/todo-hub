@@ -317,12 +317,24 @@ export interface AppSettings {
   start: StartSettings;
 }
 
+/** A review ticket's PR whose GitHub repo is the origin of a periscope repo. */
+export interface PeriscopePr {
+  number: number;
+  label: string;                                // "acme/api#812"
+  url: string;
+  repos: string[];                              // periscope's repos whose origin is the PR's repo
+  branch_worktrees: string[];                   // the ones with a worktree already on pr-<N>
+  prompt: string;                               // the review prompt, filled in for this PR
+}
+
 /** Settings → Start Claude: Start in Claude Code's repos, and the prompts. */
 export interface StartSettings {
   repos: { repo: string; label: string }[];   // absolute top folders; the label shows ~
   code_prompt: string;                        // Start in periscope and Start in Claude Code
+  review_prompt: string;                      // Start in periscope, for a review ticket's PR
   chat_prompt: string;                        // Start in Claude Desktop
   default_code_prompt: string;
+  default_review_prompt: string;
   default_chat_prompt: string;
 }
 
@@ -334,12 +346,14 @@ export interface StartOptions {
   branch: string;                               // Linear's branch name
   branch_worktrees: string[];                   // repos with a worktree already on that branch
   prompt: string;                               // the code prompt, filled in
+  prs?: PeriscopePr[];                          // periscope only: a review ticket's PRs; empty for other tickets
+  pr_hint?: string;                             // periscope only: "No periscope repo has acme/web as its origin. …", or ""
 }
 
 export interface PeriscopeStart {
   mode: "spawned" | "existing";                 // existing: a Claude was already on the branch
   pid: string;                                  // periscope always gives the pane's id
-  warnings: string[];                           // why the session comment was not added; usually empty
+  warnings: string[];                           // periscope's warning, and why the session comment was not added; usually empty
 }
 
 export interface ClaudeCodeStart {
@@ -576,7 +590,7 @@ export const api = {
   issuePreview: (ident: string) => call<IssuePreview>("GET", `/api/issues/${encodeURIComponent(ident)}/preview`),
   periscopeOptions: (issueId: string) =>
     call<StartOptions>("GET", `/api/issues/${encodeURIComponent(issueId)}/periscope`),
-  startInPeriscope: (issueId: string, body: { repo: string; branch: string; prompt: string }) =>
+  startInPeriscope: (issueId: string, body: { repo: string; prompt: string } & ({ branch: string } | { pr: number })) =>
     call<PeriscopeStart>("POST", `/api/issues/${encodeURIComponent(issueId)}/periscope`, body),
   showInPeriscope: (pid: string) => call<{ ok: boolean }>("POST", "/api/periscope/show", { pid }),
   claudeCodeOptions: (issueId: string) =>
@@ -599,7 +613,8 @@ export const api = {
   setSchedule: (s: Pick<Schedule, "every" | "start" | "end" | "days">) => call<AppSettings>("PUT", "/api/settings/schedule", s),
   installSchedule: () => call<AppSettings>("POST", "/api/settings/schedule/install"),
   setDaylightPlace: (d: AppSettings["daylight"]) => call<AppSettings>("PUT", "/api/settings/daylight", d),
-  setPrompt: (kind: "code" | "chat", prompt: string) => call<AppSettings>("PUT", `/api/settings/prompts/${kind}`, { prompt }),
+  setPrompt: (kind: "code" | "review" | "chat", prompt: string) =>
+    call<AppSettings>("PUT", `/api/settings/prompts/${kind}`, { prompt }),
   addRepo: (path: string) => call<AppSettings>("POST", "/api/settings/repos", { path }),
   removeRepo: (repo: string) => call<AppSettings>("DELETE", `/api/settings/repos?repo=${encodeURIComponent(repo)}`),
   daylight: () => call<{ location: { lat: number; lon: number; place: string } | null }>("GET", "/api/daylight"),

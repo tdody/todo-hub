@@ -71,6 +71,13 @@ def test_fill_prompt_fills_three_tokens_and_keeps_other_braces():
         "Read ENG-1: Fix {url} in {that} at https://linear.app/x/issue/ENG-1. Keep {this}."
 
 
+def test_fill_prompt_fills_pr_only_when_it_is_given():
+    issue = {"identifier": "ENG-1", "title": "Fix", "url": "https://linear.app/x/issue/ENG-1"}
+    pr = "https://github.com/acme/api/pull/812"
+    assert fill_prompt("Review {pr} for {identifier}.", issue, pr=pr) == f"Review {pr} for ENG-1."
+    assert fill_prompt("Review {pr} for {identifier}.", issue) == "Review {pr} for ENG-1."
+
+
 def test_default_repo_project_then_client_then_last():
     db = DB(load_settings().db_path)
     repos = ["/dev/api", "/dev/web"]

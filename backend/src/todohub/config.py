@@ -121,11 +121,17 @@ def home() -> Path:
     return Path.home() / ".todohub"
 
 
-# Start in periscope and Start in Claude Code send the code prompt. Start in Claude Desktop puts the chat prompt in
-# a new chat. {identifier}, {title} and {url} become the issue's.
+# Start in periscope and Start in Claude Code send the code prompt. Start in periscope sends the review prompt for a
+# review ticket's PR. Start in Claude Desktop puts the chat prompt in a new chat. {identifier}, {title} and {url}
+# become the issue's, and {pr} in the review prompt becomes the PR's URL.
 DEFAULT_CODE_PROMPT = (
     "Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. "
     "Sum up the ask, then propose a plan. Do not change code until I agree."
+)
+DEFAULT_REVIEW_PROMPT = (
+    "Read Linear ticket {identifier} ({url}) and its comments with the Linear tools. "
+    "Then review {pr} in this worktree: sum up the change and list the problems you find. "
+    "Do not post anything on GitHub."
 )
 DEFAULT_CHAT_PROMPT = (
     "Read Linear ticket {identifier} ({url}) and its comments with the Linear connector. "
@@ -170,6 +176,7 @@ class Settings:
     periscope_url: str = ""
     periscope_app_id: str = ""
     code_prompt: str = DEFAULT_CODE_PROMPT
+    review_prompt: str = DEFAULT_REVIEW_PROMPT
     chat_prompt: str = DEFAULT_CHAT_PROMPT
     repos: list[str] = field(default_factory=list)     # Start in Claude Code's repos: absolute top folders
     # Settings page: each source's state ("on", "paused", "removed"); a source not listed follows
@@ -368,7 +375,7 @@ def apply_overrides(s: Settings, data: dict) -> None:
     if isinstance(start, dict):
         if isinstance(start.get("repos"), list):
             s.repos = [r for r in start["repos"] if isinstance(r, str)]
-        for key in ("code_prompt", "chat_prompt"):
+        for key in ("code_prompt", "review_prompt", "chat_prompt"):
             if isinstance(start.get(key), str) and start[key].strip():
                 setattr(s, key, start[key])
 

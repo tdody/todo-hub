@@ -404,10 +404,11 @@ class Linear:
             raise LinearError(f"Linear did not attach {url}.")
         return (data["attachmentCreate"].get("attachment") or {}).get("id") or ""
 
-    def attachment_urls(self, issue_id: str) -> set[str]:
+    def attachment_urls(self, issue_id: str) -> list[str]:
+        """The URLs of the issue's links, in the order Linear gives them."""
         data = self.gql("query($id: String!) { issue(id: $id) { attachments(first: 100) { nodes { url } } } }",
                         {"id": issue_id})
-        return {a["url"] for a in ((data.get("issue") or {}).get("attachments") or {}).get("nodes", [])}
+        return [a["url"] for a in ((data.get("issue") or {}).get("attachments") or {}).get("nodes", [])]
 
     def delete_attachment(self, attachment_id: str) -> None:
         data = self.gql("mutation($id: String!) { attachmentDelete(id: $id) { success } }", {"id": attachment_id})
