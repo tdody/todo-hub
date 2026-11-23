@@ -536,11 +536,13 @@ class DB:
         return [dict(r) for r in rows]
 
     def categories_by_identifier(self) -> dict[str, str]:
-        """Task type of each Linear issue TodoHub created, so lists show the same icon."""
+        """Task type of each Linear issue with an approved card, so lists show the same icon. A merge gives an issue
+        another card: the latest approval wins."""
         with self.connect() as c:
             rows = c.execute(
                 "SELECT linear_identifier, category FROM candidates "
-                "WHERE status = 'approved' AND linear_identifier IS NOT NULL AND category IS NOT NULL").fetchall()
+                "WHERE status = 'approved' AND linear_identifier IS NOT NULL AND category IS NOT NULL "
+                "ORDER BY decided_at").fetchall()
         return {r["linear_identifier"]: r["category"] for r in rows}
 
     def decisions_since(self, since_iso: str) -> list[dict]:

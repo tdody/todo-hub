@@ -35,3 +35,19 @@ def test_new_client_label_and_setting_the_client(tmp_path):
     assert c["client_label"] == "Globex" and c["new_client_label"] is None
     db.update_candidate(cid, new_client_label="Pied Piper")  # not an editable field
     assert db.get_candidate(cid)["new_client_label"] is None
+
+
+def test_the_latest_approval_gives_an_issue_its_type(tmp_path, monkeypatch):
+    db = DB(tmp_path / "t.db")
+    def add(source_id, category):
+        return db.add_candidate(None, source="slack", source_id=source_id, title="Check the lift chart", signal="ask",
+                                category=category)[1]
+    def approve(cid, when):
+        monkeypatch.setattr("todohub.db.now_iso", lambda: when)
+        db.decide(cid, "approved", "ENG-99", "https://x/ENG-99")
+    older_card, newer_card = add("C1:1", "analysis"), add("C1:2", "code")
+    approve(newer_card, "2026-11-20T10:00:00+00:00")          # creates ENG-99
+    approve(older_card, "2026-11-21T10:00:00+00:00")          # merges into ENG-99
+    assert db.categories_by_identifier() == {"ENG-99": "analysis"}
+    db.decide(older_card, "pending")                          # undo the merge
+    assert db.categories_by_identifier() == {"ENG-99": "code"}
