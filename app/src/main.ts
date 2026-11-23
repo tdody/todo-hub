@@ -14,7 +14,7 @@ import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, group
 import type { Category } from "./avatars";
 import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues";
 import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
-import { closePeriscope, dismissPeriscope, forgetPeriscope, isPeriscopeOpen, periscopeItem, periscopePopover, setupPeriscope } from "./periscope";
+import { closeStart, dismissStart, forgetStart, isStartOpen, setupStart, startItems, startPopover } from "./start";
 import { renderMarkdown } from "./markdown";
 import { installUpdate, RELEASES_URL, update, watchForUpdates } from "./update";
 
@@ -2657,7 +2657,7 @@ function stageBody(i: Issue, onToday: boolean): Node[] {
   const more = h("details", { class: "drop-menu pane-menu" },
     h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
     h("div", { class: "menu" },
-      state.meta?.periscope ? periscopeItem(i) : "",
+      ...startItems(i, state.meta),
       onToday ? h("button", { type: "button", onclick: () => void toggleToday(i.id) }, "Remove from Today") : "",
       h("button", { type: "button", class: "menu-danger", onclick: (e: Event) => {
         (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
@@ -2665,7 +2665,7 @@ function stageBody(i: Issue, onToday: boolean): Node[] {
       } }, "Delete…")));
   return [
     h("div", { class: "tl-fields" }, ...issueFields(i),
-      h("span", { class: "tl-actions" }, more, periscopePopover(i))),
+      h("span", { class: "tl-actions" }, more, startPopover(i))),
     detailBody(i.id),
   ];
 }
@@ -2940,7 +2940,7 @@ function issuePane(i: Issue): HTMLElement {
     h("summary", { class: "ghost-btn small-btn icon-more", title: "More", "aria-label": "More actions" }, "⋯"),
     h("div", { class: "menu" },
       link("Open in Linear ↗", i.url, "menu-link"),
-      state.meta?.periscope ? periscopeItem(i) : "",
+      ...startItems(i, state.meta),
       t ? h("button", { type: "button", onclick: () => void toggleToday(i.id) }, "Remove from Today") : "",
       h("button", { type: "button", class: "menu-danger", onclick: (e: Event) => {
         (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
@@ -2955,7 +2955,7 @@ function issuePane(i: Issue): HTMLElement {
       h("span", { class: "tl-actions" },
         t ? blockControls(t) : h("button", { class: "ghost small-btn", title: "Star it for Today (then you can block time for it)",
           onclick: () => void toggleToday(i.id) }, "☆ Add to Today"),
-        more, periscopePopover(i))),
+        more, startPopover(i))),
     detailBody(i.id),
   );
 }
@@ -3139,7 +3139,7 @@ function goTab(id: Tab, highlight: string[] = []) {
   if (state.pickedProject) state.filter = "";
   state.pickedClient = null;
   state.pickedProject = null;
-  forgetPeriscope();
+  forgetStart();
   state.tab = id;
   state.highlight = new Set(highlight);
   if (highlight.length) {
@@ -3157,7 +3157,7 @@ function goTab(id: Tab, highlight: string[] = []) {
 }
 
 function pickClient(name: string) {
-  forgetPeriscope();
+  forgetStart();
   state.tab = "client";
   state.filter = name;
   state.pickedClient = name;
@@ -3169,7 +3169,7 @@ function pickClient(name: string) {
 /** One project from the sidebar: every open issue in it, Client and Dev together (a client issue
  *  can belong to a project too), grouped by status. The filter then searches within it. */
 function pickProject(name: string) {
-  forgetPeriscope();
+  forgetStart();
   state.tab = "dev";
   state.filter = "";
   state.pickedClient = name;
@@ -3455,7 +3455,7 @@ function slipTag(s: Slip | undefined): HTMLElement | "" {
 }
 
 setupPane({ render, editIssue, offerUndo, canUndo, toast, fail, loadIssues, afterPointer, doneStatus, todoStatus, state });
-setupPeriscope({ render, toast: (m, a) => void toast(m, a, false, 9000), fail });   // 9 s for Show, like Undo
+setupStart({ render, toast: (m, a) => void toast(m, a, false, 9000), fail });   // 9 s, like Undo: time to click Show
 setupPulls({
   rerender: () => { if (state.tab === "pulls" && !editing()) render(); else renderHeader(); },
   toast: (m) => void toast(m),
@@ -3468,6 +3468,7 @@ const settingsCtx: SettingsCtx = {
   runNow: (source) => void runNow(source).then(() => settingsCtx.rerender()),
   running: () => state.run.status === "running",
   toast: (m) => void toast(m),
+  metaChanged: () => void api.meta().then((m) => { state.meta = m; if (state.tab !== "settings" && !editing()) render(); }).catch(fail),
   fail,
   when: (iso) => shortWhen(iso),
 };
@@ -3660,7 +3661,7 @@ function afterPointer(fn: () => void) {
 // Same for the balance popover.
 document.addEventListener("pointerdown", (e) => {
   pointerIsDown = true;
-  dismissPeriscope(e.target as Element);
+  dismissStart(e.target as Element);
   // (Removed in place, not re-rendered, so the click that closed it still lands on its target.)
   if (state.balanceOpen && !(e.target as Element).closest?.(".bal-anchor")) {
     state.balanceOpen = false;
@@ -3736,10 +3737,10 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape" && state.balanceOpen) { state.balanceOpen = false; render(); return; }
-  // The periscope popover takes the keys: Esc closes it, its own keydown handles ↵, and no key acts
+  // The start popover takes the keys: Esc closes it, its own keydown handles ↵, and no key acts
   // on the issue behind it. The ⌘ keys above still work.
-  if (isPeriscopeOpen()) {
-    if (e.key === "Escape") closePeriscope();
+  if (isStartOpen()) {
+    if (e.key === "Escape") closeStart();
     return;
   }
   if (typing) {
@@ -3843,7 +3844,7 @@ async function start() {
     setDaylightLocation(location);
     if (currentTheme() === "daylight") { applyTheme(); renderHeader(); }
   }).catch(() => undefined);
-  onDesktopEvent("capture", () => { forgetPeriscope(); state.tab = "inbox"; render(); captureInput.focus(); });
+  onDesktopEvent("capture", () => { forgetStart(); state.tab = "inbox"; render(); captureInput.focus(); });
   onDesktopEvent("run-now", () => void runNow());
   watchForUpdates(() => { if (state.tab === "settings" && !editing()) settingsCtx.rerender(); else renderHeader(); });
   await refresh(true);

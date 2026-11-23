@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -26,17 +27,17 @@ from pydantic import BaseModel, Field
 
 from . import calendar_block, digest, gmail_draft, handled
 from . import capture as capture_mod
-from . import logos, mutes, pulls, schedule, stats, summary, tools
+from . import claude_code, claude_desktop, logos, mutes, pulls, schedule, stats, summary, tools
 from .categories import categorize
-from .config import (DEFAULT_PERISCOPE_PROMPT, DEFAULT_PERISCOPE_REVIEW_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY,
+from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, DEFAULT_REVIEW_PROMPT, SCHEDULE_DAYS, SCHEDULE_EVERY,
                      SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings, get_linear_key, load_settings,
                      read_overrides, source_state, write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, shape_issue
-from .periscope import (Periscope, PeriscopeError, bring_to_front, default_repo, fill_prompt, pane_name,
-                        pr_links, remember_repo, review_prs)
+from .periscope import Periscope, PeriscopeError, bring_to_front, pr_links, review_prs
 from .selfcmd import self_command
 from .sources import SourceError
+from .start import StartError, claude_name, default_repo, fill_prompt, remember_repo
 from .sweep import _env, next_working_day
 from .tools import ToolError
 
@@ -107,9 +108,18 @@ class DaylightIn(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
-class PeriscopePromptsIn(BaseModel):
-    prompt: str | None = Field(default=None, max_length=8000)
-    review_prompt: str | None = Field(default=None, max_length=8000)
+class PromptIn(BaseModel):
+    prompt: str = Field(max_length=8000)       # empty: back to the default
+
+
+class RepoIn(BaseModel):
+    path: str = Field(min_length=1, max_length=500)       # a folder in a git repo; ~ is allowed
+
+
+class StartIn(BaseModel):
+    repo: str = Field(min_length=1, max_length=500)       # a repo path from the Settings list
+    branch: str = Field(min_length=1, max_length=250)
+    prompt: str = Field(min_length=1, max_length=8000)
 
 
 class PeriscopeStartIn(BaseModel):
@@ -223,7 +233,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     linear_factory = linear_factory or (lambda: Linear(get_linear_key()))
     periscope_factory = periscope_factory or (lambda: Periscope(settings.periscope_url))
     front = front_fn or bring_to_front
-    name_claude = name_fn or (lambda issue: pane_name(settings, issue))
+    name_claude = name_fn or (lambda issue: claude_name(settings, issue))
     token = os.environ.get("TODOHUB_TOKEN")
 
     def default_launcher(args: list[str]) -> None:
@@ -284,11 +294,27 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         finally:
             client.close()
 
+    def add_session_comment(issue: dict, email: str | None, session_id: str) -> list[str]:
+        """Record a new Claude session on the issue. A comment that Linear refuses is a warning, not an error:
+        Claude already runs."""
+        comment = (f"- Started: {datetime.now(stats.TZ).replace(microsecond=0).isoformat()}\n"
+                   f"- Claude account: {email or 'unknown'}\n"
+                   f"- Claude session: `{session_id}`")
+        client = linear_factory()
+        try:
+            client.create_comment(issue["id"], comment)
+        except LinearError as exc:
+            return [f"The Claude session was not added to {issue['identifier']}: {exc}"]
+        finally:
+            client.close()
+        return []
+
     def team_meta(refresh: bool = False) -> TeamMeta:
         with lock:
             if refresh or cache["meta"] is None or time.time() - cache["at"] > META_TTL_SECONDS:
                 cache["meta"] = linear_call(lambda l: l.team_meta(settings.team_key, settings.client_label_group))
                 cache["at"] = time.time()
+                cache["claude_desktop"] = claude_desktop.is_installed()
                 db.set_meta("client_labels", [l["name"] for l in cache["meta"].client_labels])
                 db.set_meta("projects", [p["name"] for p in cache["meta"].projects])
             return cache["meta"]
@@ -386,6 +412,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "todo_state": (todo_status(m.states) or {}).get("name"),
             "done_state": (done_status(m.states) or {}).get("name"),
             "periscope": settings.periscope_on,
+            "claude_code": settings.claude_code_on,
+            "claude_desktop": cache["claude_desktop"],
         }
 
     @app.get("/api/daylight", dependencies=auth)
@@ -406,12 +434,15 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     def save_override(section: str, value) -> None:
         data = read_overrides()
-        if isinstance(value, dict) and isinstance(data.get(section), dict) and section in ("sources", "periscope"):
+        if isinstance(value, dict) and isinstance(data.get(section), dict) and section in ("sources", "start"):
             data[section] = {**data[section], **value}
         else:
             data[section] = value
         write_overrides(data)
         reload_settings()
+
+    def repo_labels() -> list[dict]:
+        return [{"repo": r, "label": claude_code.tilde(r)} for r in settings.repos]
 
     def settings_body() -> dict:
         status = {o["source"]: o for o in db.source_overview([k for k, *_ in SOURCE_INFO])}
@@ -421,10 +452,10 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             "schedule": schedule.describe(settings, scheduler.installed()) | {"supported": scheduler.supported()},
             "daylight": {"place": settings.daylight_place, "latitude": settings.daylight_latitude,
                          "longitude": settings.daylight_longitude},
-            "periscope": {"enabled": settings.periscope_on, "prompt": settings.periscope_prompt,
-                          "default_prompt": DEFAULT_PERISCOPE_PROMPT,
-                          "review_prompt": settings.periscope_review_prompt,
-                          "default_review_prompt": DEFAULT_PERISCOPE_REVIEW_PROMPT},
+            "start": {"repos": repo_labels(), "code_prompt": settings.code_prompt,
+                      "review_prompt": settings.review_prompt, "chat_prompt": settings.chat_prompt,
+                      "default_code_prompt": DEFAULT_CODE_PROMPT, "default_review_prompt": DEFAULT_REVIEW_PROMPT,
+                      "default_chat_prompt": DEFAULT_CHAT_PROMPT},
         }
 
     @app.get("/api/settings", dependencies=auth)
@@ -471,10 +502,30 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         save_override("daylight", body.model_dump())
         return settings_body()
 
-    @app.put("/api/settings/periscope", dependencies=auth)
-    def set_periscope(body: PeriscopePromptsIn) -> dict:
-        """The prompts Start in periscope sends. An empty one goes back to the default; one left out stays."""
-        save_override("periscope", {k: v.strip() for k, v in body.model_dump().items() if v is not None})
+    @app.put("/api/settings/prompts/{kind}", dependencies=auth)
+    def set_prompt(kind: Literal["code", "review", "chat"], body: PromptIn) -> dict:
+        """Save the code prompt (periscope and Claude Code), the review prompt (periscope, for a review ticket's
+        PR) or the chat prompt (Claude Desktop). An empty prompt goes back to the default."""
+        prompt = body.prompt.strip()
+        if kind == "chat" and prompt.startswith("/"):
+            raise HTTPException(400, "The chat prompt cannot start with /.")    # Claude Desktop refuses that link
+        save_override("start", {f"{kind}_prompt": prompt})
+        return settings_body()
+
+    @app.post("/api/settings/repos", dependencies=auth)
+    def add_repo(body: RepoIn) -> dict:
+        """Add the top folder of the git repo that ``path`` is in to Start in Claude Code's repos."""
+        path = body.path.strip()
+        top = claude_code.repo_top(path)
+        if top is None:
+            raise HTTPException(400, f"Not a git repo: {claude_code.tilde(path)}")
+        if top not in settings.repos:
+            save_override("start", {"repos": [*settings.repos, top]})
+        return settings_body()
+
+    @app.delete("/api/settings/repos", dependencies=auth)
+    def remove_repo(repo: str) -> dict:
+        save_override("start", {"repos": [r for r in settings.repos if r != repo]})
         return settings_body()
 
     # ---- review queue -----------------------------------------------------------------
@@ -1008,8 +1059,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.get("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_options(issue_id: str) -> dict:
         """What the popover shows first: periscope's repos, the one to select and why, Linear's branch, the
-        repos with a worktree already on it and the Settings page's prompt filled in for the issue. For a review
-        ticket, also its PRs that periscope can check out (``prs``), or why it has none (``pr_hint``)."""
+        repos with a worktree already on it, and the code prompt filled in for the issue. For a review ticket, also
+        its PRs that periscope can check out (``prs``), or why it has none (``pr_hint``)."""
         raw = linear_call(lambda l: l.get_issue(issue_id))
         [issue] = shape_issues([raw])
         catalog = periscope_call(lambda p: p.catalog())
@@ -1020,11 +1071,11 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         # An older periscope sends no slug, and cannot check out a PR.
         if issue["category"] == "review" and any("slug" in r for r in catalog["repos"]):
             urls = linear_call(lambda l: l.attachment_urls(issue["id"]))
-            prs, pr_hint = review_prs(pr_links(urls), catalog, settings.periscope_review_prompt, issue)
+            prs, pr_hint = review_prs(pr_links(urls), catalog, settings.review_prompt, issue)
         return {
             "repos": repos, "repo": repo, "hint": hint, "branch": branch,
             "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"] if w["branch"] == branch}),
-            "prompt": fill_prompt(settings.periscope_prompt, issue),
+            "prompt": fill_prompt(settings.code_prompt, issue),
             "prs": prs, "pr_hint": pr_hint,
         }
 
@@ -1050,18 +1101,9 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if body.pr is None:
             remember_repo(db, issue, body.repo)
         warning = result.pop("warning", None)
-        warnings: list[str] = [warning] if warning else []
+        warnings = [warning] if warning else []
         if result.get("session_id"):
-            comment = (f"- Started: {datetime.now(stats.TZ).replace(microsecond=0).isoformat()}\n"
-                       f"- Claude account: {result.get('email') or 'unknown'}\n"
-                       f"- Claude session: `{result['session_id']}`")
-            client = linear_factory()
-            try:
-                client.create_comment(issue["id"], comment)
-            except LinearError as exc:
-                warnings.append(f"The Claude session was not added to {issue['identifier']}: {exc}")
-            finally:
-                client.close()
+            warnings += add_session_comment(issue, result.get("email"), result["session_id"])
         return {**result, "warnings": warnings}
 
     @app.post("/api/periscope/show", dependencies=periscope_auth)
@@ -1073,6 +1115,65 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 front(settings.periscope_app_id)
 
         periscope_call(select_then_front)
+        return {"ok": True}
+
+    # ---- Start in Claude Code -----------------------------------------------------------------
+    def require_claude_code() -> None:
+        if not settings.claude_code_on:
+            raise HTTPException(404, "Start in Claude Code is off. Add a repo on the Settings page.")
+
+    claude_code_auth = [*auth, Depends(require_claude_code)]
+
+    @app.get("/api/issues/{issue_id}/claude-code", dependencies=claude_code_auth)
+    def claude_code_options(issue_id: str) -> dict:
+        """What the popover shows first: the Settings repos, the one to select and why, Linear's branch, the
+        repos with a worktree already on it, and the code prompt filled in for the issue."""
+        raw = linear_call(lambda l: l.get_issue(issue_id))
+        issue = shape_issue(raw, settings)
+        repo, hint = default_repo(db, issue, settings.repos)
+        branch = raw["branchName"]
+        return {
+            "repos": repo_labels(), "repo": repo, "hint": hint, "branch": branch,
+            "branch_worktrees": [r for r in settings.repos if branch in claude_code.worktrees(r)],
+            "prompt": fill_prompt(settings.code_prompt, issue),
+        }
+
+    @app.post("/api/issues/{issue_id}/claude-code", dependencies=claude_code_auth)
+    def claude_code_start(issue_id: str, body: StartIn) -> dict:
+        """Find or make the worktree on the branch, then open a script that starts Claude Code there with the
+        prompt and a name from Haiku, then remember the repo for the issue's project (or client). The new
+        session goes into a comment on the issue; a comment that fails is a warning."""
+        branch = body.branch.strip()
+        if not branch:
+            raise HTTPException(400, "The branch is empty")
+        if body.repo not in settings.repos:       # git and the script run only in a repo you listed
+            raise HTTPException(400, "Pick a repo from the Settings list.")
+        issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
+        session_id = str(uuid.uuid4())
+        try:
+            path, reused, warnings = claude_code.find_or_add_worktree(body.repo, branch)
+            command = claude_code.start_command(settings, name_claude(issue), session_id, body.prompt)
+            script = claude_code.write_script(settings.home / "start", issue["identifier"], path, command)
+            claude_code.open_script(script)
+        except StartError as exc:
+            raise HTTPException(502, str(exc))
+        remember_repo(db, issue, body.repo)
+        warnings += add_session_comment(issue, claude_code.account_email(settings), session_id)
+        return {"path": path, "reused": reused, "session_id": session_id, "warnings": warnings}
+
+    # ---- Start in Claude Desktop --------------------------------------------------------------
+    def require_claude_desktop() -> None:
+        if not cache.get("claude_desktop"):
+            raise HTTPException(404, "Claude Desktop is not installed.")
+
+    @app.post("/api/issues/{issue_id}/claude-desktop", dependencies=[*auth, Depends(require_claude_desktop)])
+    def claude_desktop_start(issue_id: str) -> dict:
+        """Open a new Claude Desktop chat with the chat prompt, filled in for the issue, in its message box."""
+        issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
+        try:
+            claude_desktop.open_chat(fill_prompt(settings.chat_prompt, issue))
+        except StartError as exc:
+            raise HTTPException(502, str(exc))
         return {"ok": True}
 
     @app.get("/api/slips", dependencies=auth)

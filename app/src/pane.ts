@@ -72,7 +72,7 @@ interface PaneSnapshot {
   edit: string | null; start: number | null; end: number | null; focus: string | null; ident: string | null; scroll: number;
 }
 
-// A control with data-focus (a sub-issue tick box, the periscope popover's select and buttons) keeps
+// A control with data-focus (a sub-issue tick box, the start popover's select and buttons) keeps
 // the focus across a re-render. One rebuilt disabled (its save or start in flight) gets it back from
 // the first re-render that shows it enabled, unless you moved on.
 let focusToRestore: string | null = null;
@@ -84,8 +84,8 @@ function paneIdent(pane: HTMLElement): string | null {
   return pane.getAttribute("aria-label") ?? pane.querySelector<HTMLElement>(".card")?.dataset.id ?? null;
 }
 
-/** Before a re-render: the pane field holding the cursor or the data-focus control with the focus,
- *  and how far the reading pane is scrolled. */
+/** Before a re-render: the data-edit field (a pane or Settings field) holding the cursor, or the
+ *  data-focus control with the focus, and how far the reading pane is scrolled. */
 function snapshotPane(): PaneSnapshot {
   const a = document.activeElement as HTMLInputElement | null;
   const pane = document.querySelector<HTMLElement>(PANE);

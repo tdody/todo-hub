@@ -1,5 +1,10 @@
+import os
+import subprocess
+from pathlib import Path
+
 import pytest
 
+from todohub import claude_desktop
 from todohub.linear import TeamMeta
 
 
@@ -9,6 +14,42 @@ def tmp_home(tmp_path, monkeypatch):
     monkeypatch.delenv("TODOHUB_TOKEN", raising=False)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_test")
     return tmp_path / "home"
+
+
+@pytest.fixture(autouse=True)
+def no_claude_desktop(monkeypatch):
+    """Claude Desktop is not installed, unless a test says so: no test runs osascript."""
+    monkeypatch.setattr(claude_desktop, "is_installed", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def isolated_git(tmp_path, monkeypatch):
+    """git reads a test config only: a test identity, no signing, no hooks. Nothing from this Mac."""
+    config = tmp_path / "gitconfig"
+    config.write_text("[user]\n\tname = Test\n\temail = test@example.com\n"
+                      "[commit]\n\tgpgsign = false\n[core]\n\thooksPath = /dev/null\n")
+    for name in [name for name in os.environ if name.startswith("GIT_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+def git(*args: str, cwd: Path) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+
+@pytest.fixture
+def git_repo(tmp_path) -> Path:
+    """``<tmp>/api``, a clone of a bare ``origin.git``. Origin has ``main`` and ``me/eng-2``; the clone has only
+    ``main`` as a local branch."""
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    git("init", "-q", "-b", "main", cwd=seed)
+    git("commit", "-q", "--allow-empty", "-m", "one", cwd=seed)
+    git("branch", "me/eng-2", cwd=seed)
+    git("clone", "-q", "--bare", str(seed), str(tmp_path / "origin.git"), cwd=tmp_path)
+    git("clone", "-q", str(tmp_path / "origin.git"), str(tmp_path / "api"), cwd=tmp_path)
+    return (tmp_path / "api").resolve()
 
 
 def make_issue(identifier, title, client=None, state="Todo", due=None, priority=0, completed=None):

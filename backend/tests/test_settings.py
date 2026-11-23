@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from todohub import config, schedule
+from todohub import claude_code, config, schedule
 from todohub.api import create_app
 from todohub.config import load_settings
 from todohub.db import DB
@@ -130,21 +130,17 @@ def test_install_keeps_the_program_of_an_existing_schedule(tmp_path, monkeypatch
     assert any("bootstrap" in a[0] for a in calls)
 
 
-def test_periscope_prompt_from_the_settings_page():
-    assert load_settings().periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
-    config.write_overrides({"periscope": {"prompt": "Read {identifier}."}})
-    assert load_settings().periscope_prompt == "Read {identifier}."
-    config.write_overrides({"periscope": {"prompt": "   "}})
-    assert load_settings().periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
-
-
-def test_periscope_review_prompt_from_the_settings_page():
-    assert load_settings().periscope_review_prompt == config.DEFAULT_PERISCOPE_REVIEW_PROMPT
-    config.write_overrides({"periscope": {"review_prompt": "Review {pr}."}})
+def test_start_settings_from_the_settings_page():
     s = load_settings()
-    assert s.periscope_review_prompt == "Review {pr}." and s.periscope_prompt == config.DEFAULT_PERISCOPE_PROMPT
-    config.write_overrides({"periscope": {"review_prompt": "   "}})
-    assert load_settings().periscope_review_prompt == config.DEFAULT_PERISCOPE_REVIEW_PROMPT
+    assert (s.code_prompt, s.review_prompt, s.chat_prompt, s.repos) == \
+        (config.DEFAULT_CODE_PROMPT, config.DEFAULT_REVIEW_PROMPT, config.DEFAULT_CHAT_PROMPT, [])
+    assert not s.claude_code_on
+    config.write_overrides({"start": {"repos": ["/code/api", 7], "code_prompt": "Read {identifier}.",
+                                      "review_prompt": "Review {pr}.", "chat_prompt": "   "}})
+    s = load_settings()
+    assert s.repos == ["/code/api"] and s.claude_code_on
+    assert s.code_prompt == "Read {identifier}." and s.review_prompt == "Review {pr}."
+    assert s.chat_prompt == config.DEFAULT_CHAT_PROMPT
 
 
 def test_periscope_is_off_by_default():
@@ -162,17 +158,67 @@ def test_periscope_url_and_app_id_from_config_toml(tmp_home):
     assert s.periscope_app_id == "com.example.periscope"
 
 
-def test_settings_api_periscope_prompts():
+def test_settings_api_prompts():
     client, _, _ = client_for()
-    default = {"enabled": False,
-               "prompt": config.DEFAULT_PERISCOPE_PROMPT, "default_prompt": config.DEFAULT_PERISCOPE_PROMPT,
-               "review_prompt": config.DEFAULT_PERISCOPE_REVIEW_PROMPT,
-               "default_review_prompt": config.DEFAULT_PERISCOPE_REVIEW_PROMPT}
-    assert client.get("/api/settings").json()["periscope"] == default
-    r = client.put("/api/settings/periscope", json={"prompt": "Read {identifier}.", "review_prompt": "Review {pr}."})
-    assert r.status_code == 200
-    assert r.json()["periscope"] == {**default, "prompt": "Read {identifier}.", "review_prompt": "Review {pr}."}
-    # One prompt back to its default: the other stays as it was.
-    assert client.put("/api/settings/periscope", json={"prompt": ""}).json()["periscope"] == \
-        {**default, "review_prompt": "Review {pr}."}
-    assert client.put("/api/settings/periscope", json={"review_prompt": ""}).json()["periscope"] == default
+    start = client.get("/api/settings").json()["start"]
+    assert start["code_prompt"] == start["default_code_prompt"] == config.DEFAULT_CODE_PROMPT
+    assert start["review_prompt"] == start["default_review_prompt"] == config.DEFAULT_REVIEW_PROMPT
+    assert start["chat_prompt"] == start["default_chat_prompt"] == config.DEFAULT_CHAT_PROMPT
+    r = client.put("/api/settings/prompts/chat", json={"prompt": " Help with {identifier}. "})
+    assert r.status_code == 200 and r.json()["start"]["chat_prompt"] == "Help with {identifier}."
+    r = client.put("/api/settings/prompts/code", json={"prompt": "Read {identifier}."})
+    assert r.json()["start"]["code_prompt"] == "Read {identifier}."
+    assert r.json()["start"]["chat_prompt"] == "Help with {identifier}."        # one save keeps the others
+    r = client.put("/api/settings/prompts/review", json={"prompt": "Review {pr}."})
+    assert r.json()["start"]["review_prompt"] == "Review {pr}."
+    assert r.json()["start"]["code_prompt"] == "Read {identifier}."
+    r = client.put("/api/settings/prompts/chat", json={"prompt": ""})
+    assert r.json()["start"]["chat_prompt"] == config.DEFAULT_CHAT_PROMPT
+    assert client.put("/api/settings/prompts/other", json={"prompt": "x"}).status_code == 422
+
+
+def test_a_chat_prompt_that_starts_with_a_slash_is_refused():
+    client, _, _ = client_for()
+    r = client.put("/api/settings/prompts/chat", json={"prompt": " /review {identifier}"})
+    assert r.status_code == 400 and r.json() == {"error": "The chat prompt cannot start with /."}
+    assert client.put("/api/settings/prompts/code", json={"prompt": "/review {identifier}"}).status_code == 200
+
+
+def test_settings_api_repos(git_repo, monkeypatch):
+    monkeypatch.setenv("HOME", str(git_repo.parent))
+    client, settings, _ = client_for()
+    assert client.get("/api/settings").json()["start"]["repos"] == []
+    (git_repo / "src").mkdir()
+    r = client.post("/api/settings/repos", json={"path": " ~/api/src "})
+    assert r.status_code == 200 and r.json()["start"]["repos"] == [{"repo": str(git_repo), "label": "~/api"}]
+    assert settings.repos == [str(git_repo)] and settings.claude_code_on
+    r = client.post("/api/settings/repos", json={"path": str(git_repo)})
+    assert r.json()["start"]["repos"] == [{"repo": str(git_repo), "label": "~/api"}]      # no second copy
+    r = client.post("/api/settings/repos", json={"path": "~/nothing"})
+    assert r.status_code == 400 and r.json() == {"error": "Not a git repo: ~/nothing"}
+    r = client.delete("/api/settings/repos", params={"repo": str(git_repo)})
+    assert r.json()["start"]["repos"] == [] and not settings.claude_code_on
+
+
+def test_a_blank_repo_path_is_not_the_folder_the_backend_runs_in(git_repo, monkeypatch):
+    monkeypatch.chdir(git_repo)
+    client, settings, _ = client_for()
+    r = client.post("/api/settings/repos", json={"path": "   "})
+    assert r.status_code == 400 and r.json() == {"error": "Not a git repo: "}
+    assert settings.repos == []
+
+
+def test_a_start_key_that_is_not_a_dict_does_not_block_a_save(tmp_home):
+    tmp_home.mkdir(parents=True, exist_ok=True)
+    (tmp_home / "settings.json").write_text('{"start": "x"}')
+    client, _, _ = client_for()
+    r = client.put("/api/settings/prompts/code", json={"prompt": "Read {identifier}."})
+    assert r.status_code == 200 and r.json()["start"]["code_prompt"] == "Read {identifier}."
+
+
+def test_a_repo_path_in_a_worktree_adds_nothing_new(git_repo):
+    path, _, _ = claude_code.find_or_add_worktree(str(git_repo), "me/eng-1")
+    client, settings, _ = client_for()
+    assert client.post("/api/settings/repos", json={"path": str(git_repo)}).status_code == 200
+    assert client.post("/api/settings/repos", json={"path": path}).status_code == 200
+    assert settings.repos == [str(git_repo)]
