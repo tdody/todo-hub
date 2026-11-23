@@ -2,6 +2,16 @@
 
 What changed in each TodoHub release, newest first. The app's update panel shows the newest section, and anyone can read this file.
 
+## v0.4.0
+
+- **Start in Claude Code:** an issue's ⋯ menu has **Start in Claude Code**, after Start in periscope. Pick a repo, a branch and a prompt, then click **Start**. TodoHub uses or adds a worktree for the issue's branch in `<repo>-worktrees/<branch>`. Then your app for `.command` files, for example Terminal, starts `claude` there with the prompt. The issue gets a comment with the Claude session, as with Start in periscope.
+- **Start in Claude Desktop:** when Claude Desktop is installed, the ⋯ menu also has **Start in Claude Desktop**. It opens a new chat with the chat prompt in the message box. You send the message.
+- **A review ticket starts on its PR:** Start in periscope on a review ticket with a GitHub PR link starts Claude on the PR's code. The popover has a **PR** select, and **Repo** lists only the repos whose origin is the PR's repo. Periscope checks out the PR, or brings the worktree that is already on it up to the PR's latest commit. This needs a periscope from 2026-11-22 or later. With an older periscope, the popover starts on the issue's branch, as before.
+- **Settings → Start Claude:** this section replaces **Periscope**. It has the repos for Start in Claude Code and 3 prompts: the code prompt for periscope and Claude Code, the review prompt for a review ticket's PR, and the chat prompt for Claude Desktop. In the review prompt, `{pr}` becomes the PR's URL. Each prompt has its own **Save** and **Reset to default**.
+- **The type you approved stays:** after an approve, a merge, an edit or a restore, the issue shows the type that you approved. Before, it showed the type from the rules until the next refresh. The brief's list of issues done today shows the approved type too.
+- **Periscope's warnings:** when periscope starts Claude but reports a problem, the toast shows it. For example, periscope cannot update a worktree that has local changes.
+- **If you update from v0.3.0 or earlier:** TodoHub forgets the repo that it remembered for each project, one time. Pick each project's repo again at its next start. A custom periscope prompt goes back to the default. Set it again as the code prompt under **Settings → Start Claude**.
+
 ## v0.3.0
 
 - **New client labels:** when a sweep or a capture finds a task for a customer that has no client label in Linear, the Inbox card proposes a new label. The card shows a **New client label** box, the client select shows "Hooli (new)", and the button reads **Approve, add label**. Approve creates the label in your client label group, then the issue with it. The other cards for that customer get the label too.
