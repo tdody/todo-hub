@@ -12,7 +12,7 @@ from todohub.api import create_app
 from todohub.config import load_settings
 from todohub.db import DB
 from todohub.linear import LinearError
-from todohub.periscope import Periscope, PeriscopeError, pr_links, review_prs
+from todohub.periscope import Periscope, PeriscopeError, pr_links, pr_repos, review_prs
 from todohub.start import LAST_REPO_KEY, REPOS_KEY
 from conftest import FakeLinear, make_issue
 
@@ -79,6 +79,12 @@ def test_client_start_with_a_pr_sends_no_branch(peri):
                                                          "title": "Review", "prompt": "Review it.", "name": "eng-3"})]
 
 
+def test_client_start_with_no_ticket_sends_none(peri):
+    Periscope(URL, transport=peri.transport).start(repo="/dev/api", pr=812, prompt="Review it.", name="pr-812")
+    assert peri.calls == [("POST", "/api/linear/start", {"repo": "/dev/api", "pr": 812, "prompt": "Review it.",
+                                                         "name": "pr-812"})]
+
+
 def test_client_errors(peri):
     client = Periscope(URL, transport=peri.transport)
     peri.answer = httpx.Response(409, json={"detail": "start already running"})
@@ -137,6 +143,13 @@ def test_review_prs_match_repos_by_origin_and_name_the_missing_ones():
     # One PR with a repo is enough: the others are not offered, and there is no hint.
     prs, hint = review_prs([("acme/ios", 7), ("acme/api", 812)], SLUGGED, "Review {pr}.", issue)
     assert [p["label"] for p in prs] == ["acme/api#812"] and hint == ""
+
+
+def test_pr_repos_are_the_ones_whose_origin_is_the_prs_repo():
+    assert pr_repos(SLUGGED, "ACME/api", 812) == ([{"repo": "/dev/api", "label": "api"}], ["/dev/api"])
+    assert pr_repos(SLUGGED, "acme/web", 812) == ([{"repo": "/dev/web", "label": "web"}], [])
+    assert pr_repos(SLUGGED, "acme/ios", 7) == ([], [])
+    assert pr_repos(CATALOG, "acme/api", 812) == ([], [])          # an older periscope sends no slug
 
 
 def test_bring_to_front_opens_the_app_by_its_id(monkeypatch):
