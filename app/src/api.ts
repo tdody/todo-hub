@@ -350,6 +350,23 @@ export interface StartOptions {
   pr_hint?: string;                             // periscope only: "No periscope repo has acme/web as its origin. …", or ""
 }
 
+/** Where Claude starts, from a popover. */
+export type StartTarget = "periscope" | "claude-code";
+
+/** Review in To review: what its popover shows first. */
+export interface PullStartOptions {
+  ticket: { identifier: string; title: string } | null;   // the PR's ticket, as Linear gives it
+  ticket_hint: string;                          // why the prompt leaves the row's ticket out, or ""
+  prompt: string;                               // the review prompt, filled in
+  targets: Partial<Record<StartTarget, PullStartTarget>>;   // only the ones that are on
+}
+
+export interface PullStartTarget {
+  repos: { repo: string; label: string }[];     // the ones whose origin is the PR's repo
+  branch_worktrees: string[];                   // the ones with a worktree already on pr-<N>
+  error: string;                                // periscope's, when its repos cannot be read; else ""
+}
+
 export interface PeriscopeStart {
   mode: "spawned" | "existing";                 // existing: a Claude was already on the branch
   pid: string;                                  // periscope always gives the pane's id
@@ -630,6 +647,12 @@ export const api = {
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
   pulls: (refresh = false) => call<Pulls>("GET", `/api/pulls${refresh ? "?refresh=true" : ""}`),
   pull: (repo: string, number: number) => call<Pulls>("POST", `/api/pulls/${repo}/${number}`),
+  pullStartOptions: (p: PullRequest, ticket: string) =>
+    call<PullStartOptions>("GET", `/api/pulls/${p.repo}/${p.number}/start?ticket=${encodeURIComponent(ticket)}`),
+  reviewInPeriscope: (p: PullRequest, body: { repo: string; prompt: string; title: string; ticket: string; ticket_title: string }) =>
+    call<PeriscopeStart>("POST", `/api/pulls/${p.repo}/${p.number}/periscope`, body),
+  reviewInClaudeCode: (p: PullRequest, body: { repo: string; prompt: string; title: string }) =>
+    call<ClaudeCodeStart>("POST", `/api/pulls/${p.repo}/${p.number}/claude-code`, body),
   pullWeeks: () => call<PullWeeks>("GET", "/api/pulls/weekly"),
   editIssue: (id: string, edit: IssueEdit) => call<Issue>("PATCH", `/api/issues/${encodeURIComponent(id)}`, edit),
   /** Move an issue to Linear's trash (restorable there for 30 days); it also leaves Today. */
