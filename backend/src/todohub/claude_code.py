@@ -1,10 +1,12 @@
-"""Start in Claude Code: a worktree on Linear's branch next to the repo, and a ``.command`` script that the
-Mac's default app for ``.command`` files runs. The script starts Claude Code in the worktree with the prompt."""
+"""Start in Claude Code: a worktree on Linear's branch, or on a pull request, next to the repo, and a ``.command``
+script that the Mac's default app for ``.command`` files runs. The script starts Claude Code in the worktree with
+the prompt."""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import shlex
 import shutil
 import subprocess
@@ -19,6 +21,7 @@ log = logging.getLogger("todohub.claude_code")
 QUICK_SECONDS = 15
 FETCH_SECONDS = 30
 ADD_SECONDS = 60
+_GITHUB_ORIGIN = re.compile(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/?$")
 
 
 def tilde(path: str) -> str:
@@ -31,6 +34,21 @@ def _git(repo: str, *args: str, timeout: int = QUICK_SECONDS) -> subprocess.Comp
     # GIT_TERMINAL_PROMPT=0 stops HTTPS credential prompts. _env adds the Homebrew folders that hooks need.
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, timeout=timeout,
                           env={**_env(), "GIT_TERMINAL_PROMPT": "0"})
+
+
+def _git_problem(repo: str, *args: str, timeout: int) -> str:
+    """Why git did not do it, on one line, or ""."""
+    try:
+        proc = _git(repo, "-c", "advice.diverging=false", *args, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"git {args[0]} took more than {timeout} s."
+    return "" if proc.returncode == 0 else " ".join(proc.stderr.split()) or f"git {args[0]} failed."
+
+
+def github_slug(repo: str) -> str | None:
+    """The ``owner/name`` of the repo's origin on GitHub, or None."""
+    m = _GITHUB_ORIGIN.search(_git(repo, "remote", "get-url", "origin").stdout.strip())
+    return m.group(1) if m else None
 
 
 def repo_top(path: str) -> str | None:
@@ -65,22 +83,36 @@ def _has_ref(repo: str, ref: str) -> bool:
     return _git(repo, "show-ref", "--verify", "--quiet", ref).returncode == 0
 
 
+def _checked_out(repo: str) -> dict[str, str]:
+    """``worktrees(repo)``, after a prune: a worktree folder deleted by hand blocks a new one."""
+    if repo_top(repo) is None:
+        raise StartError(f"Not a git repo: {tilde(repo)}")
+    _git(repo, "worktree", "prune")
+    return worktrees(repo)
+
+
+def _new_path(repo: str, branch: str) -> str:
+    return str(Path(repo).parent / f"{Path(repo).name}-worktrees" / branch.replace("/", "-"))
+
+
+def _add_worktree(repo: str, *args: str) -> None:
+    try:
+        proc = _git(repo, "worktree", "add", "--quiet", *args, timeout=ADD_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise StartError(f"git worktree add took more than {ADD_SECONDS} s. It may still finish.") from None
+    if proc.returncode != 0:
+        raise StartError(proc.stderr.strip() or "git worktree add failed.")
+
+
 def find_or_add_worktree(repo: str, branch: str) -> tuple[str, bool, list[str]]:
     """The worktree on ``branch``: the one already on it (reused), else a new one in
     ``<repo>-worktrees/<branch with - for />``. Also the warnings for the toast."""
-    if repo_top(repo) is None:
-        raise StartError(f"Not a git repo: {tilde(repo)}")
-    _git(repo, "worktree", "prune")          # a worktree folder deleted by hand blocks the add
-    if branch in (checked_out := worktrees(repo)):
+    if branch in (checked_out := _checked_out(repo)):
         return checked_out[branch], True, []
     warnings: list[str] = []
-    try:
-        fetched = _git(repo, "fetch", "--quiet", "origin", timeout=FETCH_SECONDS).returncode == 0
-    except subprocess.TimeoutExpired:
-        fetched = False
-    if not fetched:
+    if _git_problem(repo, "fetch", "--quiet", "origin", timeout=FETCH_SECONDS):
         warnings.append("Could not fetch origin. The worktree uses the local branches.")
-    path = str(Path(repo).parent / f"{Path(repo).name}-worktrees" / branch.replace("/", "-"))
+    path = _new_path(repo, branch)
     if _has_ref(repo, f"refs/heads/{branch}"):
         args = [path, branch]
     elif _has_ref(repo, f"refs/remotes/origin/{branch}"):
@@ -90,13 +122,26 @@ def find_or_add_worktree(repo: str, branch: str) -> tuple[str, bool, list[str]]:
     else:
         warnings.append(f"{tilde(repo)} has no origin/HEAD. The new branch starts from HEAD.")
         args = ["--no-track", "-b", branch, path, "HEAD"]
-    try:
-        proc = _git(repo, "worktree", "add", "--quiet", *args, timeout=ADD_SECONDS)
-    except subprocess.TimeoutExpired:
-        raise StartError(f"git worktree add took more than {ADD_SECONDS} s. It may still finish.") from None
-    if proc.returncode != 0:
-        raise StartError(proc.stderr.strip() or "git worktree add failed.")
+    _add_worktree(repo, *args)
     return path, False, warnings
+
+
+def find_or_add_pr_worktree(repo: str, number: int) -> tuple[str, bool, list[str]]:
+    """The worktree on pull request ``number`` as the branch ``pr-<N>``: the one already on it, brought up to the PR
+    by a fast-forward (reused), else a new one in ``<repo>-worktrees/pr-<N>``. Also the warnings for the toast."""
+    branch, head = f"pr-{number}", f"pull/{number}/head"
+    path = _checked_out(repo).get(branch)
+    reused = path is not None
+    if path:
+        problem = (_git_problem(path, "fetch", "origin", head, timeout=FETCH_SECONDS)
+                   or _git_problem(path, "merge", "--ff-only", "FETCH_HEAD", timeout=ADD_SECONDS))
+    else:
+        problem = _git_problem(repo, "fetch", "origin", f"{head}:{branch}", timeout=FETCH_SECONDS)
+        if problem and not _has_ref(repo, f"refs/heads/{branch}"):
+            raise StartError(problem)
+        path = _new_path(repo, branch)
+        _add_worktree(repo, path, branch)
+    return path, reused, [f"{branch} may be behind #{number}: {problem}"] if problem else []
 
 
 def start_command(settings: Settings, name: str, session_id: str, prompt: str) -> list[str]:

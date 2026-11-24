@@ -143,6 +143,101 @@ def test_a_folder_in_no_repo_is_an_error(tmp_path):
         claude_code.find_or_add_worktree(str(tmp_path), "me/eng-1")
 
 
+@pytest.mark.parametrize("url, slug", [
+    ("git@github.com:acme/api.git", "acme/api"),
+    ("https://github.com/acme/api.git", "acme/api"),
+    ("https://github.com/acme/api", "acme/api"),
+    ("ssh://git@github.com/acme/api.git", "acme/api"),
+    ("https://gitlab.com/acme/api.git", None),
+])
+def test_github_slug_is_the_owner_and_name_of_origin(git_repo, url, slug):
+    git("remote", "set-url", "origin", url, cwd=git_repo)
+    assert claude_code.github_slug(str(git_repo)) == slug
+
+
+def test_github_slug_is_none_with_no_origin_and_no_folder(git_repo):
+    git("remote", "remove", "origin", cwd=git_repo)
+    assert claude_code.github_slug(str(git_repo)) is None
+    assert claude_code.github_slug(str(git_repo.parent / "gone")) is None
+
+
+@pytest.fixture
+def push_pr(git_repo):
+    """``push_pr(text)`` adds a commit that writes ``text`` in ``f`` to PR 812 on origin, and gives its sha."""
+    author = git_repo.parent / "author"
+    git("clone", "-q", str(git_repo.parent / "origin.git"), str(author), cwd=git_repo.parent)
+
+    def push(text: str) -> str:
+        (author / "f").write_text(text)
+        git("add", "f", cwd=author)
+        git("commit", "-q", "-m", text, cwd=author)
+        git("push", "-q", "--force", "origin", "HEAD:refs/pull/812/head", cwd=author)
+        return git("rev-parse", "HEAD", cwd=author).strip()
+
+    return push
+
+
+def head_of(path: str) -> str:
+    return git("rev-parse", "HEAD", cwd=Path(path)).strip()
+
+
+def test_a_pr_gets_a_worktree_on_its_head(git_repo, push_pr):
+    sha = push_pr("one")
+    path, reused, warnings = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert path == str(git_repo.parent / "api-worktrees" / "pr-812") and not reused and warnings == []
+    assert branch_of(path) == "pr-812" and head_of(path) == sha
+    assert upstream(path) is None            # so a push has no default target
+
+
+def test_a_worktree_already_on_the_pr_moves_to_its_head(git_repo, push_pr):
+    push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    sha = push_pr("two")
+    assert claude_code.find_or_add_pr_worktree(str(git_repo), 812) == (path, True, [])
+    assert head_of(path) == sha
+
+
+def test_local_changes_that_block_the_fast_forward_stay(git_repo, push_pr):
+    old = push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    push_pr("two")
+    (Path(path) / "f").write_text("mine")
+    _, reused, [warning] = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert reused and warning.startswith("pr-812 may be behind #812: error: Your local changes")
+    assert (Path(path) / "f").read_text() == "mine" and head_of(path) == old
+
+
+def test_a_pr_worktree_that_diverged_stays(git_repo, push_pr):
+    push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    git("commit", "-q", "--allow-empty", "-m", "mine", cwd=Path(path))
+    mine = head_of(path)
+    push_pr("two")
+    assert claude_code.find_or_add_pr_worktree(str(git_repo), 812) == (
+        path, True, ["pr-812 may be behind #812: fatal: Not possible to fast-forward, aborting."])
+    assert head_of(path) == mine
+
+
+def test_a_pr_that_cannot_be_fetched_uses_the_local_branch(git_repo, push_pr):
+    sha = push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    git("worktree", "remove", path, cwd=git_repo)
+    git("remote", "set-url", "origin", str(git_repo.parent / "gone.git"), cwd=git_repo)
+    again, reused, [warning] = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert again == path and not reused and head_of(path) == sha
+    assert warning.startswith("pr-812 may be behind #812: fatal: ")
+
+
+def test_a_pr_that_cannot_be_fetched_and_has_no_local_branch_is_an_error(git_repo):
+    with pytest.raises(StartError, match="couldn't find remote ref pull/9/head"):
+        claude_code.find_or_add_pr_worktree(str(git_repo), 9)
+
+
+def test_a_pr_in_a_folder_in_no_repo_is_an_error(tmp_path):
+    with pytest.raises(StartError, match="Not a git repo: "):
+        claude_code.find_or_add_pr_worktree(str(tmp_path), 812)
+
+
 def test_a_git_worktree_add_error_carries_gits_message(git_repo):
     taken = git_repo.parent / "api-worktrees" / "me-eng-5"
     taken.mkdir(parents=True)
