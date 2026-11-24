@@ -19,6 +19,8 @@ LAST_REPO_KEY = "start_last_repo"    # meta: the repo last picked for any issue
 NAME_SECONDS = 30
 _TOKEN = re.compile(r"\{(identifier|title|url|pr)\}")
 _WORD = re.compile(r"[a-z0-9]+")
+_SENTENCE = re.compile(r"\S.*?(?:[.!?](?=\s)|\n|\Z)\s*")
+_TICKET_TOKEN = re.compile(r"\{(identifier|title|url)\}")
 
 
 class StartError(Exception):
@@ -59,6 +61,15 @@ def fill_prompt(template: str, issue: dict, pr: str = "") -> str:
     if pr:
         values["pr"] = pr
     return _TOKEN.sub(lambda m: values.get(m.group(1), m.group(0)), template)
+
+
+def fill_review_prompt(template: str, issue: dict | None, pr: str) -> str:
+    """The review prompt for the PR at the URL ``pr``, and for ``issue``, its ticket. With no ticket, each sentence
+    that names one is left out. A sentence ends at . ! or ? before a space, or at a line end."""
+    if issue:
+        return fill_prompt(template, issue, pr=pr)
+    kept = [s for s in _SENTENCE.findall(template) if not _TICKET_TOKEN.search(s)]
+    return "".join(kept).strip().replace("{pr}", pr)
 
 
 def _memory_key(issue: dict) -> tuple[str, str] | None:

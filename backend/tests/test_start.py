@@ -3,9 +3,10 @@ import subprocess
 
 import pytest
 
-from todohub.config import load_settings
+from todohub.config import DEFAULT_REVIEW_PROMPT, load_settings
 from todohub.db import DB
-from todohub.start import LAST_REPO_KEY, REPOS_KEY, claude_name, default_repo, fill_prompt, remember_repo
+from todohub.start import (LAST_REPO_KEY, REPOS_KEY, claude_name, default_repo, fill_prompt, fill_review_prompt,
+                           remember_repo)
 
 NAMED = {"identifier": "ENG-1", "title": "Rebin Globex grades for jane@globex.com"}
 
@@ -76,6 +77,27 @@ def test_fill_prompt_fills_pr_only_when_it_is_given():
     pr = "https://github.com/acme/api/pull/812"
     assert fill_prompt("Review {pr} for {identifier}.", issue, pr=pr) == f"Review {pr} for ENG-1."
     assert fill_prompt("Review {pr} for {identifier}.", issue) == "Review {pr} for ENG-1."
+
+
+PR = "https://github.com/acme/api/pull/812"
+
+
+def test_the_review_prompt_of_a_pr_with_a_ticket_is_the_whole_prompt():
+    issue = {"identifier": "ENG-1", "title": "Fix", "url": "https://linear.app/x/issue/ENG-1"}
+    assert fill_review_prompt(DEFAULT_REVIEW_PROMPT, issue, PR) == fill_prompt(DEFAULT_REVIEW_PROMPT, issue, pr=PR)
+
+
+@pytest.mark.parametrize("template, expected", [
+    (DEFAULT_REVIEW_PROMPT, f"Then review {PR} in this worktree: sum up the change and list the problems you find. "
+                            "Do not post anything on GitHub."),
+    ("Review {pr}", f"Review {PR}"),
+    # A dot inside a URL or "e.g." does not end a sentence, and a list keeps its other lines.
+    ("Use https://acme.dev/guide.html for {title}.\nReview {pr}, e.g. its tests.\n\n- keep {identifier} in mind\n- be kind",
+     f"Review {PR}, e.g. its tests.\n\n- be kind"),
+    ("Read {url}. Review {pr} for {identifier}!", ""),
+])
+def test_the_review_prompt_of_a_pr_with_no_ticket_leaves_the_ticket_out(template, expected):
+    assert fill_review_prompt(template, None, PR) == expected
 
 
 def test_default_repo_project_then_client_then_last():
