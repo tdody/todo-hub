@@ -218,6 +218,55 @@ def test_a_pr_worktree_that_diverged_stays(git_repo, push_pr):
     assert head_of(path) == mine
 
 
+def test_the_fast_forward_keeps_a_local_file_that_gitignore_lists(git_repo, push_pr):
+    old = push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    (git_repo / ".git" / "info" / "exclude").write_text("notes.txt\n")
+    (Path(path) / "notes.txt").write_text("mine")
+    author = git_repo.parent / "author"
+    (author / "notes.txt").write_text("theirs")
+    git("add", "notes.txt", cwd=author)
+    push_pr("two")
+    _, _, [warning] = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert warning.startswith("pr-812 may be behind #812: error: The following untracked working tree files")
+    assert (Path(path) / "notes.txt").read_text() == "mine" and head_of(path) == old
+
+
+def test_a_diverged_local_branch_with_no_worktree_stays(git_repo, push_pr):
+    push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    git("commit", "-q", "--allow-empty", "-m", "mine", cwd=Path(path))
+    mine = head_of(path)
+    git("worktree", "remove", path, cwd=git_repo)
+    push_pr("two")
+    again, reused, [warning] = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert again == path and not reused and head_of(path) == mine
+    assert warning.startswith("pr-812 may be behind #812: ") and "(non-fast-forward)" in warning
+
+
+@pytest.fixture
+def slow_fetch(monkeypatch):
+    """Call it, and each fetch takes too long."""
+    real = claude_code._git
+
+    def slow(repo, *args, timeout=claude_code.QUICK_SECONDS):
+        if "fetch" in args:
+            raise subprocess.TimeoutExpired("git", timeout)
+        return real(repo, *args, timeout=timeout)
+
+    return lambda: monkeypatch.setattr(claude_code, "_git", slow)
+
+
+def test_a_slow_fetch_is_a_warning(git_repo, push_pr, slow_fetch):
+    push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    slow_fetch()
+    assert claude_code.find_or_add_pr_worktree(str(git_repo), 812) == (
+        path, True, ["pr-812 may be behind #812: git fetch took more than 30 s."])
+    _, _, warnings = claude_code.find_or_add_worktree(str(git_repo), "me/eng-2")
+    assert warnings == ["Could not fetch origin. The worktree uses the local branches."]
+
+
 def test_a_pr_that_cannot_be_fetched_uses_the_local_branch(git_repo, push_pr):
     sha = push_pr("one")
     path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
@@ -503,3 +552,13 @@ def test_pull_start_is_404_when_no_repo_is_set(opened):
     client = TestClient(create_app(settings, DB(settings.db_path), linear_factory=FakeLinear))
     r = client.post(f"{PULL}/claude-code", json={"repo": "/x", "prompt": "p", "title": "t"})
     assert r.status_code == 404 and opened == []
+
+
+def test_pull_start_names_the_claude_for_the_pr(git_repo, push_pr, opened):
+    push_pr("one")
+    settings, named = load_settings(), []
+    settings.repos = [str(git_repo)]
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     name_fn=lambda issue: named.append(issue) or "pr-812")
+    TestClient(app).post(f"{PULL}/claude-code", json={"repo": str(git_repo), "prompt": "Review it.", "title": "Retry"})
+    assert named == [{"identifier": "PR-812", "title": "Retry"}]

@@ -51,6 +51,12 @@ def github_slug(repo: str) -> str | None:
     return m.group(1) if m else None
 
 
+def catalog(repos: list[dict]) -> dict:
+    """``repos`` ({repo, label}) in the shape of periscope's catalog: each with its ``slug``, and their worktrees."""
+    return {"repos": [{**r, "slug": github_slug(r["repo"])} for r in repos],
+            "worktrees": [{"repo": r["repo"], "branch": b} for r in repos for b in worktrees(r["repo"])]}
+
+
 def repo_top(path: str) -> str | None:
     """The absolute top folder of the git repo that ``path`` (``~`` allowed) is in, or None.
     A path in a linked worktree gives the main repo. A submodule gives itself.
@@ -134,7 +140,8 @@ def find_or_add_pr_worktree(repo: str, number: int) -> tuple[str, bool, list[str
     reused = path is not None
     if path:
         problem = (_git_problem(path, "fetch", "origin", head, timeout=FETCH_SECONDS)
-                   or _git_problem(path, "merge", "--ff-only", "FETCH_HEAD", timeout=ADD_SECONDS))
+                   # By default, a fast-forward overwrites a local file that .gitignore lists.
+                   or _git_problem(path, "merge", "--ff-only", "--no-overwrite-ignore", "FETCH_HEAD", timeout=ADD_SECONDS))
     else:
         problem = _git_problem(repo, "fetch", "origin", f"{head}:{branch}", timeout=FETCH_SECONDS)
         if problem and not _has_ref(repo, f"refs/heads/{branch}"):

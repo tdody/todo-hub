@@ -8,7 +8,7 @@ import subprocess
 
 import httpx
 
-from .start import fill_prompt
+from .start import fill_review_prompt
 
 QUICK_SECONDS = 15
 START_SECONDS = 120                      # a start fetches, makes the worktree, then waits for Claude's screen
@@ -41,6 +41,8 @@ class Periscope:
         if resp.is_error:
             try:
                 detail = resp.json().get("detail")
+                if isinstance(detail, list):     # FastAPI's 422: an item for each field, with the whole body in it
+                    detail = "; ".join(f"{'.'.join(map(str, d['loc'][1:]))}: {d['msg']}" for d in detail)
             except ValueError:
                 detail = None
             raise PeriscopeError(str(detail or f"Periscope answered HTTP {resp.status_code}."),
@@ -87,13 +89,15 @@ def pr_links(urls: list[str]) -> list[tuple[str, int]]:
     return list(found.values())
 
 
-def pr_repos(catalog: dict, slug: str, number: int) -> tuple[list[dict], list[str]]:
-    """The catalog's repos whose origin is the GitHub repo ``slug``, and the ones with a worktree on ``pr-<N>``."""
+def pr_repos(catalog: dict, slug: str, number: int) -> dict:
+    """{repos, branch_worktrees}: the catalog's repos whose origin is the GitHub repo ``slug``, and the ones with a
+    worktree on ``pr-<N>``."""
     repos = [{"repo": r["repo"], "label": r["label"]} for r in catalog["repos"]
              if (r.get("slug") or "").lower() == slug.lower()]
     paths = {r["repo"] for r in repos}
-    return repos, sorted({w["repo"] for w in catalog["worktrees"]
-                          if w["repo"] in paths and w["branch"] == f"pr-{number}"})
+    return {"repos": repos,
+            "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"]
+                                        if w["repo"] in paths and w["branch"] == f"pr-{number}"})}
 
 
 def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue: dict) -> tuple[list[dict], str]:
@@ -102,15 +106,15 @@ def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue
     prs: list[dict] = []
     missing: dict[str, None] = {}
     for slug, number in links:
-        repos, branch_worktrees = pr_repos(catalog, slug, number)
-        if not repos:
+        found = pr_repos(catalog, slug, number)
+        if not found["repos"]:
             missing.setdefault(slug, None)
             continue
         url = f"https://github.com/{slug}/pull/{number}"
         prs.append({
-            "number": number, "label": f"{slug}#{number}", "url": url, "repos": [r["repo"] for r in repos],
-            "branch_worktrees": branch_worktrees,
-            "prompt": fill_prompt(template, issue, pr=url),
+            "number": number, "label": f"{slug}#{number}", "url": url, "repos": [r["repo"] for r in found["repos"]],
+            "branch_worktrees": found["branch_worktrees"],
+            "prompt": fill_review_prompt(template, issue, url),
         })
     if prs or not missing:
         return prs, ""

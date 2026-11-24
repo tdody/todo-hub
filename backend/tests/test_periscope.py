@@ -14,7 +14,7 @@ from todohub.db import DB
 from todohub.linear import LinearError
 from todohub.periscope import Periscope, PeriscopeError, pr_links, pr_repos, review_prs
 from todohub.start import LAST_REPO_KEY, REPOS_KEY
-from conftest import FakeLinear, make_issue
+from conftest import FakeLinear, git, make_issue
 
 URL = "http://127.0.0.1:17374"
 APP_ID = "com.example.periscope"
@@ -95,6 +95,12 @@ def test_client_errors(peri):
     with pytest.raises(PeriscopeError, match="spawn failed: no server") as e:
         client.start(repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p", name="eng-1")
     assert e.value.status == 502
+    # FastAPI's 422, from an older periscope that needs the ticket: the message names the field, without the prompt.
+    peri.answer = httpx.Response(422, json={"detail": [{"type": "missing", "loc": ["body", "ticket"], "msg": "Field required",
+                                                        "input": {"prompt": "p"}}]})
+    with pytest.raises(PeriscopeError) as e:
+        client.start(repo="/dev/api", pr=812, prompt="p", name="pr-812")
+    assert str(e.value) == "ticket: Field required"
     peri.answer = httpx.Response(500, text="Internal Server Error")
     with pytest.raises(PeriscopeError, match="Periscope answered HTTP 500."):
         client.start(repo="/dev/api", branch="b", ticket="ENG-1", title="", prompt="p", name="eng-1")
@@ -146,10 +152,12 @@ def test_review_prs_match_repos_by_origin_and_name_the_missing_ones():
 
 
 def test_pr_repos_are_the_ones_whose_origin_is_the_prs_repo():
-    assert pr_repos(SLUGGED, "ACME/api", 812) == ([{"repo": "/dev/api", "label": "api"}], ["/dev/api"])
-    assert pr_repos(SLUGGED, "acme/web", 812) == ([{"repo": "/dev/web", "label": "web"}], [])
-    assert pr_repos(SLUGGED, "acme/ios", 7) == ([], [])
-    assert pr_repos(CATALOG, "acme/api", 812) == ([], [])          # an older periscope sends no slug
+    none = {"repos": [], "branch_worktrees": []}
+    assert pr_repos(SLUGGED, "ACME/api", 812) == {"repos": [{"repo": "/dev/api", "label": "api"}],
+                                                  "branch_worktrees": ["/dev/api"]}
+    assert pr_repos(SLUGGED, "acme/web", 812) == {**none, "repos": [{"repo": "/dev/web", "label": "web"}]}
+    assert pr_repos(SLUGGED, "acme/ios", 7) == none
+    assert pr_repos(CATALOG, "acme/api", 812) == none              # an older periscope sends no slug
 
 
 def test_bring_to_front_opens_the_app_by_its_id(monkeypatch):
@@ -497,17 +505,20 @@ def test_pull_options_when_linear_does_not_give_the_ticket(env, peri):
     assert o["prompt"].startswith(f"Then review {PR}")
 
 
-def test_pull_options_when_periscope_is_not_running():
+def test_pull_options_with_both_targets_on_and_periscope_not_running(git_repo):
     def refuse(request):
         raise httpx.ConnectError("refused")
 
+    git("remote", "set-url", "origin", "git@github.com:acme/api.git", cwd=git_repo)
     settings = settings_on()
+    settings.repos, settings.review_prompt = [str(git_repo)], "My {pr} for {title}. Be kind."
     app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
                      periscope_factory=lambda: Periscope(URL, transport=httpx.MockTransport(refuse)))
-    r = TestClient(app).get(f"{PULL}/start")
-    assert r.status_code == 200
-    assert r.json()["targets"] == {"periscope": {"repos": [], "branch_worktrees": [],
-                                                 "error": "Periscope is not running at 127.0.0.1:17374."}}
+    o = TestClient(app).get("/api/pulls/ACME/api/812/start").json()
+    assert o["prompt"] == "Be kind."
+    assert o["targets"]["periscope"] == {"repos": [], "branch_worktrees": [],
+                                         "error": "Periscope is not running at 127.0.0.1:17374."}
+    assert [r["repo"] for r in o["targets"]["claude-code"]["repos"]] == [str(git_repo)]
 
 
 def test_pull_start_sends_the_pr_and_its_ticket(env, peri, linear):

@@ -515,8 +515,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.put("/api/settings/prompts/{kind}", dependencies=auth)
     def set_prompt(kind: Literal["code", "review", "chat"], body: PromptIn) -> dict:
-        """Save the code prompt (periscope and Claude Code), the review prompt (periscope, for a review ticket's
-        PR) or the chat prompt (Claude Desktop). An empty prompt goes back to the default."""
+        """Save the code prompt (periscope and Claude Code), the review prompt (Review in To review, and periscope for
+        a review ticket's PR) or the chat prompt (Claude Desktop). An empty prompt goes back to the default."""
         prompt = body.prompt.strip()
         if kind == "chat" and prompt.startswith("/"):
             raise HTTPException(400, "The chat prompt cannot start with /.")    # Claude Desktop refuses that link
@@ -1138,17 +1138,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     claude_code_auth = [*auth, Depends(require_claude_code)]
 
-    def start_in_claude_code(named: dict, script_name: str, body: StartIn | PullStartIn,
-                             find_worktree: Callable[[str], tuple[str, bool, list[str]]]) -> dict:
-        """Open a script that starts Claude Code with the prompt in the worktree that ``find_worktree`` gives for the
-        repo. Haiku names the Claude for the issue or PR ``named``."""
+    def start_in_claude_code(named: dict, script_name: str, prompt: str, worktree: tuple[str, bool, list[str]]) -> dict:
+        """Open a script that starts Claude Code with the prompt in ``worktree``, as claude_code found or added it.
+        Haiku names the Claude for the issue or PR ``named``."""
+        path, reused, warnings = worktree
         session_id = str(uuid.uuid4())
-        try:
-            path, reused, warnings = find_worktree(body.repo)
-            command = claude_code.start_command(settings, name_claude(named), session_id, body.prompt)
-            claude_code.open_script(claude_code.write_script(settings.home / "start", script_name, path, command))
-        except StartError as exc:
-            raise HTTPException(502, str(exc))
+        command = claude_code.start_command(settings, name_claude(named), session_id, prompt)
+        claude_code.open_script(claude_code.write_script(settings.home / "start", script_name, path, command))
         return {"path": path, "reused": reused, "session_id": session_id, "warnings": warnings}
 
     def require_listed(repo: str) -> None:
@@ -1180,8 +1176,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             raise HTTPException(400, "The branch is empty")
         require_listed(body.repo)
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
-        result = start_in_claude_code(issue, issue["identifier"], body,
-                                      lambda repo: claude_code.find_or_add_worktree(repo, branch))
+        result = start_in_claude_code(issue, issue["identifier"], body.prompt,
+                                      claude_code.find_or_add_worktree(body.repo, branch))
         remember_repo(db, issue, body.repo)
         result["warnings"] += add_session_comment(issue, claude_code.account_email(settings), result["session_id"])
         return result
@@ -1195,10 +1191,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     def claude_desktop_start(issue_id: str) -> dict:
         """Open a new Claude Desktop chat with the chat prompt, filled in for the issue, in its message box."""
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
-        try:
-            claude_desktop.open_chat(fill_prompt(settings.chat_prompt, issue))
-        except StartError as exc:
-            raise HTTPException(502, str(exc))
+        claude_desktop.open_chat(fill_prompt(settings.chat_prompt, issue))
         return {"ok": True}
 
     @app.get("/api/slips", dependencies=auth)
@@ -1263,17 +1256,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 ticket_hint = f"The prompt leaves {ticket} out: {exc.detail}"
         targets = {}
         if settings.periscope_on:
-            repos, branch_worktrees, error = [], [], ""
             try:
-                repos, branch_worktrees = pr_repos(periscope_call(lambda p: p.catalog()), slug, number)
+                targets["periscope"] = {**pr_repos(periscope_call(lambda p: p.catalog()), slug, number), "error": ""}
             except HTTPException as exc:
-                error = exc.detail
-            targets["periscope"] = {"repos": repos, "branch_worktrees": branch_worktrees, "error": error}
+                targets["periscope"] = {"repos": [], "branch_worktrees": [], "error": exc.detail}
         if settings.claude_code_on:
-            repos = [r for r in repo_labels() if (claude_code.github_slug(r["repo"]) or "").lower() == slug.lower()]
-            targets["claude-code"] = {
-                "repos": repos, "error": "",
-                "branch_worktrees": [r["repo"] for r in repos if f"pr-{number}" in claude_code.worktrees(r["repo"])]}
+            targets["claude-code"] = {**pr_repos(claude_code.catalog(repo_labels()), slug, number), "error": ""}
         return {
             "ticket": {"identifier": issue["identifier"], "title": issue["title"]} if issue else None,
             "ticket_hint": ticket_hint,
@@ -1294,8 +1282,8 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         """Find or make the worktree on pr-<N>, then open a script that starts Claude Code there with the prompt and a
         name from Haiku."""
         require_listed(body.repo)
-        return start_in_claude_code(named_pull(number, body.title), f"{name}-pr-{number}", body,
-                                    lambda repo: claude_code.find_or_add_pr_worktree(repo, number))
+        return start_in_claude_code(named_pull(number, body.title), f"{name}-pr-{number}", body.prompt,
+                                    claude_code.find_or_add_pr_worktree(body.repo, number))
 
     pull_week_cache: dict = {"at": 0.0, "data": None}
 
@@ -1598,6 +1586,10 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
         return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+
+    @app.exception_handler(StartError)
+    async def start_error(_: Request, exc: StartError) -> JSONResponse:
+        return JSONResponse({"error": str(exc)}, status_code=502)
 
     return app
 
