@@ -377,17 +377,18 @@ export function reviewPopover(): HTMLElement | "" {
       "data-focus": `start-${t}`, disabled: !o.targets[t]?.repos.length,
       onclick: () => { selectTarget(r, o, t); ctx.render(); },
     }, TARGET_NAME[t]))));
+  const hintClass = only ? "start-hint lead" : "start-hint";      // under the title when there is no Where
   const selected = r.target && o.targets[r.target];
   const hint = !selected ? ""
     : selected.branch_worktrees.includes(r.repo) ? `A worktree is already on pr-${n}.`
     : r.target === "periscope" ? "Periscope checks out the PR in a new worktree."
     : `A new worktree next to the repo, on pr-${n}.`;
-  const reasons = r.targets.filter((t) => !o.targets[t]?.repos.length).map((t) => h("p", { class: "start-hint off" },
+  const reasons = r.targets.filter((t) => !o.targets[t]?.repos.length).map((t) => h("p", { class: `${hintClass} off` },
     o.targets[t]?.error || `No repo in ${t === "periscope" ? "periscope" : "Settings"} has ${r.pull.repo} as its origin.`));
   return frame(label, run,
     o.ticket_hint ? h("p", { class: "start-hint lead" }, o.ticket_hint) : "",
     where,
-    hint ? h("p", { class: "start-hint" }, hint) : "",
+    hint ? h("p", { class: hintClass }, hint) : "",
     ...reasons,
     selected ? repoField(r, selected.repos) : "",
     selected ? promptField(r, update) : "",
