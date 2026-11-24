@@ -34,10 +34,10 @@ from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, DEFAULT_REVIEW_PR
                      read_overrides, source_state, write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, shape_issue
-from .periscope import Periscope, PeriscopeError, bring_to_front, pr_links, review_prs
+from .periscope import Periscope, PeriscopeError, bring_to_front, pr_links, pr_repos, review_prs
 from .selfcmd import self_command
 from .sources import SourceError
-from .start import StartError, claude_name, default_repo, fill_prompt, remember_repo
+from .start import StartError, claude_name, default_repo, fill_prompt, fill_review_prompt, remember_repo
 from .sweep import _env, next_working_day
 from .tools import ToolError
 
@@ -128,6 +128,17 @@ class PeriscopeStartIn(BaseModel):
     branch: str = Field(default="", max_length=250)
     pr: int | None = Field(default=None, gt=0)
     prompt: str = Field(min_length=1, max_length=8000)
+
+
+class PullStartIn(BaseModel):
+    repo: str = Field(min_length=1, max_length=500)       # a repo path from the popover's options
+    prompt: str = Field(min_length=1, max_length=8000)
+    title: str = Field(max_length=500)                    # the PR's title, for Claude's name
+
+
+class PullPeriscopeStartIn(PullStartIn):
+    ticket: str = Field(default="", max_length=50)        # the ticket on periscope's card, or ""
+    ticket_title: str = Field(default="", max_length=500)
 
 
 class PeriscopeShowIn(BaseModel):
@@ -1056,6 +1067,17 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     periscope_auth = [*auth, Depends(require_periscope)]
 
+    def start_in_periscope(what: str, **start) -> dict:
+        """Periscope's answer to a start, with its warning in ``warnings``. ``what`` names the start in the 409."""
+        try:
+            result = periscope_call(lambda p: p.start(**start))
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                raise HTTPException(409, f"Periscope is already starting {what}.")
+            raise
+        warning = result.pop("warning", None)
+        return {**result, "warnings": [warning] if warning else []}
+
     @app.get("/api/issues/{issue_id}/periscope", dependencies=periscope_auth)
     def periscope_options(issue_id: str) -> dict:
         """What the popover shows first: periscope's repos, the one to select and why, Linear's branch, the
@@ -1089,22 +1111,14 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if bool(branch) == (body.pr is not None):
             raise HTTPException(400, "Send a branch or a PR.")
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
-        name = name_claude(issue)
-        try:
-            result = periscope_call(lambda p: p.start(
-                repo=body.repo, branch=branch, pr=body.pr, ticket=issue["identifier"], title=issue["title"],
-                prompt=body.prompt, name=name))
-        except HTTPException as exc:
-            if exc.status_code == 409:
-                raise HTTPException(409, f"Periscope is already starting {issue['identifier']}.")
-            raise
+        result = start_in_periscope(
+            issue["identifier"], repo=body.repo, branch=branch, pr=body.pr, ticket=issue["identifier"],
+            title=issue["title"], prompt=body.prompt, name=name_claude(issue))
         if body.pr is None:
             remember_repo(db, issue, body.repo)
-        warning = result.pop("warning", None)
-        warnings = [warning] if warning else []
         if result.get("session_id"):
-            warnings += add_session_comment(issue, result.get("email"), result["session_id"])
-        return {**result, "warnings": warnings}
+            result["warnings"] += add_session_comment(issue, result.get("email"), result["session_id"])
+        return result
 
     @app.post("/api/periscope/show", dependencies=periscope_auth)
     def periscope_show(body: PeriscopeShowIn) -> dict:
@@ -1123,6 +1137,24 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             raise HTTPException(404, "Start in Claude Code is off. Add a repo on the Settings page.")
 
     claude_code_auth = [*auth, Depends(require_claude_code)]
+
+    def start_in_claude_code(named: dict, script_name: str, body: StartIn | PullStartIn,
+                             find_worktree: Callable[[str], tuple[str, bool, list[str]]]) -> dict:
+        """Open a script that starts Claude Code with the prompt in the worktree that ``find_worktree`` gives for the
+        repo. Haiku names the Claude for the issue or PR ``named``."""
+        session_id = str(uuid.uuid4())
+        try:
+            path, reused, warnings = find_worktree(body.repo)
+            command = claude_code.start_command(settings, name_claude(named), session_id, body.prompt)
+            claude_code.open_script(claude_code.write_script(settings.home / "start", script_name, path, command))
+        except StartError as exc:
+            raise HTTPException(502, str(exc))
+        return {"path": path, "reused": reused, "session_id": session_id, "warnings": warnings}
+
+    def require_listed(repo: str) -> None:
+        """Git and the start script run only in a repo you listed."""
+        if repo not in settings.repos:
+            raise HTTPException(400, "Pick a repo from the Settings list.")
 
     @app.get("/api/issues/{issue_id}/claude-code", dependencies=claude_code_auth)
     def claude_code_options(issue_id: str) -> dict:
@@ -1146,20 +1178,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         branch = body.branch.strip()
         if not branch:
             raise HTTPException(400, "The branch is empty")
-        if body.repo not in settings.repos:       # git and the script run only in a repo you listed
-            raise HTTPException(400, "Pick a repo from the Settings list.")
+        require_listed(body.repo)
         issue = shape_issue(linear_call(lambda l: l.get_issue(issue_id)), settings)
-        session_id = str(uuid.uuid4())
-        try:
-            path, reused, warnings = claude_code.find_or_add_worktree(body.repo, branch)
-            command = claude_code.start_command(settings, name_claude(issue), session_id, body.prompt)
-            script = claude_code.write_script(settings.home / "start", issue["identifier"], path, command)
-            claude_code.open_script(script)
-        except StartError as exc:
-            raise HTTPException(502, str(exc))
+        result = start_in_claude_code(issue, issue["identifier"], body,
+                                      lambda repo: claude_code.find_or_add_worktree(repo, branch))
         remember_repo(db, issue, body.repo)
-        warnings += add_session_comment(issue, claude_code.account_email(settings), session_id)
-        return {"path": path, "reused": reused, "session_id": session_id, "warnings": warnings}
+        result["warnings"] += add_session_comment(issue, claude_code.account_email(settings), result["session_id"])
+        return result
 
     # ---- Start in Claude Desktop --------------------------------------------------------------
     def require_claude_desktop() -> None:
@@ -1218,6 +1243,59 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
                 raise HTTPException(502, str(exc))
             pull_cache["data"] = pulls.updated(pull_cache["data"], f"{owner}/{name}", number, pr)
             return pulls_payload()
+
+    # ---- Review a pull request ------------------------------------------------------------------
+    # No session comment: the ticket that a PR names can be its author's, and a comment can notify them.
+    def named_pull(number: int, title: str) -> dict:
+        """What Haiku names the Claude for: ``pr-812`` and up to three words for the PR's title."""
+        return {"identifier": f"PR-{number}", "title": title}
+
+    @app.get("/api/pulls/{owner}/{name}/{number}/start", dependencies=auth)
+    def pull_start_options(owner: str, name: str, number: int, ticket: str = "") -> dict:
+        """What Review's popover shows first: the ticket that the PR's row shows, the review prompt filled in, and for
+        each target that is on, its repos whose origin is the PR's repo and the ones with a worktree on pr-<N>."""
+        slug = f"{owner}/{name}"
+        issue, ticket_hint = None, ""
+        if ticket:
+            try:
+                issue = shape_issue(linear_call(lambda l: l.get_issue(ticket)), settings)
+            except HTTPException as exc:
+                ticket_hint = f"The prompt leaves {ticket} out: {exc.detail}"
+        targets = {}
+        if settings.periscope_on:
+            repos, branch_worktrees, error = [], [], ""
+            try:
+                repos, branch_worktrees = pr_repos(periscope_call(lambda p: p.catalog()), slug, number)
+            except HTTPException as exc:
+                error = exc.detail
+            targets["periscope"] = {"repos": repos, "branch_worktrees": branch_worktrees, "error": error}
+        if settings.claude_code_on:
+            repos = [r for r in repo_labels() if (claude_code.github_slug(r["repo"]) or "").lower() == slug.lower()]
+            targets["claude-code"] = {
+                "repos": repos, "error": "",
+                "branch_worktrees": [r["repo"] for r in repos if f"pr-{number}" in claude_code.worktrees(r["repo"])]}
+        return {
+            "ticket": {"identifier": issue["identifier"], "title": issue["title"]} if issue else None,
+            "ticket_hint": ticket_hint,
+            "prompt": fill_review_prompt(settings.review_prompt, issue, f"https://github.com/{slug}/pull/{number}"),
+            "targets": targets,
+        }
+
+    @app.post("/api/pulls/{owner}/{name}/{number}/periscope", dependencies=periscope_auth)
+    def pull_periscope_start(owner: str, name: str, number: int, body: PullPeriscopeStartIn) -> dict:
+        """Ask periscope to start Claude on the PR with the prompt and a name from Haiku. The repo is one of the
+        options, whose origin is the PR's repo. A Claude already on pr-<N> is answered as mode "existing"."""
+        return start_in_periscope(
+            f"#{number}", repo=body.repo, pr=number, ticket=body.ticket, title=body.ticket_title, prompt=body.prompt,
+            name=name_claude(named_pull(number, body.title)))
+
+    @app.post("/api/pulls/{owner}/{name}/{number}/claude-code", dependencies=claude_code_auth)
+    def pull_claude_code_start(owner: str, name: str, number: int, body: PullStartIn) -> dict:
+        """Find or make the worktree on pr-<N>, then open a script that starts Claude Code there with the prompt and a
+        name from Haiku."""
+        require_listed(body.repo)
+        return start_in_claude_code(named_pull(number, body.title), f"{name}-pr-{number}", body,
+                                    lambda repo: claude_code.find_or_add_pr_worktree(repo, number))
 
     pull_week_cache: dict = {"at": 0.0, "data": None}
 

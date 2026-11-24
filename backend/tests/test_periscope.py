@@ -460,3 +460,103 @@ def test_show_when_periscope_is_not_running_does_not_bring_it_forward():
     r = TestClient(app).post("/api/periscope/show", json={"pid": "k"})
     assert r.status_code == 502 and r.json() == {"error": "Periscope is not running at 127.0.0.1:17374."}
     assert fronted == []
+
+
+PULL = "/api/pulls/acme/api/812"
+PULL_START = {"repo": "/dev/api", "prompt": "Review it.", "title": "Retry stuck uploads"}
+
+
+def test_pull_options_with_a_ticket(env, peri):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    r = client.get(f"{PULL}/start?ticket=ENG-1")
+    assert r.status_code == 200 and r.json() == {
+        "ticket": {"identifier": "ENG-1", "title": "Rebin Globex grades"},
+        "ticket_hint": "",
+        "prompt": REVIEW_PROMPT.replace("ENG-3", "ENG-1"),
+        "targets": {"periscope": {"repos": [{"repo": "/dev/api", "label": "api"}], "branch_worktrees": ["/dev/api"],
+                                  "error": ""}},
+    }
+
+
+def test_pull_options_with_no_ticket(env, peri):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    o = client.get("/api/pulls/acme/ios/7/start").json()
+    assert o["ticket"] is None and o["ticket_hint"] == ""
+    assert o["prompt"].startswith("Then review https://github.com/acme/ios/pull/7 in this worktree")
+    assert o["targets"] == {"periscope": {"repos": [], "branch_worktrees": [], "error": ""}}
+
+
+def test_pull_options_when_linear_does_not_give_the_ticket(env, peri):
+    client, _, _ = env
+    peri.catalog = SLUGGED
+    o = client.get(f"{PULL}/start?ticket=ENG-9").json()
+    assert o["ticket"] is None
+    assert o["ticket_hint"] == "The prompt leaves ENG-9 out: Issue ENG-9 not found."
+    assert o["prompt"].startswith(f"Then review {PR}")
+
+
+def test_pull_options_when_periscope_is_not_running():
+    def refuse(request):
+        raise httpx.ConnectError("refused")
+
+    settings = settings_on()
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=httpx.MockTransport(refuse)))
+    r = TestClient(app).get(f"{PULL}/start")
+    assert r.status_code == 200
+    assert r.json()["targets"] == {"periscope": {"repos": [], "branch_worktrees": [],
+                                                 "error": "Periscope is not running at 127.0.0.1:17374."}}
+
+
+def test_pull_start_sends_the_pr_and_its_ticket(env, peri, linear):
+    client, db, _ = env
+    peri.answer = httpx.Response(200, json=WITH_SESSION)
+    r = client.post(f"{PULL}/periscope", json={**PULL_START, "ticket": "ENG-1", "ticket_title": "Rebin Globex grades"})
+    assert r.status_code == 200 and r.json() == {**WITH_SESSION, "warnings": []}
+    assert peri.calls == [("POST", "/api/linear/start", {
+        "repo": "/dev/api", "pr": 812, "ticket": "ENG-1", "title": "Rebin Globex grades", "prompt": "Review it.",
+        "name": "pr-812-rebin"})]
+    # The ticket can be the PR author's, and the PR chose the repo.
+    assert linear.comments == []
+    assert db.get_meta(REPOS_KEY) is None and db.get_meta(LAST_REPO_KEY) is None
+
+
+def test_pull_start_with_no_ticket_sends_none(env, peri):
+    client, _, _ = env
+    assert client.post(f"{PULL}/periscope", json=PULL_START).status_code == 200
+    assert peri.calls == [("POST", "/api/linear/start", {
+        "repo": "/dev/api", "pr": 812, "prompt": "Review it.", "name": "pr-812-rebin"})]
+
+
+def test_pull_start_names_the_claude_for_the_pr(peri):
+    settings, named = settings_on(), []
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     periscope_factory=lambda: Periscope(URL, transport=peri.transport),
+                     name_fn=lambda issue: named.append(issue) or "pr-812")
+    TestClient(app).post(f"{PULL}/periscope", json=PULL_START)
+    assert named == [{"identifier": "PR-812", "title": "Retry stuck uploads"}]
+
+
+def test_pull_start_carries_periscopes_warning(env, peri):
+    client, _, _ = env
+    behind = "pr-812 may be behind PR #812: the worktree has local changes"
+    peri.answer = httpx.Response(200, json={**SPAWNED, "warning": behind})
+    assert client.post(f"{PULL}/periscope", json=PULL_START).json() == {**SPAWNED, "warnings": [behind]}
+
+
+def test_pull_start_that_periscope_refuses(env, peri):
+    client, _, _ = env
+    peri.answer = httpx.Response(409, json={"detail": "start already running"})
+    r = client.post(f"{PULL}/periscope", json=PULL_START)
+    assert r.status_code == 409 and r.json() == {"error": "Periscope is already starting #812."}
+
+
+def test_pull_start_is_404_when_periscope_is_off(peri):
+    settings = load_settings()
+    client = TestClient(create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                                   periscope_factory=lambda: Periscope(URL, transport=peri.transport)))
+    assert client.post(f"{PULL}/periscope", json=PULL_START).status_code == 404
+    assert client.get(f"{PULL}/start").json()["targets"] == {}
+    assert peri.calls == []

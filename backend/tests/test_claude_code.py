@@ -453,3 +453,53 @@ def test_meta_says_whether_claude_code_is_on(git_repo):
         settings.repos = repos
         app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear)
         assert TestClient(app).get("/api/meta").json()["claude_code"] is expected
+
+
+PULL = "/api/pulls/acme/api/812"
+
+
+def test_pull_options_list_the_settings_repos_of_the_pr(env, monkeypatch):
+    monkeypatch.setenv("HOME", str(env.repo.parent))
+    git("remote", "set-url", "origin", "git@github.com:Acme/api.git", cwd=env.repo)
+    here = {"repos": [{"repo": str(env.repo), "label": "~/api"}], "branch_worktrees": [], "error": ""}
+    assert env.client.get(f"{PULL}/start").json()["targets"] == {"claude-code": here}
+    git("worktree", "add", "-q", "-b", "pr-812", str(env.repo.parent / "other"), cwd=env.repo)
+    assert env.client.get(f"{PULL}/start").json()["targets"] == {
+        "claude-code": {**here, "branch_worktrees": [str(env.repo)]}}
+    assert env.client.get("/api/pulls/acme/web/812/start").json()["targets"] == {
+        "claude-code": {"repos": [], "branch_worktrees": [], "error": ""}}
+
+
+def test_pull_start_opens_claude_code_on_the_pr(env, push_pr):
+    sha = push_pr("one")
+    r = env.client.post(f"{PULL}/claude-code", json={"repo": str(env.repo), "prompt": "Review it.", "title": "Retry"})
+    assert r.status_code == 200
+    out = r.json()
+    path = str(env.repo.parent / "api-worktrees" / "pr-812")
+    assert out == {"path": path, "reused": False, "session_id": out["session_id"], "warnings": []}
+    assert head_of(path) == sha
+    [script] = env.opened
+    assert script == env.settings.home / "start" / "api-pr-812.command"
+    assert f" --name pr-812-rebin --session-id {out['session_id']} -- 'Review it.'" in script.read_text()
+    # The ticket can be the PR author's, and the PR chose the repo.
+    assert env.linear.comments == []
+    assert env.db.get_meta(REPOS_KEY) is None and env.db.get_meta(LAST_REPO_KEY) is None
+
+
+def test_pull_start_in_a_repo_not_on_the_settings_list_is_a_400(env):
+    r = env.client.post(f"{PULL}/claude-code", json={"repo": "/elsewhere", "prompt": "Review it.", "title": "Retry"})
+    assert r.status_code == 400 and r.json() == {"error": "Pick a repo from the Settings list."}
+    assert env.opened == []
+
+
+def test_pull_start_that_git_refuses_is_a_502_and_nothing_opens(env):
+    r = env.client.post(f"{PULL}/claude-code", json={"repo": str(env.repo), "prompt": "Review it.", "title": "Retry"})
+    assert r.status_code == 502 and "couldn't find remote ref pull/812/head" in r.json()["error"]
+    assert env.opened == []
+
+
+def test_pull_start_is_404_when_no_repo_is_set(opened):
+    settings = load_settings()
+    client = TestClient(create_app(settings, DB(settings.db_path), linear_factory=FakeLinear))
+    r = client.post(f"{PULL}/claude-code", json={"repo": "/x", "prompt": "p", "title": "t"})
+    assert r.status_code == 404 and opened == []
