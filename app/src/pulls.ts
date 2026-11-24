@@ -3,10 +3,11 @@
 // from GitHub data only. A stack (pull requests built on each other) sorts and shows as one unit.
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, ApiError } from "./api";
-import type { Issue, PullRequest, Pulls } from "./api";
+import type { Issue, Meta, PullRequest, Pulls } from "./api";
 import { groupMark } from "./avatars";
 import type { Group } from "./avatars";
 import { h, loadPref, pageHead, savePref, svg } from "./dom";
+import { forgetStart, openReview, reviewedPull, reviewPopover, reviewTargets } from "./start";
 
 export interface PullsCtx {
   /** Render the page again when this tab shows, else only the sidebar (for its count). */
@@ -14,6 +15,7 @@ export interface PullsCtx {
   toast: (message: string) => void;
   /** Your open Linear issues: the one a branch or title names shows with its status and due date. */
   issues: () => Issue[];
+  meta: () => Meta | null;
 }
 let ctx: PullsCtx;
 export function setupPulls(c: PullsCtx) { ctx = c; }
@@ -276,10 +278,15 @@ function commentsCell(comments: number, open: number): Node {
   return h("span", {}, icon("msg", "i mute"), String(comments), open > 0 && " · ", open > 0 && h("span", { class: "open-n" }, `${open} open`));
 }
 
+/** Review shows in To review when periscope or Claude Code can start one. */
+const hasReview = () => st.side === "review" && reviewTargets(ctx.meta()).length > 0;
+
 function stepCell(p: PullRequest): Node {
   if (st.side === "review") {
     const ms = since(p.asked_at);
-    return h("span", { class: ms >= 3 * DAY ? "step amb" : "mute" }, long(ms));
+    return h("div", { class: "rv-line" }, h("span", { class: ms >= 3 * DAY ? "step amb" : "mute" }, long(ms)),
+      hasReview() && h("button", { type: "button", class: "rv-btn", "data-act": "review", tabindex: "-1",
+        "aria-haspopup": "dialog", "aria-label": `Review #${p.number}` }, "Review"));
   }
   const s = stepOf(p);
   return h("span", { class: `step ${s.tone}`, title: s.label }, s.label);
@@ -367,7 +374,7 @@ function prRow(p: PullRequest, u: Unit, grp?: HTMLElement): HTMLElement[] {
         "aria-controls": open ? `${domId(key)}-d` : undefined }, p.title),
       metaLine(p, u)),
     grp,
-    h("td", { class: "st" }, stepCell(p)),
+    h("td", { class: st.side === "review" ? "st rv" : "st" }, stepCell(p)),
     h("td", { class: "ci" }, ciCell(p)),
     h("td", { class: "cm" }, commentsCell(p.comments, p.open_threads)),
     h("td", { class: "sz r c-size" }, `+${num(p.additions)} −${num(p.deletions)}`),
@@ -618,6 +625,7 @@ function panel(): HTMLElement {
   const order = [...listed.flatMap((u) => (isFolded(u) ? [] : u.all)), ...(st.fold ? folded : [])].map(keyOf);
   if (!st.sel || !order.includes(st.sel)) st.sel = order[0] ?? null;
 
+  const reviewed = reviewedPull(), isReviewed = side === "review" && !!reviewed && order.includes(keyOf(reviewed));
   const rows = us.length > 0 || folded.length > 0;
   const empty = !d ? (st.loading ? [h("span", { class: "spinner" }), "Reading your pull requests from GitHub…"] : [])
     : q ? [`No pull request matches “${st.filter.trim()}”.`, h("br"), h("button", { class: "secondary", "data-clear": "" }, "Clear the filter")]
@@ -627,17 +635,24 @@ function panel(): HTMLElement {
   return h("div", { id: "pr-panel", role: "tabpanel", "aria-labelledby": `tab-${side}` },
     banner(),
     strip(base, !!d),
-    rows ? table(us, folded, secs) : h("div", { class: "empty pr-empty" }, ...empty),
-    rows && h("p", { class: "pr-hint" }, kbd("j"), kbd("k"), " move · ", kbd("Space"), " opens or closes · ", kbd("o"), " GitHub · ",
+    rows ? h("div", { class: "pr-wrap" }, table(us, folded, secs), isReviewed && reviewPopover())
+      : h("div", { class: "empty pr-empty" }, ...empty),
+    rows && h("p", { class: "pr-hint" }, kbd("j"), kbd("k"), " move · ", kbd("Space"), " opens or closes · ",
+      hasReview() && kbd("p"), hasReview() && " review · ", kbd("o"), " GitHub · ",
       kbd("l"), " Linear · ", side === "mine" && kbd("g"), side === "mine" && " groups · ",
       kbd("1"), "–", kbd(String(VIEWS[side].length)), " pick a view · ", kbd("?"), " all keys"));
 }
 
 type Focus = { on: "filter"; from: number | null; to: number | null } | { on: "act"; act: string; key: string | null }
+  | { on: "start"; field: string; from: number | null; to: number | null }
   | { on: "stack"; id: string } | { on: "section"; key: string } | { on: "table" } | { on: "tab" } | null;
 function focusNow(): Focus {
   const a = document.activeElement;
   if (a === filterInput) return { on: "filter", from: filterInput.selectionStart, to: filterInput.selectionEnd };
+  if (a instanceof HTMLElement && a.closest(".start-pop")) {
+    const text = a instanceof HTMLTextAreaElement ? a : null;
+    return { on: "start", field: a.dataset.focus ?? a.dataset.edit ?? "", from: text?.selectionStart ?? null, to: text?.selectionEnd ?? null };
+  }
   if (a instanceof HTMLElement && a.dataset.act && root?.contains(a)) {
     return { on: "act", act: a.dataset.act, key: a.closest<HTMLElement>("tr")?.dataset.key ?? null };
   }
@@ -653,6 +668,12 @@ function refocus(f: Focus) {
   if (f?.on === "filter") {
     filterInput.focus();
     if (f.from !== null) filterInput.setSelectionRange(f.from, f.to);
+  } else if (f?.on === "start") {
+    const pop = root?.querySelector(".start-pop"), field = CSS.escape(f.field);
+    if (!pop) return focusSel(false);
+    const el = pop.querySelector<HTMLElement>(`[data-focus="${field}"], [data-edit="${field}"]`);
+    el?.focus({ preventScroll: true });
+    if (el instanceof HTMLTextAreaElement && f.from !== null) el.setSelectionRange(f.from, f.to);
   } else if (f?.on === "act") {
     const row = f.key ? `tr[data-key="${CSS.escape(f.key)}"] ` : "";
     root?.querySelector<HTMLElement>(`${row}[data-act="${f.act}"]`)?.focus();
@@ -677,8 +698,18 @@ export function pullsView(): HTMLElement {
   if (!st.loading && Date.now() - lastRead() > READ_EVERY && Date.now() - st.askedAt > MIN) void loadPulls();
   const f = focusNow();
   root = h("div", { class: "prs", onclick: onClick, onmouseover: onHover, onmouseleave: onHover, onfocusin: onFocusIn }, head(), panel());
-  queueMicrotask(() => refocus(f));           // once the page is in the window
+  queueMicrotask(() => { placeReview(); refocus(f); });      // once the page is in the window
   return root;
+}
+
+/** Put Review's popover under its row, and let the page grow to show all of it. */
+function placeReview() {
+  const pop = root?.querySelector<HTMLElement>(".pr-wrap > .start-pop"), p = reviewedPull();
+  const row = p && root?.querySelector<HTMLElement>(`tr.pr-row[data-key="${CSS.escape(keyOf(p))}"]`);
+  if (!pop || !row) return;
+  const top = row.offsetTop + row.offsetHeight - 4;
+  pop.style.top = `${top}px`;
+  pop.parentElement!.style.setProperty("--pop-bottom", `${top + pop.offsetHeight}px`);
 }
 
 /** Draw the tab again in place, keeping the focus where it was. */
@@ -686,6 +717,7 @@ function paint() {
   if (!root?.isConnected) return;
   const f = focusNow();
   root.replaceChildren(head(), panel());
+  placeReview();
   refocus(f);
 }
 
@@ -786,6 +818,7 @@ function setGrouped(on: boolean) {
 function pickView(id: string) { st.view[st.side] = id; st.note = false; paint(); }
 function switchSide(side: Side) {
   if (side === st.side) return;
+  forgetStart();
   st.side = side;
   st.note = false;
   st.open.clear();
@@ -800,6 +833,9 @@ function act(kind: string, p: PullRequest | undefined) {
     const lin = linearOf(p);
     if (lin?.url) void openUrl(lin.url);
     else ctx.toast("No Linear issue in the branch name or title.");
+  } else if (kind === "review") {
+    st.sel = keyOf(p);
+    void openReview(p, linearOf(p)?.ident ?? "", reviewTargets(ctx.meta()));
   } else if (kind === "refresh") void refreshOne(p);
   else if (kind === "copy") {
     navigator.clipboard.writeText(p.head).then(() => ctx.toast(`Copied ${p.head}`), () => ctx.toast("Could not copy the branch name."));
@@ -887,6 +923,10 @@ export function pullsKey(e: KeyboardEvent): boolean {
       else if (st.open.size) st.open.clear();
       else return false;
       paint();
+      return true;
+    case "p":
+      if (!hasReview()) return false;
+      act("review", prOf(st.sel));
       return true;
     case "o": act("gh", prOf(st.sel)); return true;
     case "l": act("lin", prOf(st.sel)); return true;
