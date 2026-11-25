@@ -3,6 +3,7 @@ the details of 10 pull requests in each call, all at the same time.
 
 - mine: the open pull requests you opened.
 - review: the open pull requests that ask for your review.
+- reviewed: the open pull requests of others that you reviewed and that do not ask for your review now.
 - weekly: for Insights, the pull requests you merged and reviewed each week, and the lines merged this week and last.
 
 Everything is GitHub data; nothing is written by Claude. Comments, reviews and review requests
@@ -19,11 +20,12 @@ from . import stats
 from .config import Settings
 from .sources import gh_json
 
+LISTS = ("mine", "review", "reviewed")
 MAX_PRS = 50
 # GitHub stops a query after about 10 seconds. 10 pull requests with all their details take 2 to 5.
 PRS_PER_CALL = 10
 # The newest review threads read per pull request. Each one costs GitHub a lookup: 30 keep a read
-# near 20 of the 5,000 points an hour GitHub allows.
+# near 25 of the 5,000 points an hour GitHub allows.
 MAX_THREADS = 30
 SHOWN_THREADS = 3            # open threads sent with each pull request; the rest are only counted
 THREAD_TEXT = 280            # characters kept of a thread's first comment
@@ -49,6 +51,7 @@ fragment pr on PullRequest {
     }
   }
   reviewRequests(first: 20) { nodes { requestedReviewer { ...reviewer } } }
+  viewerLatestReview { submittedAt }
   latestReviews(first: 20) { nodes { author { __typename login } state submittedAt } }
   timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 30) {
     nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ...reviewer } } }
@@ -69,6 +72,9 @@ query($n: Int!) {
   review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: $n) {
     issueCount nodes { ... on PullRequest { id } }
   }
+  reviewed: search(query: "is:pr is:open reviewed-by:@me -review-requested:@me -author:@me archived:false sort:updated-desc", type: ISSUE, first: $n) {
+    issueCount nodes { ... on PullRequest { id } }
+  }
 }
 """
 DETAILS_QUERY = """
@@ -83,11 +89,11 @@ query($owner: String!, $name: String!, $number: Int!, $threads: Int!) {
 
 
 def read(settings: Settings, env: dict | None = None) -> dict:
-    """Your open pull requests and the ones that ask for your review. Raises sources.SourceError."""
+    """Your open pull requests, the ones that ask for your review and the ones you reviewed. Raises sources.SourceError."""
     data = (gh_json(settings, ["api", "graphql", "-f", f"query={SEARCH}", "-F", f"n={MAX_PRS}"], env) or {})["data"]
     me = data["viewer"]["login"]
-    ids = {side: [n["id"] for n in data[side]["nodes"] if n] for side in ("mine", "review")}
-    all_ids = ids["mine"] + ids["review"]
+    ids = {name: [n["id"] for n in data[name]["nodes"] if n] for name in LISTS}
+    all_ids = [i for name in LISTS for i in ids[name]]
 
     def details(batch: list[str]) -> list[dict]:
         args = ["api", "graphql", "-f", f"query={DETAILS_QUERY}", "-F", f"threads={MAX_THREADS}"]
@@ -96,10 +102,12 @@ def read(settings: Settings, env: dict | None = None) -> dict:
     batches = [all_ids[i:i + PRS_PER_CALL] for i in range(0, len(all_ids), PRS_PER_CALL)]
     with ThreadPoolExecutor() as pool:
         found = dict(zip(all_ids, (pr for prs in pool.map(details, batches) for pr in prs)))
-    mine = _link_stacks([shape(found[i], me) for i in ids["mine"]])
-    review = [shape(found[i], me) for i in ids["review"]]
-    return {"login": me, "mine": mine, "review": review,
-            "mine_total": data["mine"]["issueCount"], "review_total": data["review"]["issueCount"]}
+    prs = {name: [shape(found[i], me) for i in ids[name]] for name in LISTS}
+    # reviewed-by also finds a pull request where your only review is not submitted yet
+    reviewed = [p for p in prs["reviewed"] if p["reviewed_at"]]
+    return {"login": me, "mine": _link_stacks(prs["mine"]), "review": prs["review"], "reviewed": reviewed,
+            "mine_total": data["mine"]["issueCount"], "review_total": data["review"]["issueCount"],
+            "reviewed_total": data["reviewed"]["issueCount"] - (len(prs["reviewed"]) - len(reviewed))}
 
 
 def read_one(settings: Settings, repo: str, number: int, env: dict | None = None) -> dict | None:
@@ -117,15 +125,15 @@ def updated(d: dict, repo: str, number: int, pr: dict | None) -> dict:
         return (p["repo"], p["number"]) == (repo, number)
 
     out = dict(d)
-    for side in ("mine", "review"):
-        if not any(map(same, d[side])):
+    for name in LISTS:
+        if not any(map(same, d[name])):
             continue
         if pr:
-            prs = [pr if same(p) else p for p in d[side]]
+            prs = [pr if same(p) else p for p in d[name]]
         else:
-            prs = [p for p in d[side] if not same(p)]
-            out[f"{side}_total"] -= 1
-        out[side] = _link_stacks(prs) if side == "mine" else prs
+            prs = [p for p in d[name] if not same(p)]
+            out[f"{name}_total"] -= 1
+        out[name] = _link_stacks(prs) if name == "mine" else prs
     return out
 
 
@@ -204,9 +212,9 @@ def shape(pr: dict, me: str) -> dict:
                      + [{"login": login, "state": r["state"].lower(), "at": r["submittedAt"]}
                         for login, r in others.items() if login not in waiting],
         "refs": list(dict.fromkeys(m.upper() for m in ISSUE_REF.findall(f"{pr['headRefName']} {pr['title']}"))),
-        # For the review tab: when you were asked (your own request, else the team's), and whether you reviewed it before.
+        # For the review tab: when you were asked (your own request, else the team's), and when you last reviewed it.
         "asked_at": asked.get(me) or max((asked[w] for w in waiting if w in asked), default=pr["createdAt"]),
-        "reviewed_before": me in reviews,
+        "reviewed_at": (pr["viewerLatestReview"] or {}).get("submittedAt"),   # latestReviews leaves out who is asked again
     }
 
 

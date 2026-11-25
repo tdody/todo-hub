@@ -1,6 +1,6 @@
-// Pull requests tab: your open pull requests (Mine) and the ones that ask for your review (To
-// review), read from GitHub by the backend (pulls.py). Each of yours gets one next step, worked out
-// from GitHub data only. A stack (pull requests built on each other) sorts and shows as one unit.
+// Pull requests tab: your open pull requests (Mine) and the ones that ask for your review or that you
+// reviewed (To review), read from GitHub by the backend (pulls.py). Each of yours gets one next step,
+// worked out from GitHub data only. A stack (pull requests built on each other) sorts and shows as one unit.
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, ApiError } from "./api";
 import type { Issue, Meta, PullRequest, Pulls } from "./api";
@@ -26,6 +26,8 @@ type Tone = "red" | "amb" | "ok" | "mute";
 interface Step { label: string; tone: Tone; rank: number; needs: boolean }
 interface View {
   id: string; label: string; has: (p: PullRequest) => boolean; none: () => string;
+  /** The list it shows, when it is not its side's. */
+  list?: "reviewed";
   /** A part of the view, named under its count; clicking it filters the table to that part. */
   note?: { text: (n: number) => string; tone: Tone; has: (p: PullRequest) => boolean };
 }
@@ -215,14 +217,18 @@ const VIEWS: Record<Side, View[]> = {
       none: () => "Nobody is waiting on your review." },
     { id: "old", label: "Waiting 3+ days", has: (p) => since(p.asked_at) >= 3 * DAY,
       none: () => "No review has waited 3 days or more." },
-    { id: "again", label: "Asked again", has: (p) => p.reviewed_before, none: () => "Nobody asked you again." },
+    { id: "reviewed", label: "Reviewed", list: "reviewed", has: () => true, none: () => "No open pull request that you reviewed." },
+    { id: "again", label: "Asked again", has: (p) => p.reviewed_at !== null, none: () => "Nobody asked you again." },
   ],
 };
 const viewOf = () => VIEWS[st.side].find((v) => v.id === st.view[st.side]) ?? VIEWS[st.side][0];
+const listOf = (v: View) => v.list ?? st.side;
+const shownList = () => listOf(viewOf());
 
 // A header's first click sorts the way you most often want.
 const STEP_COL: Col = { id: "step", label: "Next step", first: 1, cls: "c-st", unit: "min",
-  key: (p) => (st.side === "mine" ? stepOf(p).rank * 1e13 + Date.parse(p.updated_at) : Date.parse(p.asked_at)) };
+  key: (p) => (st.side === "mine" ? stepOf(p).rank * 1e13 + Date.parse(p.updated_at)
+    : shownList() === "reviewed" ? -Date.parse(p.reviewed_at!) : Date.parse(p.asked_at)) };
 const COLS: Col[] = [
   { id: "number", label: "#", key: (p) => p.number, first: -1, cls: "c-num", unit: "min", tip: "Pull request number" },
   { id: "title", label: "Pull request", key: (p) => p.title.toLowerCase(), first: 1, unit: "base" },
@@ -284,8 +290,9 @@ const showsReview = () => st.side === "review" && reviewTargets(ctx.meta()).leng
 
 function stepCell(p: PullRequest): Node {
   if (st.side === "review") {
-    const ms = since(p.asked_at);
-    return h("div", { class: "rv-line" }, h("span", { class: ms >= 3 * DAY ? "step amb" : "mute" }, long(ms)),
+    const reviewed = shownList() === "reviewed", ms = since(reviewed ? p.reviewed_at : p.asked_at);
+    return h("div", { class: "rv-line" },
+      h("span", { class: ms >= 3 * DAY && !reviewed ? "step amb" : "mute" }, reviewed ? `${ago(ms)} ago` : long(ms)),
       showsReview() && h("button", { type: "button", class: "rv-btn", "data-act": "review", tabindex: "-1",
         "aria-haspopup": "dialog", "aria-label": `Review #${p.number}` }, "Review"));
   }
@@ -311,7 +318,7 @@ function metaLine(p: PullRequest, u: Unit): HTMLElement {
   const rest: (Node | string)[] = [];
   if (st.side === "review") {
     rest.push(`by ${p.author}`);
-    if (p.reviewed_before) rest.push(h("span", { class: "amb" }, "asked again"));
+    if (p.reviewed_at && shownList() === "review") rest.push(h("span", { class: "amb" }, "asked again"));
   }
   const lin = linearOf(p);
   if (lin) rest.push(linearRef(lin.ident));
@@ -418,9 +425,10 @@ function threadsBox(p: PullRequest): Node[] {
 
 const REVIEW_WORD = { waiting: "waiting", approved: "approved", changes_requested: "requested changes", commented: "commented" };
 function sideBox(p: PullRequest): Node[] {
+  if (shownList() === "reviewed") return [lbl("Review"), li("", h("span", {}, `You reviewed it ${long(since(p.reviewed_at))} ago.`))];
   if (st.side === "review") {
     return [lbl("Review"), li("", h("span", {}, `${p.author} asked you ${long(since(p.asked_at))} ago.`)),
-      p.reviewed_before ? li("amb", h("span", {}, "You reviewed it before; this asks again.")) : ""].filter(Boolean) as Node[];
+      p.reviewed_at ? li("amb", h("span", {}, "You reviewed it before; this asks again.")) : ""].filter(Boolean) as Node[];
   }
   const lin = linearOf(p);
   const due = lin?.issue?.due_date
@@ -480,7 +488,7 @@ function subtitle(): string {
   const read = st.loading ? "Reading GitHub…"
     : d.error ? `Read from GitHub at ${clock(d.read_at)}`
     : since(d.read_at) < MIN ? "Read from GitHub just now" : `Read from GitHub ${long(since(d.read_at))} ago`;
-  const total = st.side === "mine" ? d.mine_total : d.review_total, shown = d[st.side].length;
+  const list = shownList(), total = d[`${list}_total` as const], shown = d[list].length;
   return total > shown ? `${read} · the ${shown} updated last of ${total}` : read;
 }
 
@@ -518,10 +526,10 @@ function banner(): Node | string {
     h("span", {}, `Could not read GitHub${when}: ${err}`, d?.read_at ? ` This page shows what was read at ${clock(d.read_at)}.` : ""));
 }
 
-function strip(base: PullRequest[], have: boolean): HTMLElement {
+function strip(baseOf: (v: View) => PullRequest[], have: boolean): HTMLElement {
   const v = viewOf();
   return h("div", { class: "pr-strip", role: "group", "aria-label": "Show" }, ...VIEWS[st.side].map((w, i) => {
-    const on = w.id === v.id, ps = base.filter(w.has);
+    const on = w.id === v.id, ps = baseOf(w).filter(w.has);
     const k = w.note && have ? ps.filter(w.note.has).length : 0;
     const pressed = on && st.note;
     return h("div", { class: `seg${on ? " on" : ""}` },
@@ -587,7 +595,7 @@ function sectionHead(s: Section, span: number): HTMLElement {
 
 function table(us: Unit[], folded: PullRequest[], secs: Section[] | null): HTMLElement {
   const sort = st.sorts[st.side], v = viewOf(), col = sortCol(), cols = shownCols();
-  const label = (c: Col) => (st.side === "review" && c.id === "step" ? "Waiting" : c.label);
+  const label = (c: Col) => (st.side === "mine" || c.id !== "step" ? c.label : shownList() === "reviewed" ? "Reviewed" : "Waiting");
   const withGroup = showsGroup();
   return h("table", { class: "pr-table" },
     h("caption", { class: "vh" }, `${v.label}, sorted by ${label(col)}`),
@@ -614,7 +622,9 @@ function panel(): HTMLElement {
   const d = st.data?.read_at ? st.data : null;
   const side = st.side, v = viewOf();
   const q = st.filter.trim().toLowerCase();
-  const base = (d?.[side] ?? []).filter((p) => !q || [p.title, p.repo, `#${p.number}`, p.head, ...p.refs].some((s) => s.toLowerCase().includes(q)));
+  const baseOf = (w: View) => (d?.[listOf(w)] ?? [])
+    .filter((p) => !q || [p.title, p.repo, `#${p.number}`, p.head, ...p.refs].some((s) => s.toLowerCase().includes(q)));
+  const base = baseOf(v);
   if (st.note && !base.filter(v.has).some((p) => v.note?.has(p))) st.note = false;
   const shown = base.filter((p) => v.has(p) && (!st.note || v.note!.has(p)));
   // Drafts in no stack wait under a fold, like Today's "not on Today".
@@ -630,12 +640,12 @@ function panel(): HTMLElement {
   const rows = us.length > 0 || folded.length > 0;
   const empty = !d ? (st.loading ? [h("span", { class: "spinner" }), "Reading your pull requests from GitHub…"] : [])
     : q ? [`No pull request matches “${st.filter.trim()}”.`, h("br"), h("button", { class: "secondary", "data-clear": "" }, "Clear the filter")]
-    : !d[side].length ? [side === "mine" ? "No open pull requests." : "Nobody is waiting on your review."]
+    : side === "mine" && !d.mine.length ? ["No open pull requests."]
     : [v.none()];
   const kbd = (k: string) => h("kbd", {}, k);
   return h("div", { id: "pr-panel", role: "tabpanel", "aria-labelledby": `tab-${side}` },
     banner(),
-    strip(base, !!d),
+    strip(baseOf, !!d),
     rows ? h("div", { class: "pr-wrap" }, table(us, folded, secs), reviewing && order.includes(keyOf(reviewing)) && reviewPopover())
       : h("div", { class: "empty pr-empty" }, ...empty),
     rows && h("p", { class: "pr-hint" }, kbd("j"), kbd("k"), " move · ", kbd("Space"), " opens or closes · ",
@@ -722,7 +732,7 @@ function paint() {
   refocus(f);
 }
 
-/** Needs you plus To review, for the sidebar; null until GitHub was read. */
+/** Needs you plus Waiting on you, for the sidebar; null until GitHub was read. */
 export function pullsCount(): number | null {
   const d = st.data;
   return d?.read_at ? d.mine.filter(needsYou).length + d.review.length : null;
@@ -753,7 +763,7 @@ async function refreshOne(p: PullRequest): Promise<void> {
   paint();
   try {
     const d = (st.data = await api.pull(p.repo, p.number));
-    const listed = [...d.mine, ...d.review].some((x) => keyOf(x) === key);
+    const listed = [...d.mine, ...d.review, ...d.reviewed].some((x) => keyOf(x) === key);
     ctx.toast(listed ? `Refreshed #${p.number}` : `#${p.number} is merged or closed, so it left the list.`);
   } catch (e) {
     ctx.toast(`Could not refresh #${p.number}: ${e instanceof ApiError ? e.message : String(e)}`);
@@ -777,7 +787,7 @@ function focusSel(scroll = true) {
   if (scroll) b.closest("tr")?.scrollIntoView({ block: "nearest" });
 }
 const rowKeys = () => [...(root?.querySelectorAll<HTMLElement>("tr.pr-row") ?? [])].map((r) => r.dataset.key!);
-const prOf = (key: string | null | undefined) => (key ? st.data?.[st.side].find((p) => keyOf(p) === key) : undefined);
+const prOf = (key: string | null | undefined) => (key ? st.data?.[shownList()].find((p) => keyOf(p) === key) : undefined);
 function toggle(key: string) {
   if (!st.open.delete(key)) st.open.add(key);
   st.sel = key;

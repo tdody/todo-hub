@@ -516,15 +516,17 @@ export interface PullRequest {
   /** Yours only: the pull request this one is built on (its base branch is that one's branch). */
   stacked_on?: number | null;
   asked_at: string;                // when your review was asked for
-  reviewed_before: boolean;        // you reviewed it before this request
+  reviewed_at: string | null;      // when you last reviewed it
 }
 
 export interface Pulls {
   login: string | null;
   mine: PullRequest[];
   review: PullRequest[];
+  reviewed: PullRequest[];         // you reviewed them, and they do not ask for your review now
   mine_total: number;              // GitHub's count; more than mine.length when some were not read
   review_total: number;
+  reviewed_total: number;
   read_at: string | null;          // the last good read
   error: string | null;            // why the last read failed
   error_at: string | null;

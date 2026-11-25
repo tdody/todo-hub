@@ -40,6 +40,7 @@ Point at one pull request of a stack and the whole stack lights up; the stack's 
 - The pull request number has its own sortable column, **#**, in Mine and To review (2026-11-16). The meta line keeps only the repo name.
 - Mine groups by client or project: the client label of the Linear issue, else its project, else "No client or project". It combines prototype A (sections, from the Group control or g) and prototype B (a sortable Client / project column when the groups are off). The column hides in the sections.
 - Pull requests with no client or project share one group, not one group for each repo.
+- To review has a Reviewed view, third, between Waiting 3+ days and Asked again (2026-11-24): open pull requests of others that he reviewed and that do not ask for his review now. They do not wait on him, so the To review count and the sidebar count leave them out.
 - To review has no column and no groups: on 2026-11-16, none of its 7 pull requests named one of his open issues.
 - The Client / project column shows only on pages wider than 1120px (a 1400px window with the default sidebar). At the default 1120px window (an 840px page), the titles would get no room. The groups work at every width.
 - Size folds at a 920px page and narrower: with **#** and Size, the titles had about 135px at the default 1120px window.
@@ -48,7 +49,7 @@ Point at one pull request of a stack and the whole stack lights up; the stack's 
 
 - The Linear issue comes from the branch name or title, when its team key is one his issues use; its status and due date show when it is one of his open issues.
 - The stack summary row keeps two lines ("Stack of N" over "repo · merge order"), as in the approved mock's final version: one line broke "Stack of 2" in two.
-- A read of the list costs about 20 of 5,000 points an hour, and a read of one pull request costs 1; the newest 30 threads per pull request are read.
+- A read of the list costs about 25 of 5,000 points an hour, and a read of one pull request costs 1; the newest 30 threads per pull request are read.
 - A pull request read again alone leaves the list only when it is merged or closed. A review request that GitHub drops stays in To review until the next read of the list.
 - The error banner has no button of its own: Refresh all sits just above it.
 - The Done pill ink (`s-done-ink`) is #2b7451 in light mode: 4.9:1 on its pill, where Done Green gave 4.35:1. Every Done pill and the Approved pill use it, and so does a green filter note, because Done Green falls under 4.5:1 on the pressed and hover fills.
