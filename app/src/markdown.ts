@@ -18,6 +18,8 @@ function safeLink(text: Inline[], url: string): Inline {
   if (!SAFE_URL.test(u)) return h("span", {}, ...text);
   const a = link("", u, "link");
   a.replaceChildren(...text);
+  // A URL in the text is a link too: unwrap it, or one click opens both.
+  a.querySelectorAll("a").forEach((x) => x.replaceWith(...x.childNodes));
   a.title = u;
   return a;
 }
@@ -29,7 +31,8 @@ const INLINE: { re: RegExp; make: (m: RegExpExecArray) => Inline }[] = [
   { re: /`([^`\n]+)`/, make: (m) => h("code", {}, m[1]) },
   // Link targets may hold one level of parentheses (Wikipedia-style URLs).
   { re: /!\[([^\]]*)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)/, make: (m) => imageHook?.(m[1], m[2]) ?? safeLink([`Image${m[1] ? `: ${m[1]}` : ""} ↗`], m[2]) },
-  { re: /\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)/, make: (m) => safeLink(inline(m[1]), m[2]) },
+  // Linear can write the target in angle brackets: [text](<url>).
+  { re: /\[([^\]]+)\]\((?:<([^>\s]+)>|((?:[^()\s]|\([^()\s]*\))+))(?:\s+"[^"]*")?\)/, make: (m) => safeLink(inline(m[1]), m[2] ?? m[3]) },
   { re: /<((?:https?:\/\/|mailto:)[^>\s]+)>/, make: (m) => safeLink([m[1]], m[1]) },
   { re: /\*\*(?=\S)([\s\S]*?\S)\*\*/, make: (m) => h("strong", {}, ...inline(m[1])) },
   { re: /__(?=\S)([\s\S]*?\S)__/, make: (m) => h("strong", {}, ...inline(m[1])) },
