@@ -149,11 +149,11 @@ launchd (weekdays 8, 10, 12, 14, 16)        TodoHub.app (Tauri) + menu-bar item,
 - In **Pull requests → To review**, **Review** (**p** for the selected row) opens a popover under the row.
   - **Where** picks periscope or Claude Code, when both are on. A target with no repo whose origin is the PR's repo cannot be picked, and a line says why. Periscope comes first.
   - **Repo** lists the target's repos whose origin is the PR's repo. It selects one with a worktree already on `pr-<N>` if there is one.
-  - **Prompt** is the review prompt on the Settings page, filled in for the PR and the Linear issue that its row shows. For a PR with no issue, or when Linear does not give it, the prompt leaves out each sentence that names `{identifier}`, `{title}` or `{url}`.
-- **Start** (↵, or ⌘↵ in the prompt) checks the PR out as `pr-<N>`. Periscope does it in its own worktrees. For Claude Code, todo-hub adds the worktree `<repo>-worktrees/pr-<N>`, or brings the worktree already on `pr-<N>` up to the PR by a fast-forward. If the fetch or the fast-forward fails, todo-hub uses the worktree or the local branch as it is, and an error toast says why. Your local changes stay.
+  - **Prompt** is the review prompt on the Settings page, filled in for the PR and the Linear issue that its row shows. For a PR with no Linear issue, or when Linear does not give it, the prompt leaves out each sentence that names `{identifier}`, `{title}` or `{url}`.
+- **Start** (↵, or ⌘↵ in the prompt) checks the PR out as `pr-<N>`. Periscope does it in its own worktrees. For Claude Code, todo-hub adds the worktree `<repo>-worktrees/pr-<N>`, or brings the worktree already on `pr-<N>` up to the PR by a fast-forward. If the fetch or the fast-forward fails, todo-hub uses the worktree or the local branch as it is, and an error toast says why. Your local changes and ignored files stay.
 - Haiku names the new Claude: `pr-<N>` and up to three words. Periscope's toast has **Show**. With a Claude already on `pr-<N>`, periscope starts nothing.
 - A review adds no comment to the Linear issue, because the issue can be the PR author's. It does not change the remembered repos.
-- A periscope that still needs a ticket answers a review of a PR with no ticket with an error.
+- A periscope that still needs a `ticket` answers a review of a PR with no Linear issue with an error.
 
 ## Safety model
 
