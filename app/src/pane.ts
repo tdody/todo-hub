@@ -69,7 +69,7 @@ function openEdit(key: string, text: string) {
 }
 
 interface PaneSnapshot {
-  edit: string | null; start: number | null; end: number | null; focus: string | null; ident: string | null; scroll: number;
+  edit: string | null; start: number | null; end: number | null; editScroll: number; focus: string | null; ident: string | null; scroll: number;
 }
 
 // A control with data-focus (a sub-issue tick box, the start popover's select and buttons) keeps
@@ -91,7 +91,7 @@ function snapshotPane(): PaneSnapshot {
   const pane = document.querySelector<HTMLElement>(PANE);
   const edit = a?.dataset?.edit ?? null;
   const focus = a?.dataset?.focus ?? (!a || a === document.body ? focusToRestore : null);
-  return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null, focus,
+  return { edit, start: edit ? a!.selectionStart : null, end: edit ? a!.selectionEnd : null, editScroll: a?.scrollTop ?? 0, focus,
     ident: pane ? paneIdent(pane) : null, scroll: pane?.scrollTop ?? 0 };
 }
 
@@ -112,6 +112,7 @@ function restorePane(k: PaneSnapshot) {
   if (!el) return;
   el.focus({ preventScroll: true });
   if (k.start !== null) el.setSelectionRange(k.start, k.end ?? k.start);
+  el.scrollTop = k.editScroll;
 }
 
 /** Keep the pane's copy of a description in step with a save or an undo. */

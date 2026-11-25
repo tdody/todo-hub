@@ -380,7 +380,7 @@ function startSection(ctx: SettingsCtx): HTMLElement {
       "aria-label": `Remove ${r.label}`, onclick: () => removeRepo(r, ctx) },
       busy === `repo-${r.repo}` ? "Removing…" : "Remove")));
   return card("start", "Start Claude",
-    "How the ⋯ menu's start items start Claude on an issue. In the prompts, {identifier}, {title} and {url} become the issue's.",
+    "How the ⋯ menu's start items start Claude on an issue, and Review starts it on a pull request. In the prompts, {identifier}, {title} and {url} become the issue's.",
     "",
     h("div", { class: "set-start-part" },
       h("div", { class: "set-label" }, "Repos"),
@@ -392,7 +392,7 @@ function startSection(ctx: SettingsCtx): HTMLElement {
       repoError ? h("p", { class: "set-sub bad", role: "alert" }, repoError) : ""),
     promptField("code", "Code prompt", "Start in periscope and Start in Claude Code send it to the new Claude.", ctx),
     promptField("review", "Review prompt",
-      "Start in periscope sends it for a review ticket whose GitHub PR is in a periscope repo. {pr} becomes the PR's link.", ctx),
+      "Review in To review sends it, and Start in periscope for a review ticket whose GitHub PR is in a periscope repo. {pr} becomes the PR's link. For a PR with no Linear issue, Review leaves out each sentence that names {identifier}, {title} or {url}.", ctx),
     promptField("chat", "Chat prompt", "Start in Claude Desktop puts it in a new chat. It cannot start with /.", ctx));
 }
 

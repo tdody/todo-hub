@@ -654,7 +654,6 @@ button.theme:hover { color: var(--ink); }
 .segmented.link-switch { display: flex; margin-top: 10px; }
 .segmented.link-switch button.seg { flex: 1; min-width: 0; border-left: 1px solid var(--border); }
 .segmented.link-switch button.seg:first-child { border-left: 0; }
-.segmented.link-switch button.seg:focus-visible { outline-offset: -2px; }   /* .segmented clips what is outside it */
 .rec-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-left: 6px; vertical-align: middle; }
 .link-reason { margin-top: 6px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .link-reason strong { color: var(--ink); font-weight: 600; }
@@ -1599,6 +1598,8 @@ details.more[open] > summary { margin-bottom: 10px; }
 .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--surface); }
 .segmented button.seg { background: transparent; border: 0; padding: 6px 12px; font-size: 12px; cursor: pointer; color: var(--muted); }
 .segmented button.seg.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.segmented button.seg:focus-visible { outline-offset: -2px; }               /* .segmented clips what is outside it */
+.segmented button.seg.on:focus-visible { outline-color: var(--accent-ink); }
 .prs button[aria-disabled="true"] { opacity: .55; cursor: default; filter: none; }
 .prs button .spinner { width: 10px; height: 10px; flex: none; }     /* inside the button: the strip clips what is outside it */
 .seg-b b { font-size: 20px; font-weight: 700; line-height: 1.25; font-variant-numeric: tabular-nums; }
@@ -1734,6 +1735,18 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
 .fold-b:hover { color: var(--ink); }
 .fold-b .i { margin: 0 0 0 auto; transition: transform .12s; }
 .fold-b[aria-expanded="true"] .i { transform: rotate(90deg); }
+/* To review: the row's Review button (it keeps its space, so the row does not move) and its popover, which
+   placeReview puts under the row. The page grows to --pop-bottom, so the last row's popover can scroll into view, and
+   stays so until the next draw: a click that closes the popover must not move the row under the pointer. */
+.pr-wrap { position: relative; min-height: var(--pop-bottom, 0); }
+.pr-table td.st.rv { overflow: visible; }
+.rv-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prs .rv-btn { margin: -3px 0 -4px; border-radius: 6px; padding: 0 10px; font-size: 12px; font-weight: 600; line-height: 24px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--ink); cursor: pointer; opacity: 0; }
+tr.pr-row:hover .rv-btn, tr.pr-row.sel .rv-btn { opacity: 1; }
+.pr-wrap > .start-pop { top: 0; right: 148px; }
+@container (max-width: 920px) { .pr-wrap > .start-pop { right: 30px; } }
+@container (max-width: 720px) { .pr-wrap > .start-pop { right: 0; } }
 /* the row, opened in place */
 .pr-table tr.detail > td { padding: 2px 12px 14px 0; white-space: normal; }
 .pr-table tr.detail > td.rail { padding: 0; }
@@ -1810,6 +1823,7 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
   border-radius: 12px; box-shadow: 0 14px 34px rgba(0, 0, 0, .18); padding: 14px 16px;
   display: flex; flex-direction: column; gap: 8px; font-size: 13px; text-align: left; cursor: default;
 }
+.start-pop:focus { outline: none; }
 .start-title { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
 .start-wait { margin: 0; color: var(--muted); }
 .start-field { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px; align-items: center; }
@@ -1823,6 +1837,8 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
 textarea.start-input { resize: vertical; line-height: 1.5; }
 .start-hint { margin: -4px 0 2px 64px; font-size: 12px; color: var(--muted); }
 .start-hint.lead { margin-left: 0; }
+.start-hint.off { color: var(--warn-ink); }
+.start-pop .segmented { justify-self: start; }
 .start-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .set-prompt { display: block; width: 100%; max-width: 640px; box-sizing: border-box; resize: vertical; font: inherit; line-height: 1.5; }
 /* Settings → Start Claude: the repo rows, the + Add field and the two prompts. .set-label gives each part its top

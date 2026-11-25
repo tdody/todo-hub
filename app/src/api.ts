@@ -331,7 +331,7 @@ export interface PeriscopePr {
 export interface StartSettings {
   repos: { repo: string; label: string }[];   // absolute top folders; the label shows ~
   code_prompt: string;                        // Start in periscope and Start in Claude Code
-  review_prompt: string;                      // Start in periscope, for a review ticket's PR
+  review_prompt: string;                      // Review in To review, and Start in periscope for a review ticket's PR
   chat_prompt: string;                        // Start in Claude Desktop
   default_code_prompt: string;
   default_review_prompt: string;
@@ -348,6 +348,23 @@ export interface StartOptions {
   prompt: string;                               // the code prompt, filled in
   prs?: PeriscopePr[];                          // periscope only: a review ticket's PRs; empty for other tickets
   pr_hint?: string;                             // periscope only: "No periscope repo has acme/web as its origin. …", or ""
+}
+
+/** Where Claude starts, from a popover. */
+export type StartTarget = "periscope" | "claude-code";
+
+/** Review in To review: what its popover shows first. */
+export interface PullStartOptions {
+  issue: { identifier: string; title: string } | null;    // the one that the PR's row shows, as Linear gives it
+  issue_hint: string;                           // why the prompt leaves the row's issue out, or ""
+  prompt: string;                               // the review prompt, filled in
+  targets: Partial<Record<StartTarget, PullStartTarget>>;   // only the ones that are on
+}
+
+export interface PullStartTarget {
+  repos: { repo: string; label: string }[];     // the ones whose origin is the PR's repo
+  branch_worktrees: string[];                   // the ones with a worktree already on pr-<N>
+  error: string;                                // periscope's, when its repos cannot be read; else ""
 }
 
 export interface PeriscopeStart {
@@ -630,6 +647,12 @@ export const api = {
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
   pulls: (refresh = false) => call<Pulls>("GET", `/api/pulls${refresh ? "?refresh=true" : ""}`),
   pull: (repo: string, number: number) => call<Pulls>("POST", `/api/pulls/${repo}/${number}`),
+  pullStartOptions: (p: PullRequest, ident: string) =>
+    call<PullStartOptions>("GET", `/api/pulls/${p.repo}/${p.number}/start?ident=${encodeURIComponent(ident)}`),
+  reviewInPeriscope: (p: PullRequest, body: { repo: string; prompt: string; title: string; ticket: string; ticket_title: string }) =>
+    call<PeriscopeStart>("POST", `/api/pulls/${p.repo}/${p.number}/periscope`, body),
+  reviewInClaudeCode: (p: PullRequest, body: { repo: string; prompt: string; title: string }) =>
+    call<ClaudeCodeStart>("POST", `/api/pulls/${p.repo}/${p.number}/claude-code`, body),
   pullWeeks: () => call<PullWeeks>("GET", "/api/pulls/weekly"),
   editIssue: (id: string, edit: IssueEdit) => call<Issue>("PATCH", `/api/issues/${encodeURIComponent(id)}`, edit),
   /** Move an issue to Linear's trash (restorable there for 30 days); it also leaves Today. */

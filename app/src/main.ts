@@ -14,7 +14,7 @@ import { CATEGORIES, CATEGORY_NAME, categoryIcon, clientLogo, ensureLogos, group
 import type { Category } from "./avatars";
 import { closedType, dueLabel, isoDay, isOpen, localToday, when } from "./issues";
 import { detailBody, details, loadDetail, paneKey, postToUndoIn, rebuildKeepingPane, setDescription, setupPane, titleField } from "./pane";
-import { closeStart, dismissStart, forgetStart, isStartOpen, setupStart, startItems, startPopover } from "./start";
+import { closeStart, dismissStart, forgetStart, isStartOpen, reviewTargets, setupStart, startItems, startPopover } from "./start";
 import { renderMarkdown } from "./markdown";
 import { installUpdate, RELEASES_URL, update, watchForUpdates } from "./update";
 
@@ -3460,6 +3460,7 @@ setupPulls({
   rerender: () => { if (state.tab === "pulls" && !editing()) render(); else renderHeader(); },
   toast: (m) => void toast(m),
   issues: () => state.issues,
+  meta: () => state.meta,
 });
 
 const settingsCtx: SettingsCtx = {
@@ -3580,7 +3581,8 @@ async function submitCapture() {
 }
 
 // ---- keyboard -----------------------------------------------------------------------------------
-const SHORTCUTS: [string, string][] = [
+// The third part says when the key is on; a key without one always is.
+const SHORTCUTS: [string, string, (() => boolean)?][] = [
   ["j / k", "Next / previous task or pull request"],
   ["a or ⌘↩", "Approve (or close / post / track); on a linked card, do its pick"],
   ["d, then 1–5", "Drop, with a reason (on a linked card: pick Drop)"],
@@ -3592,7 +3594,8 @@ const SHORTCUTS: [string, string][] = [
   ["⇧⌘R", "Reload: restart the backend and the window after a code change"],
   ["e", "Edit the title (an Inbox card, or the issue in Today, Client and Dev)"],
   ["⇧E · ⇧S · ⇧C", "Today, Client, Dev: edit the description · add a sub-issue · comment (⌘↵ posts)"],
-  ["p", "Today, Client, Dev: start the issue in periscope (a worktree, Claude and a prompt)"],
+  ["p", "Today, Client, Dev: start the issue in periscope (a worktree, Claude and a prompt)", () => !!state.meta?.periscope],
+  ["p", "Pull requests (To review): review the selected pull request (a worktree, Claude and a prompt)", () => reviewTargets(state.meta).length > 0],
   ["c", "Capture a task"],
   ["/", "Filter"],
   ["⌘1 – ⌘7", "Inbox, Today, Client, Dev, Pull requests, Insights, Settings (also ⌘,)"],
@@ -3641,7 +3644,7 @@ function focusedCard(): HTMLElement | null {
 
 function showShortcuts() {
   modal("Keyboard shortcuts", h("table", { class: "stats" },
-    h("tbody", {}, ...SHORTCUTS.filter(([k]) => k !== "p" || state.meta?.periscope).map(([k, v]) => h("tr", {}, h("td", {}, h("kbd", {}, k)), h("td", {}, v))))));
+    h("tbody", {}, ...SHORTCUTS.filter(([, , isOn]) => !isOn || isOn()).map(([k, v]) => h("tr", {}, h("td", {}, h("kbd", {}, k)), h("td", {}, v))))));
 }
 
 // Swapping what's under the pointer before it's released would lose the click.

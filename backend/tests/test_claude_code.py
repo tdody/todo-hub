@@ -143,6 +143,165 @@ def test_a_folder_in_no_repo_is_an_error(tmp_path):
         claude_code.find_or_add_worktree(str(tmp_path), "me/eng-1")
 
 
+@pytest.mark.parametrize("url, slug", [
+    ("git@github.com:acme/api.git", "acme/api"),
+    ("https://github.com/acme/api.git", "acme/api"),
+    ("https://github.com/acme/api", "acme/api"),
+    ("ssh://git@github.com/acme/api.git", "acme/api"),
+    ("https://gitlab.com/acme/api.git", None),
+])
+def test_github_slug_is_the_owner_and_name_of_origin(git_repo, url, slug):
+    git("remote", "set-url", "origin", url, cwd=git_repo)
+    assert claude_code.github_slug(str(git_repo)) == slug
+
+
+def test_github_slug_is_none_with_no_origin_and_no_folder(git_repo):
+    git("remote", "remove", "origin", cwd=git_repo)
+    assert claude_code.github_slug(str(git_repo)) is None
+    assert claude_code.github_slug(str(git_repo.parent / "gone")) is None
+
+
+@pytest.fixture
+def push_pr(git_repo):
+    """``push_pr(text)`` adds a commit that writes ``text`` in ``f`` to PR 812 on origin, and gives its sha."""
+    author = git_repo.parent / "author"
+    git("clone", "-q", str(git_repo.parent / "origin.git"), str(author), cwd=git_repo.parent)
+
+    def push(text: str) -> str:
+        (author / "f").write_text(text)
+        git("add", "f", cwd=author)
+        git("commit", "-q", "-m", text, cwd=author)
+        git("push", "-q", "--force", "origin", "HEAD:refs/pull/812/head", cwd=author)
+        return git("rev-parse", "HEAD", cwd=author).strip()
+
+    return push
+
+
+def head_of(path: str) -> str:
+    return git("rev-parse", "HEAD", cwd=Path(path)).strip()
+
+
+def test_a_pr_gets_a_worktree_on_its_head(git_repo, push_pr):
+    sha = push_pr("one")
+    path, reused, warnings = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert path == str(git_repo.parent / "api-worktrees" / "pr-812") and not reused and warnings == []
+    assert branch_of(path) == "pr-812" and head_of(path) == sha
+    assert upstream(path) is None            # so a push has no default target
+
+
+def test_a_worktree_already_on_the_pr_moves_to_its_head(git_repo, push_pr):
+    push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    sha = push_pr("two")
+    assert claude_code.find_or_add_pr_worktree(str(git_repo), 812) == (path, True, [])
+    assert head_of(path) == sha
+
+
+def test_local_changes_that_block_the_fast_forward_stay(git_repo, push_pr):
+    old = push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    push_pr("two")
+    (Path(path) / "f").write_text("mine")
+    _, reused, [warning] = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert reused and warning.startswith("pr-812 may be behind #812: error: Your local changes")
+    assert (Path(path) / "f").read_text() == "mine" and head_of(path) == old
+
+
+def test_a_pr_worktree_that_diverged_stays(git_repo, push_pr):
+    push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    git("commit", "-q", "--allow-empty", "-m", "mine", cwd=Path(path))
+    mine = head_of(path)
+    push_pr("two")
+    assert claude_code.find_or_add_pr_worktree(str(git_repo), 812) == (
+        path, True, ["pr-812 may be behind #812: fatal: Not possible to fast-forward, aborting."])
+    assert head_of(path) == mine
+
+
+def test_the_fast_forward_keeps_a_local_file_that_gitignore_lists(git_repo, push_pr):
+    old = push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    (git_repo / ".git" / "info" / "exclude").write_text("notes.txt\n")
+    (Path(path) / "notes.txt").write_text("mine")
+    author = git_repo.parent / "author"
+    (author / "notes.txt").write_text("theirs")
+    git("add", "notes.txt", cwd=author)
+    push_pr("two")
+    _, _, [warning] = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert warning.startswith("pr-812 may be behind #812: error: The following untracked working tree files")
+    assert (Path(path) / "notes.txt").read_text() == "mine" and head_of(path) == old
+
+
+def test_a_hook_in_the_prs_tree_does_not_run(git_repo, push_pr, tmp_path):
+    git("config", "core.hooksPath", ".husky", cwd=git_repo)
+    hooks, ran = git_repo.parent / "author" / ".husky", tmp_path / "ran"
+    hooks.mkdir()
+    for name in ("post-checkout", "post-merge"):
+        (hooks / name).write_text(f"#!/bin/sh\necho {name} >> {ran}\n")
+        (hooks / name).chmod(0o755)
+    git("add", ".husky", cwd=hooks.parent)
+    push_pr("one")
+    claude_code.find_or_add_pr_worktree(str(git_repo), 812)       # git worktree add runs post-checkout
+    push_pr("two")
+    claude_code.find_or_add_pr_worktree(str(git_repo), 812)       # git merge runs post-merge
+    assert not ran.exists()
+
+
+def test_a_diverged_local_branch_with_no_worktree_stays(git_repo, push_pr):
+    push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    git("commit", "-q", "--allow-empty", "-m", "mine", cwd=Path(path))
+    mine = head_of(path)
+    git("worktree", "remove", path, cwd=git_repo)
+    push_pr("two")
+    again, reused, [warning] = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert again == path and not reused and head_of(path) == mine
+    assert warning.startswith("pr-812 may be behind #812: ") and "(non-fast-forward)" in warning
+
+
+@pytest.fixture
+def slow_fetch(monkeypatch):
+    """Call it, and each fetch takes too long."""
+    real = claude_code._git
+
+    def slow(repo, *args, timeout=claude_code.QUICK_SECONDS):
+        if "fetch" in args:
+            raise subprocess.TimeoutExpired("git", timeout)
+        return real(repo, *args, timeout=timeout)
+
+    return lambda: monkeypatch.setattr(claude_code, "_git", slow)
+
+
+def test_a_slow_fetch_is_a_warning(git_repo, push_pr, slow_fetch):
+    push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    slow_fetch()
+    assert claude_code.find_or_add_pr_worktree(str(git_repo), 812) == (
+        path, True, ["pr-812 may be behind #812: git fetch took more than 30 s."])
+    _, _, warnings = claude_code.find_or_add_worktree(str(git_repo), "me/eng-2")
+    assert warnings == ["Could not fetch origin. The worktree uses the local branches."]
+
+
+def test_a_pr_that_cannot_be_fetched_uses_the_local_branch(git_repo, push_pr):
+    sha = push_pr("one")
+    path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    git("worktree", "remove", path, cwd=git_repo)
+    git("remote", "set-url", "origin", str(git_repo.parent / "gone.git"), cwd=git_repo)
+    again, reused, [warning] = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
+    assert again == path and not reused and head_of(path) == sha
+    assert warning.startswith("pr-812 may be behind #812: fatal: ")
+
+
+def test_a_pr_that_cannot_be_fetched_and_has_no_local_branch_is_an_error(git_repo):
+    with pytest.raises(StartError, match="couldn't find remote ref pull/9/head"):
+        claude_code.find_or_add_pr_worktree(str(git_repo), 9)
+
+
+def test_a_pr_in_a_folder_in_no_repo_is_an_error(tmp_path):
+    with pytest.raises(StartError, match="Not a git repo: "):
+        claude_code.find_or_add_pr_worktree(str(tmp_path), 812)
+
+
 def test_a_git_worktree_add_error_carries_gits_message(git_repo):
     taken = git_repo.parent / "api-worktrees" / "me-eng-5"
     taken.mkdir(parents=True)
@@ -254,7 +413,7 @@ def env(git_repo, opened):
     db = DB(settings.db_path)
     linear = FakeLinear()
     app = create_app(settings, db, linear_factory=lambda: linear,
-                     name_fn=lambda issue: f"{issue['identifier'].lower()}-rebin")
+                     name_fn=lambda ident, title: f"{ident.lower()}-rebin")
     return SimpleNamespace(client=TestClient(app), db=db, linear=linear, settings=settings, repo=git_repo,
                            opened=opened, start={"repo": str(git_repo), "branch": " me/eng-1 ", "prompt": "Read ENG-1."})
 
@@ -358,3 +517,63 @@ def test_meta_says_whether_claude_code_is_on(git_repo):
         settings.repos = repos
         app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear)
         assert TestClient(app).get("/api/meta").json()["claude_code"] is expected
+
+
+PULL = "/api/pulls/acme/api/812"
+
+
+def test_pull_options_list_the_settings_repos_of_the_pr(env, monkeypatch):
+    monkeypatch.setenv("HOME", str(env.repo.parent))
+    git("remote", "set-url", "origin", "git@github.com:Acme/api.git", cwd=env.repo)
+    here = {"repos": [{"repo": str(env.repo), "label": "~/api"}], "branch_worktrees": [], "error": ""}
+    assert env.client.get(f"{PULL}/start").json()["targets"] == {"claude-code": here}
+    git("worktree", "add", "-q", "-b", "pr-812", str(env.repo.parent / "other"), cwd=env.repo)
+    assert env.client.get(f"{PULL}/start").json()["targets"] == {
+        "claude-code": {**here, "branch_worktrees": [str(env.repo)]}}
+    assert env.client.get("/api/pulls/acme/web/812/start").json()["targets"] == {
+        "claude-code": {"repos": [], "branch_worktrees": [], "error": ""}}
+
+
+def test_pull_start_opens_claude_code_on_the_pr(env, push_pr):
+    sha = push_pr("one")
+    r = env.client.post(f"{PULL}/claude-code", json={"repo": str(env.repo), "prompt": "Review it.", "title": "Retry"})
+    assert r.status_code == 200
+    out = r.json()
+    path = str(env.repo.parent / "api-worktrees" / "pr-812")
+    assert out == {"path": path, "reused": False, "session_id": out["session_id"], "warnings": []}
+    assert head_of(path) == sha
+    [script] = env.opened
+    assert script == env.settings.home / "start" / "api-pr-812.command"
+    assert f" --name pr-812-rebin --session-id {out['session_id']} -- 'Review it.'" in script.read_text()
+    # The issue can be the PR author's, and the PR chose the repo.
+    assert env.linear.comments == []
+    assert env.db.get_meta(REPOS_KEY) is None and env.db.get_meta(LAST_REPO_KEY) is None
+
+
+def test_pull_start_in_a_repo_not_on_the_settings_list_is_a_400(env):
+    r = env.client.post(f"{PULL}/claude-code", json={"repo": "/elsewhere", "prompt": "Review it.", "title": "Retry"})
+    assert r.status_code == 400 and r.json() == {"error": "Pick a repo from the Settings list."}
+    assert env.opened == []
+
+
+def test_pull_start_that_git_refuses_is_a_502_and_nothing_opens(env):
+    r = env.client.post(f"{PULL}/claude-code", json={"repo": str(env.repo), "prompt": "Review it.", "title": "Retry"})
+    assert r.status_code == 502 and "couldn't find remote ref pull/812/head" in r.json()["error"]
+    assert env.opened == []
+
+
+def test_pull_start_is_404_when_no_repo_is_set(opened):
+    settings = load_settings()
+    client = TestClient(create_app(settings, DB(settings.db_path), linear_factory=FakeLinear))
+    r = client.post(f"{PULL}/claude-code", json={"repo": "/x", "prompt": "p", "title": "t"})
+    assert r.status_code == 404 and opened == []
+
+
+def test_pull_start_names_the_claude_for_the_pr(git_repo, push_pr, opened):
+    push_pr("one")
+    settings, named = load_settings(), []
+    settings.repos = [str(git_repo)]
+    app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
+                     name_fn=lambda ident, title: named.append((ident, title)) or "pr-812")
+    TestClient(app).post(f"{PULL}/claude-code", json={"repo": str(git_repo), "prompt": "Review it.", "title": "Retry"})
+    assert named == [("pr-812", "Retry")]
