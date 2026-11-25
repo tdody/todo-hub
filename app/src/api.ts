@@ -331,7 +331,7 @@ export interface PeriscopePr {
 export interface StartSettings {
   repos: { repo: string; label: string }[];   // absolute top folders; the label shows ~
   code_prompt: string;                        // Start in periscope and Start in Claude Code
-  review_prompt: string;                      // Start in periscope, for a review ticket's PR
+  review_prompt: string;                      // Review in To review, and Start in periscope for a review ticket's PR
   chat_prompt: string;                        // Start in Claude Desktop
   default_code_prompt: string;
   default_review_prompt: string;

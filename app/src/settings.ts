@@ -392,7 +392,7 @@ function startSection(ctx: SettingsCtx): HTMLElement {
       repoError ? h("p", { class: "set-sub bad", role: "alert" }, repoError) : ""),
     promptField("code", "Code prompt", "Start in periscope and Start in Claude Code send it to the new Claude.", ctx),
     promptField("review", "Review prompt",
-      "Review in To review sends it, and Start in periscope for a review ticket whose GitHub PR is in a periscope repo. {pr} becomes the PR's link. For a PR with no ticket, Review leaves out each sentence that names {identifier}, {title} or {url}.", ctx),
+      "Review in To review sends it, and Start in periscope for a review ticket whose GitHub PR is in a periscope repo. {pr} becomes the PR's link. For a PR with no Linear issue, Review leaves out each sentence that names {identifier}, {title} or {url}.", ctx),
     promptField("chat", "Chat prompt", "Start in Claude Desktop puts it in a new chat. It cannot start with /.", ctx));
 }
 

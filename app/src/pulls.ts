@@ -7,7 +7,8 @@ import type { Issue, Meta, PullRequest, Pulls } from "./api";
 import { groupMark } from "./avatars";
 import type { Group } from "./avatars";
 import { h, loadPref, pageHead, savePref, svg } from "./dom";
-import { forgetStart, openReview, reviewedPull, reviewPopover, reviewTargets } from "./start";
+import { rebuildKeepingPane } from "./pane";
+import { forgetStart, openReview, popoverPull, reviewPopover, reviewTargets } from "./start";
 
 export interface PullsCtx {
   /** Render the page again when this tab shows, else only the sidebar (for its count). */
@@ -279,13 +280,13 @@ function commentsCell(comments: number, open: number): Node {
 }
 
 /** Review shows in To review when periscope or Claude Code can start one. */
-const hasReview = () => st.side === "review" && reviewTargets(ctx.meta()).length > 0;
+const showsReview = () => st.side === "review" && reviewTargets(ctx.meta()).length > 0;
 
 function stepCell(p: PullRequest): Node {
   if (st.side === "review") {
     const ms = since(p.asked_at);
     return h("div", { class: "rv-line" }, h("span", { class: ms >= 3 * DAY ? "step amb" : "mute" }, long(ms)),
-      hasReview() && h("button", { type: "button", class: "rv-btn", "data-act": "review", tabindex: "-1",
+      showsReview() && h("button", { type: "button", class: "rv-btn", "data-act": "review", tabindex: "-1",
         "aria-haspopup": "dialog", "aria-label": `Review #${p.number}` }, "Review"));
   }
   const s = stepOf(p);
@@ -625,7 +626,7 @@ function panel(): HTMLElement {
   const order = [...listed.flatMap((u) => (isFolded(u) ? [] : u.all)), ...(st.fold ? folded : [])].map(keyOf);
   if (!st.sel || !order.includes(st.sel)) st.sel = order[0] ?? null;
 
-  const reviewed = reviewedPull(), isReviewed = side === "review" && !!reviewed && order.includes(keyOf(reviewed));
+  const reviewing = popoverPull();
   const rows = us.length > 0 || folded.length > 0;
   const empty = !d ? (st.loading ? [h("span", { class: "spinner" }), "Reading your pull requests from GitHub…"] : [])
     : q ? [`No pull request matches “${st.filter.trim()}”.`, h("br"), h("button", { class: "secondary", "data-clear": "" }, "Clear the filter")]
@@ -635,24 +636,20 @@ function panel(): HTMLElement {
   return h("div", { id: "pr-panel", role: "tabpanel", "aria-labelledby": `tab-${side}` },
     banner(),
     strip(base, !!d),
-    rows ? h("div", { class: "pr-wrap" }, table(us, folded, secs), isReviewed && reviewPopover())
+    rows ? h("div", { class: "pr-wrap" }, table(us, folded, secs), reviewing && order.includes(keyOf(reviewing)) && reviewPopover())
       : h("div", { class: "empty pr-empty" }, ...empty),
     rows && h("p", { class: "pr-hint" }, kbd("j"), kbd("k"), " move · ", kbd("Space"), " opens or closes · ",
-      hasReview() && kbd("p"), hasReview() && " review · ", kbd("o"), " GitHub · ",
+      showsReview() && kbd("p"), showsReview() && " review · ", kbd("o"), " GitHub · ",
       kbd("l"), " Linear · ", side === "mine" && kbd("g"), side === "mine" && " groups · ",
       kbd("1"), "–", kbd(String(VIEWS[side].length)), " pick a view · ", kbd("?"), " all keys"));
 }
 
 type Focus = { on: "filter"; from: number | null; to: number | null } | { on: "act"; act: string; key: string | null }
-  | { on: "start"; field: string; from: number | null; to: number | null }
-  | { on: "stack"; id: string } | { on: "section"; key: string } | { on: "table" } | { on: "tab" } | null;
+  | { on: "start" } | { on: "stack"; id: string } | { on: "section"; key: string } | { on: "table" } | { on: "tab" } | null;
 function focusNow(): Focus {
   const a = document.activeElement;
   if (a === filterInput) return { on: "filter", from: filterInput.selectionStart, to: filterInput.selectionEnd };
-  if (a instanceof HTMLElement && a.closest(".start-pop")) {
-    const text = a instanceof HTMLTextAreaElement ? a : null;
-    return { on: "start", field: a.dataset.focus ?? a.dataset.edit ?? "", from: text?.selectionStart ?? null, to: text?.selectionEnd ?? null };
-  }
+  if (a?.closest(".start-pop")) return { on: "start" };
   if (a instanceof HTMLElement && a.dataset.act && root?.contains(a)) {
     return { on: "act", act: a.dataset.act, key: a.closest<HTMLElement>("tr")?.dataset.key ?? null };
   }
@@ -669,11 +666,10 @@ function refocus(f: Focus) {
     filterInput.focus();
     if (f.from !== null) filterInput.setSelectionRange(f.from, f.to);
   } else if (f?.on === "start") {
-    const pop = root?.querySelector(".start-pop"), field = CSS.escape(f.field);
-    if (!pop) return focusSel(false);
-    const el = pop.querySelector<HTMLElement>(`[data-focus="${field}"], [data-edit="${field}"]`);
-    el?.focus({ preventScroll: true });
-    if (el instanceof HTMLTextAreaElement && f.from !== null) el.setSelectionRange(f.from, f.to);
+    // rebuildKeepingPane gave a field its focus back; Start has none while it is disabled.
+    const pop = root?.querySelector<HTMLElement>(".start-pop");
+    if (!pop) focusSel(false);
+    else if (!pop.contains(document.activeElement)) pop.focus({ preventScroll: true });
   } else if (f?.on === "act") {
     const row = f.key ? `tr[data-key="${CSS.escape(f.key)}"] ` : "";
     root?.querySelector<HTMLElement>(`${row}[data-act="${f.act}"]`)?.focus();
@@ -696,15 +692,19 @@ function lastRead(): number {
  *  5 minutes; it asks at most once a minute, for when the backend does not answer. */
 export function pullsView(): HTMLElement {
   if (!st.loading && Date.now() - lastRead() > READ_EVERY && Date.now() - st.askedAt > MIN) void loadPulls();
-  const f = focusNow();
+  const f = focusNow(), y = root?.isConnected ? window.scrollY : null;
   root = h("div", { class: "prs", onclick: onClick, onmouseover: onHover, onmouseleave: onHover, onfocusin: onFocusIn }, head(), panel());
-  queueMicrotask(() => { placeReview(); refocus(f); });      // once the page is in the window
+  queueMicrotask(() => {                      // once the page is in the window
+    placeReview();
+    if (y !== null) window.scrollTo(0, y);
+    refocus(f);
+  });
   return root;
 }
 
 /** Put Review's popover under its row, and let the page grow to show all of it. */
 function placeReview() {
-  const pop = root?.querySelector<HTMLElement>(".pr-wrap > .start-pop"), p = reviewedPull();
+  const pop = root?.querySelector<HTMLElement>(".pr-wrap > .start-pop"), p = popoverPull();
   const row = p && root?.querySelector<HTMLElement>(`tr.pr-row[data-key="${CSS.escape(keyOf(p))}"]`);
   if (!pop || !row) return;
   const top = row.offsetTop + row.offsetHeight - 4;
@@ -712,12 +712,13 @@ function placeReview() {
   pop.parentElement!.style.setProperty("--pop-bottom", `${top + pop.offsetHeight}px`);
 }
 
-/** Draw the tab again in place, keeping the focus where it was. */
+/** Draw the tab again in place, keeping the focus and the scroll where they were. */
 function paint() {
   if (!root?.isConnected) return;
-  const f = focusNow();
-  root.replaceChildren(head(), panel());
+  const f = focusNow(), y = window.scrollY;
+  rebuildKeepingPane(() => root!.replaceChildren(head(), panel()));
   placeReview();
+  window.scrollTo(0, y);
   refocus(f);
 }
 
@@ -835,7 +836,7 @@ function act(kind: string, p: PullRequest | undefined) {
     else ctx.toast("No Linear issue in the branch name or title.");
   } else if (kind === "review") {
     st.sel = keyOf(p);
-    void openReview(p, linearOf(p)?.ident ?? "", reviewTargets(ctx.meta()));
+    void openReview(p, linearOf(p)?.ident ?? "");
   } else if (kind === "refresh") void refreshOne(p);
   else if (kind === "copy") {
     navigator.clipboard.writeText(p.head).then(() => ctx.toast(`Copied ${p.head}`), () => ctx.toast("Could not copy the branch name."));
@@ -925,7 +926,7 @@ export function pullsKey(e: KeyboardEvent): boolean {
       paint();
       return true;
     case "p":
-      if (!hasReview()) return false;
+      if (!showsReview()) return false;
       act("review", prOf(st.sel));
       return true;
     case "o": act("gh", prOf(st.sel)); return true;
