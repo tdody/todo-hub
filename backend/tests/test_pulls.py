@@ -28,7 +28,7 @@ def thread(starter, resolved=False, comments=1, body="Rename it.", path="api/rep
 
 
 def pr(number, title="Report list page", head="thib/eng-716-report-list", base="main", draft=False, decision=None,
-       rollup=None, comments=(), threads=(), requests=(), reviews=(), asked=(), mergeable="MERGEABLE", unread=0):
+       rollup=None, comments=(), threads=(), requests=(), reviews=(), asked=(), mergeable="MERGEABLE", unread=0, reviewed_at=None):
     return {
         "number": number, "title": title, "url": f"https://github.com/initech/platform/pull/{number}",
         "isDraft": draft, "createdAt": "2026-11-01T10:00:00Z", "updatedAt": "2026-11-13T10:00:00Z",
@@ -39,6 +39,7 @@ def pr(number, title="Report list page", head="thib/eng-716-report-list", base="
         "reviewThreads": {"totalCount": len(threads) + unread, "nodes": list(threads)},
         "reviewRequests": {"nodes": [{"requestedReviewer": r} for r in requests]},
         "latestReviews": {"nodes": [{"author": a, "state": s, "submittedAt": "2026-11-12T10:00:00Z"} for a, s in reviews]},
+        "viewerLatestReview": reviewed_at and {"submittedAt": reviewed_at},
         "timelineItems": {"nodes": [{"createdAt": at, "requestedReviewer": r} for r, at in asked]},
         "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]},
     }
@@ -59,7 +60,7 @@ import json, pathlib, sys
 tmp, args = pathlib.Path(__file__).parent, sys.argv[1:]
 ids = [a.removeprefix("ids[]=") for a in args if a.startswith("ids[]=")]
 call = (f"nodes={len(ids)}" if ids else "one" if any(a.startswith("owner=") for a in args)
-        else "weekly" if any("reviewed-by" in a for a in args) else "search")
+        else "weekly" if any("is:merged" in a for a in args) else "search")
 with open(tmp / "calls.txt", "a") as f:
     print(call, file=f)
 if ids:
@@ -70,16 +71,16 @@ else:
 """
 
 
-def fake_gh(tmp_path, settings, mine=(), review=()):
+def fake_gh(tmp_path, settings, mine=(), review=(), reviewed=()):
     """A gh that answers the search and the reads by id for the given pull requests, and logs each call in
     calls.txt ("search", "nodes=<ids>", "one" or "weekly"). A read of one pull request prints one.json,
     and the weekly read prints weekly.json."""
     (tmp_path / "search.json").write_text(json.dumps({"data": {
         "viewer": {"login": ME},
         **{side: {"issueCount": len(prs), "nodes": [{"id": f"PR_{p['number']}"} for p in prs]}
-           for side, prs in (("mine", mine), ("review", review))},
+           for side, prs in (("mine", mine), ("review", review), ("reviewed", reviewed))},
     }}))
-    (tmp_path / "prs.json").write_text(json.dumps({f"PR_{p['number']}": p for p in [*mine, *review]}))
+    (tmp_path / "prs.json").write_text(json.dumps({f"PR_{p['number']}": p for p in [*mine, *review, *reviewed]}))
     gh = tmp_path / "gh"
     gh.write_text(f"#!{sys.executable} -S\n{FAKE_GH}")
     gh.chmod(0o755)
@@ -124,25 +125,35 @@ def test_read_shapes_mine(settings, tmp_path):
 def test_read_review_requests(settings, tmp_path):
     team = {"__typename": "Team", "name": "platform"}
     fake_gh(tmp_path, settings, review=[
-        pr(5, requests=[person(ME)], reviews=[(person(ME), "COMMENTED")],
+        pr(5, requests=[person(ME)], reviewed_at="2026-11-05T10:00:00Z",     # latestReviews leaves out who is asked again
            asked=[(person(ME), "2026-11-02T10:00:00Z"), (person(ME), "2026-11-11T10:00:00Z")]),
         pr(6, requests=[team], asked=[(team, "2026-11-09T10:00:00Z")]),
         pr(7, requests=[team]),
     ])
     five, six, seven = pulls.read(settings)["review"]
-    assert five["asked_at"] == "2026-11-11T10:00:00Z" and five["reviewed_before"]
-    assert six["asked_at"] == "2026-11-09T10:00:00Z" and not six["reviewed_before"]
+    assert five["asked_at"] == "2026-11-11T10:00:00Z" and five["reviewed_at"] == "2026-11-05T10:00:00Z"
+    assert six["asked_at"] == "2026-11-09T10:00:00Z" and six["reviewed_at"] is None
     assert seven["asked_at"] == "2026-11-01T10:00:00Z"       # no request event: when it was opened
+
+
+def test_read_reviewed(settings, tmp_path):
+    fake_gh(tmp_path, settings, review=[pr(5)], reviewed=[pr(8, reviewed_at="2026-11-12T10:00:00Z"), pr(9)])
+    d = pulls.read(settings)
+    assert [p["number"] for p in d["review"]] == [5] and d["review_total"] == 1
+    # your only review of #9 is not submitted yet
+    assert [(p["number"], p["reviewed_at"]) for p in d["reviewed"]] == [(8, "2026-11-12T10:00:00Z")] and d["reviewed_total"] == 1
 
 
 def test_read_asks_github_for_10_pull_requests_at_a_time(settings, tmp_path):
     # GitHub stops a query after about 10 seconds; 47 pull requests in one query took 11.
-    calls = fake_gh(tmp_path, settings, mine=[pr(n) for n in range(1, 24)], review=[pr(n) for n in range(30, 33)])
+    calls = fake_gh(tmp_path, settings, mine=[pr(n) for n in range(1, 24)], review=[pr(n) for n in range(30, 33)],
+                    reviewed=[pr(n, reviewed_at="2026-11-12T10:00:00Z") for n in range(40, 46)])
     d = pulls.read(settings)
     assert [p["number"] for p in d["mine"]] == list(range(1, 24))     # in the search's order
     assert [p["number"] for p in d["review"]] == [30, 31, 32]
+    assert [p["number"] for p in d["reviewed"]] == list(range(40, 46))
     assert d["mine_total"] == 23 and d["review_total"] == 3
-    assert sorted(calls.read_text().split()) == ["nodes=10", "nodes=10", "nodes=6", "search"]
+    assert sorted(calls.read_text().split()) == ["nodes=10", "nodes=10", "nodes=10", "nodes=2", "search"]
 
 
 def test_pulls_endpoint_caches_and_keeps_the_last_read(settings, tmp_path):
@@ -160,7 +171,8 @@ def test_pulls_endpoint_caches_and_keeps_the_last_read(settings, tmp_path):
 
 
 def test_refresh_one_pull_request(settings, tmp_path):
-    fake_gh(tmp_path, settings, mine=[pr(1, head="thib/a"), pr(2, head="thib/b", base="thib/a")], review=[pr(5)])
+    fake_gh(tmp_path, settings, mine=[pr(1, head="thib/a"), pr(2, head="thib/b", base="thib/a")], review=[pr(5)],
+            reviewed=[pr(8, reviewed_at="2026-11-12T10:00:00Z")])
     client = TestClient(create_app(settings, DB(settings.db_path)))
     assert client.post("/api/pulls/initech/platform/2").status_code == 409      # no list read yet
     read_at = client.get("/api/pulls").json()["read_at"]
@@ -177,6 +189,8 @@ def test_refresh_one_pull_request(settings, tmp_path):
     body = again(1, state="MERGED").json()
     assert [p["number"] for p in body["mine"]] == [2] and body["mine_total"] == 1
     assert again(5, title="Rename the export").json()["review"][0]["title"] == "Rename the export"
+    body = again(8, state="MERGED").json()
+    assert body["reviewed"] == [] and body["reviewed_total"] == 0
 
     (tmp_path / "gh").write_text("#!/bin/sh\necho 'GraphQL: Could not resolve to a PullRequest with the number of 9.' >&2\nexit 1\n")
     r = client.post("/api/pulls/initech/platform/9")

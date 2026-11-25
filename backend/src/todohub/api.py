@@ -1304,7 +1304,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         return pull_week_cache["data"]
 
     def pulls_payload() -> dict:
-        empty = {"login": None, "mine": [], "review": [], "mine_total": 0, "review_total": 0}
+        empty = {"login": None, "mine": [], "review": [], "reviewed": [], "mine_total": 0, "review_total": 0, "reviewed_total": 0}
         return {**(pull_cache["data"] or empty), "read_at": pull_cache["read_at"],
                 "error": pull_cache["error"], "error_at": pull_cache["error_at"]}
 
