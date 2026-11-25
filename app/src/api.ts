@@ -355,8 +355,8 @@ export type StartTarget = "periscope" | "claude-code";
 
 /** Review in To review: what its popover shows first. */
 export interface PullStartOptions {
-  ticket: { identifier: string; title: string } | null;   // the PR's ticket, as Linear gives it
-  ticket_hint: string;                          // why the prompt leaves the row's ticket out, or ""
+  issue: { identifier: string; title: string } | null;    // the one that the PR's row shows, as Linear gives it
+  issue_hint: string;                           // why the prompt leaves the row's issue out, or ""
   prompt: string;                               // the review prompt, filled in
   targets: Partial<Record<StartTarget, PullStartTarget>>;   // only the ones that are on
 }
@@ -647,8 +647,8 @@ export const api = {
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
   pulls: (refresh = false) => call<Pulls>("GET", `/api/pulls${refresh ? "?refresh=true" : ""}`),
   pull: (repo: string, number: number) => call<Pulls>("POST", `/api/pulls/${repo}/${number}`),
-  pullStartOptions: (p: PullRequest, ticket: string) =>
-    call<PullStartOptions>("GET", `/api/pulls/${p.repo}/${p.number}/start?ticket=${encodeURIComponent(ticket)}`),
+  pullStartOptions: (p: PullRequest, ident: string) =>
+    call<PullStartOptions>("GET", `/api/pulls/${p.repo}/${p.number}/start?ident=${encodeURIComponent(ident)}`),
   reviewInPeriscope: (p: PullRequest, body: { repo: string; prompt: string; title: string; ticket: string; ticket_title: string }) =>
     call<PeriscopeStart>("POST", `/api/pulls/${p.repo}/${p.number}/periscope`, body),
   reviewInClaudeCode: (p: PullRequest, body: { repo: string; prompt: string; title: string }) =>

@@ -122,12 +122,12 @@ Test, in `tests/routes/test_linear.py`: a `pr` start with no ticket answers "spa
 
 `owner`, `name` and `number` name the PR, as in `POST /api/pulls/{owner}/{name}/{number}`.
 
-- `GET /api/pulls/{owner}/{name}/{number}/start?ticket=ENG-123` gives what the popover shows first. `ticket` is optional.
+- `GET /api/pulls/{owner}/{name}/{number}/start?ident=ENG-123` gives what the popover shows first. `ident` is optional.
 
   ```
   {
-    "ticket": {"identifier", "title"} or null,
-    "ticket_hint": "",
+    "issue": {"identifier", "title"} or null,
+    "issue_hint": "",
     "prompt": "…",
     "targets": {
       "periscope":   {"repos": [{"repo", "label"}], "branch_worktrees": ["…"], "error": ""},
@@ -137,7 +137,7 @@ Test, in `tests/routes/test_linear.py`: a `pr` start with no ticket answers "spa
   ```
 
   `targets` has only the targets that are on. `repos` has only the repos whose origin is the PR's repo. `branch_worktrees` has the ones with a worktree on `pr-<N>`. `error` is periscope's error when its catalog cannot be read, else empty. The popover takes the targets from this answer. The match with the PR's repo ignores case.
-- `POST /api/pulls/{owner}/{name}/{number}/periscope` takes `{repo, prompt, title, ticket, ticket_title}`. `title` is the PR's title, for Claude's name. `ticket` and `ticket_title` come from the GET, and are empty with no ticket. It answers `{mode, pid, warnings}`, as the issue route does.
+- `POST /api/pulls/{owner}/{name}/{number}/periscope` takes `{repo, prompt, title, ticket, ticket_title}`. `title` is the PR's title, for Claude's name. `ticket` and `ticket_title` are periscope's fields. They come from the GET's `issue`, and are empty with none. It answers `{mode, pid, warnings}`, as the issue route does.
 - `POST /api/pulls/{owner}/{name}/{number}/claude-code` takes `{repo, prompt, title}`. It answers 400 for a repo that is not on the Settings list, because git and the script run only in a repo you listed. It answers `{path, reused, session_id, warnings}`.
 - The POST routes use `require_periscope` and `require_claude_code`, as the issue routes do.
 
@@ -146,7 +146,7 @@ Test, in `tests/routes/test_linear.py`: a `pr` start with no ticket answers "spa
 - `claude_code.py`: `catalog(repos)` gives the Settings repos in the shape of periscope's catalog. `github_slug(repo)` gives the `owner/name` of the repo's origin on GitHub, or None, for the URL forms that periscope reads (`git@github.com:`, `https://github.com/`, `ssh://git@github.com/`, with or without `.git`). `find_or_add_pr_worktree(repo, number)` gives `(path, reused, warnings)`. It shares the `git worktree add` step with `find_or_add_worktree`.
 - `periscope.py`: `pr_repos` gives a catalog's repos for a PR and the ones with a worktree on `pr-<N>`, for both targets. `review_prs` uses it too. `Periscope.start` sends `ticket` only when it has one.
 - `start.py`: the review prompt for a PR, with a ticket or with none.
-- `claude_name` takes `{"identifier": "PR-812", "title": <the PR's title>}`. Its prompt says "the work below", for an issue or a PR.
+- `claude_name` takes an ID and a title: an issue's, or `pr-812` and the PR's title. Its prompt says "the work below".
 
 ### App
 

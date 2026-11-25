@@ -27,12 +27,11 @@ class StartError(Exception):
     """A start that cannot go on. The routes answer 502 with its message."""
 
 
-def claude_name(settings: Settings, issue: dict) -> str:
-    """The new Claude's name, on periscope's rail or for ``claude --name``: the issue's ID (``pr-<N>`` for a PR) and
-    Haiku's 1 to 3 words for its title (``eng-123-grade-rebin``), or the ID alone when the title or Claude Code gives
-    no words."""
-    ident = issue["identifier"].lower()
-    title = safe_title(issue["title"])
+def claude_name(settings: Settings, ident: str, title: str) -> str:
+    """The new Claude's name, on periscope's rail or for ``claude --name``: the ID of the issue or PR and Haiku's 1 to 3
+    words for its title (``eng-123-grade-rebin``), or the ID alone when the title or Claude Code gives no words."""
+    ident = ident.lower()
+    title = safe_title(title)
     if not title:
         return ident
     prompt = (
@@ -46,12 +45,12 @@ def claude_name(settings: Settings, issue: dict) -> str:
     try:
         answer = str(run_claude_code(settings, cmd, NAME_SECONDS).get("result", ""))
     except ClaudeCodeError as exc:
-        log.warning("Haiku did not name %s: %s", issue["identifier"], exc)
+        log.warning("Haiku did not name %s: %s", ident, exc)
         return ident
     ascii_answer = unicodedata.normalize("NFKD", answer).encode("ascii", "ignore").decode()
     words = _WORD.findall(ascii_answer.lower())[:3]
     if not words:
-        log.warning("Haiku did not name %s: %s", issue["identifier"], answer[:200])
+        log.warning("Haiku did not name %s: %s", ident, answer[:200])
     return "-".join([ident, *words])
 
 
@@ -65,8 +64,8 @@ def fill_prompt(template: str, issue: dict, pr: str = "") -> str:
 
 
 def fill_review_prompt(template: str, issue: dict | None, pr: str) -> str:
-    """The review prompt for the PR at the URL ``pr``, and for ``issue``, its ticket. With no ticket, each sentence
-    that names one is left out, and each line that has no other sentence."""
+    """The review prompt for the PR at the URL ``pr``, and for ``issue``, the Linear issue that it names. With none, each
+    sentence that names an issue is left out, and each line that has no other sentence."""
     if issue:
         return fill_prompt(template, issue, pr=pr)
     lines = []

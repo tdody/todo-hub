@@ -413,7 +413,7 @@ def env(git_repo, opened):
     db = DB(settings.db_path)
     linear = FakeLinear()
     app = create_app(settings, db, linear_factory=lambda: linear,
-                     name_fn=lambda issue: f"{issue['identifier'].lower()}-rebin")
+                     name_fn=lambda ident, title: f"{ident.lower()}-rebin")
     return SimpleNamespace(client=TestClient(app), db=db, linear=linear, settings=settings, repo=git_repo,
                            opened=opened, start={"repo": str(git_repo), "branch": " me/eng-1 ", "prompt": "Read ENG-1."})
 
@@ -545,7 +545,7 @@ def test_pull_start_opens_claude_code_on_the_pr(env, push_pr):
     [script] = env.opened
     assert script == env.settings.home / "start" / "api-pr-812.command"
     assert f" --name pr-812-rebin --session-id {out['session_id']} -- 'Review it.'" in script.read_text()
-    # The ticket can be the PR author's, and the PR chose the repo.
+    # The issue can be the PR author's, and the PR chose the repo.
     assert env.linear.comments == []
     assert env.db.get_meta(REPOS_KEY) is None and env.db.get_meta(LAST_REPO_KEY) is None
 
@@ -574,6 +574,6 @@ def test_pull_start_names_the_claude_for_the_pr(git_repo, push_pr, opened):
     settings, named = load_settings(), []
     settings.repos = [str(git_repo)]
     app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
-                     name_fn=lambda issue: named.append(issue) or "pr-812")
+                     name_fn=lambda ident, title: named.append((ident, title)) or "pr-812")
     TestClient(app).post(f"{PULL}/claude-code", json={"repo": str(git_repo), "prompt": "Review it.", "title": "Retry"})
-    assert named == [{"identifier": "PR-812", "title": "Retry"}]
+    assert named == [("pr-812", "Retry")]

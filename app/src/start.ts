@@ -310,15 +310,15 @@ function focusReview() {
   });
 }
 
-/** ``ticket`` is the Linear issue that the PR's row shows, or "". */
-export async function openReview(pull: PullRequest, ticket: string) {
+/** ``ident`` is the Linear issue that the PR's row shows, or "". */
+export async function openReview(pull: PullRequest, ident: string) {
   if (review?.pull.url === pull.url) return;
   popover = null;
   const mine: Review = review = { pull, options: null, target: null, repo: "", prompt: "", starting: false };
   ctx.render();
   focusReview();
   try {
-    const o = await api.pullStartOptions(pull, ticket);
+    const o = await api.pullStartOptions(pull, ident);
     if (review !== mine) return;      // closed, or opened for another PR, meanwhile
     mine.options = o;
     mine.prompt = o.prompt;
@@ -341,10 +341,10 @@ function canReview(r: Review): boolean {
 async function startReview() {
   const r = review;
   if (!r?.options || !r.target || !canReview(r)) return;
-  const { pull, target } = r, { ticket } = r.options, body = { repo: r.repo, prompt: r.prompt, title: pull.title };
+  const { pull, target } = r, { issue } = r.options, body = { repo: r.repo, prompt: r.prompt, title: pull.title };
   await runStart(r, `${target}:${pull.url}`, () => (review?.pull.url === pull.url && review.target === target ? review : null),
     `#${pull.number}`, () => (target === "claude-code" ? api.reviewInClaudeCode(pull, body)
-      : api.reviewInPeriscope(pull, { ...body, ticket: ticket?.identifier ?? "", ticket_title: ticket?.title ?? "" })));
+      : api.reviewInPeriscope(pull, { ...body, ticket: issue?.identifier ?? "", ticket_title: issue?.title ?? "" })));
 }
 
 /** The PR that Review's popover is open for. */
@@ -376,7 +376,7 @@ export function reviewPopover(): HTMLElement | "" {
   const reasons = targets.filter((t) => !o.targets[t]!.repos.length).map((t) => h("p", { class: `${hintClass} off` },
     o.targets[t]!.error || `No repo in ${t === "periscope" ? "periscope" : "Settings"} has ${r.pull.repo} as its origin.`));
   return frame(`Review #${n}${only ? ` in ${TARGET_NAME[targets[0]]}` : ""}`, run,
-    o.ticket_hint ? h("p", { class: "start-hint lead" }, o.ticket_hint) : "",
+    o.issue_hint ? h("p", { class: "start-hint lead" }, o.issue_hint) : "",
     where,
     hint ? h("p", { class: hintClass }, hint) : "",
     ...reasons,

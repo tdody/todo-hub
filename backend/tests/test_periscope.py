@@ -198,7 +198,7 @@ def env(peri, linear):
     fronted = []
     app = create_app(settings, db, linear_factory=lambda: linear,
                      periscope_factory=lambda: Periscope(URL, transport=peri.transport),
-                     front_fn=fronted.append, name_fn=lambda issue: f"{issue['identifier'].lower()}-rebin")
+                     front_fn=fronted.append, name_fn=lambda ident, title: f"{ident.lower()}-rebin")
     return TestClient(app), db, fronted
 
 
@@ -474,34 +474,34 @@ PULL = "/api/pulls/acme/api/812"
 PULL_START = {"repo": "/dev/api", "prompt": "Review it.", "title": "Retry stuck uploads"}
 
 
-def test_pull_options_with_a_ticket(env, peri):
+def test_pull_options_with_an_issue(env, peri):
     client, _, _ = env
     peri.catalog = SLUGGED
-    r = client.get(f"{PULL}/start?ticket=ENG-1")
+    r = client.get(f"{PULL}/start?ident=ENG-1")
     assert r.status_code == 200 and r.json() == {
-        "ticket": {"identifier": "ENG-1", "title": "Rebin Globex grades"},
-        "ticket_hint": "",
+        "issue": {"identifier": "ENG-1", "title": "Rebin Globex grades"},
+        "issue_hint": "",
         "prompt": REVIEW_PROMPT.replace("ENG-3", "ENG-1"),
         "targets": {"periscope": {"repos": [{"repo": "/dev/api", "label": "api"}], "branch_worktrees": ["/dev/api"],
                                   "error": ""}},
     }
 
 
-def test_pull_options_with_no_ticket(env, peri):
+def test_pull_options_with_no_issue(env, peri):
     client, _, _ = env
     peri.catalog = SLUGGED
     o = client.get("/api/pulls/acme/ios/7/start").json()
-    assert o["ticket"] is None and o["ticket_hint"] == ""
+    assert o["issue"] is None and o["issue_hint"] == ""
     assert o["prompt"].startswith("Then review https://github.com/acme/ios/pull/7 in this worktree")
     assert o["targets"] == {"periscope": {"repos": [], "branch_worktrees": [], "error": ""}}
 
 
-def test_pull_options_when_linear_does_not_give_the_ticket(env, peri):
+def test_pull_options_when_linear_does_not_give_the_issue(env, peri):
     client, _, _ = env
     peri.catalog = SLUGGED
-    o = client.get(f"{PULL}/start?ticket=ENG-9").json()
-    assert o["ticket"] is None
-    assert o["ticket_hint"] == "The prompt leaves ENG-9 out: Issue ENG-9 not found."
+    o = client.get(f"{PULL}/start?ident=ENG-9").json()
+    assert o["issue"] is None
+    assert o["issue_hint"] == "The prompt leaves ENG-9 out: Issue ENG-9 not found."
     assert o["prompt"].startswith(f"Then review {PR}")
 
 
@@ -529,7 +529,7 @@ def test_pull_start_sends_the_pr_and_its_ticket(env, peri, linear):
     assert peri.calls == [("POST", "/api/linear/start", {
         "repo": "/dev/api", "pr": 812, "ticket": "ENG-1", "title": "Rebin Globex grades", "prompt": "Review it.",
         "name": "pr-812-rebin"})]
-    # The ticket can be the PR author's, and the PR chose the repo.
+    # The issue can be the PR author's, and the PR chose the repo.
     assert linear.comments == []
     assert db.get_meta(REPOS_KEY) is None and db.get_meta(LAST_REPO_KEY) is None
 
@@ -545,9 +545,9 @@ def test_pull_start_names_the_claude_for_the_pr(peri):
     settings, named = settings_on(), []
     app = create_app(settings, DB(settings.db_path), linear_factory=FakeLinear,
                      periscope_factory=lambda: Periscope(URL, transport=peri.transport),
-                     name_fn=lambda issue: named.append(issue) or "pr-812")
+                     name_fn=lambda ident, title: named.append((ident, title)) or "pr-812")
     TestClient(app).post(f"{PULL}/periscope", json=PULL_START)
-    assert named == [{"identifier": "PR-812", "title": "Retry stuck uploads"}]
+    assert named == [("pr-812", "Retry stuck uploads")]
 
 
 def test_pull_start_carries_periscopes_warning(env, peri):
