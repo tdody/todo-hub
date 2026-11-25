@@ -281,15 +281,15 @@ class Linear:
         )
 
     def my_closed_issues(self, since_iso: str) -> list[dict]:
-        """Issues assigned to me that were completed or canceled (including duplicates merged
-        away) and touched since ``since_iso``."""
+        """Issues assigned to me that are closed (completed, canceled or duplicate) and were touched
+        since ``since_iso``."""
         return self._paginate(
             f"""
             query($after: String, $since: DateTimeOrDuration!) {{
               viewer {{
                 assignedIssues(
                   first: 100, after: $after,
-                  filter: {{ updatedAt: {{ gte: $since }}, state: {{ type: {{ in: ["completed", "canceled"] }} }} }}
+                  filter: {{ updatedAt: {{ gte: $since }}, state: {{ type: {{ in: ["completed", "canceled", "duplicate"] }} }} }}
                 ) {{
                   nodes {{ {ISSUE_FIELDS} }}
                   pageInfo {{ hasNextPage endCursor }}

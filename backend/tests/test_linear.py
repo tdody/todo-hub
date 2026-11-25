@@ -268,3 +268,16 @@ def test_my_issue_dates_asks_for_open_issues_and_the_ones_closed_since():
     assert ('or: [ { completedAt: { gte: $since } }, { canceledAt: { gte: $since } }, '
             '{ state: { type: { nin: ["completed", "canceled", "duplicate"] } } } ]') in query
     assert "createdAt completedAt canceledAt state { type }" in query
+
+
+def test_my_closed_issues_asks_for_every_closed_status_type():
+    calls = []
+
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"data": {"viewer": {"assignedIssues": {
+            "nodes": [{"id": "i1"}], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}})
+
+    assert Linear("lin_key", transport=transport(handler)).my_closed_issues("2026-11-10T00:00:00+00:00") == [{"id": "i1"}]
+    assert calls[0]["variables"] == {"since": "2026-11-10T00:00:00+00:00", "after": None}
+    assert 'state: { type: { in: ["completed", "canceled", "duplicate"] } }' in calls[0]["query"]
