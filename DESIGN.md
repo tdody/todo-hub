@@ -507,7 +507,7 @@ A card for a customer that has no client label yet. Approving it creates the lab
 
 - **List item:** no border or fill at rest; hover shows a 60% Paper wash; selected becomes Paper with an accent-tinted border, the Selected row shadow and a 600 title. One line of 12px meta under the title.
 - **Reading pane:** Paper, Hairline border, 12px corners, 16px × 18px padding. The ID (a link), client or project, the 18px title, then one row of pills and fields, then actions above a hairline, then sections under uppercase labels.
-- **Links in Markdown:** accent text with a 70% accent underline, 3px below the text. Hover makes the line full accent and 2px thick. Never color alone: the accent is too close to Ink.
+- **Links in Markdown:** accent text with a 75% accent underline, 3px below the text. Hover makes the line full accent and 2px thick. Never color alone: the accent is too close to Ink.
 
 ### The view strip (Pull requests)
 

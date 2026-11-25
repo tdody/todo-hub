@@ -18,6 +18,8 @@ function safeLink(text: Inline[], url: string): Inline {
   if (!SAFE_URL.test(u)) return h("span", {}, ...text);
   const a = link("", u, "link");
   a.replaceChildren(...text);
+  // A URL in the text is a link too: unwrap it, or one click opens both.
+  a.querySelectorAll("a").forEach((x) => x.replaceWith(...x.childNodes));
   a.title = u;
   return a;
 }
