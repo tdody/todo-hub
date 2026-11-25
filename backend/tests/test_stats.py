@@ -38,6 +38,24 @@ def test_balance_client_share():
     assert out["weeks"][0]["client_share"] is None and out["target"] == 0.5
 
 
+def test_issue_counts():
+    def issue(created, state="unstarted", completed=None, canceled=None):
+        return {"createdAt": created, "completedAt": completed, "canceledAt": canceled, "state": {"type": state}}
+    issues = [
+        issue("2026-09-01T12:00:00Z"),                                                       # opened before, still open
+        issue("2026-10-27T12:00:00Z", "completed", completed="2026-11-02T03:30:00Z"),        # Sunday night in New York
+        issue("2026-10-28T12:00:00Z", "completed", completed="2026-11-02T05:30:00Z"),        # Monday, half past midnight
+        issue("2026-10-29T12:00:00Z", "canceled", canceled="2026-11-03T12:00:00Z"),          # not opened, open until canceled
+        issue("2026-11-02T04:30:00Z", "duplicate", canceled="2026-11-03T12:00:00Z"),         # created on Sunday night
+        issue("2026-11-02T05:30:00Z", "backlog"),                                            # created on Monday
+    ]
+    assert stats.issue_counts(issues, weeks=3, today=date(2026, 11, 4)) == {"weeks": [
+        {"week": "2026-10-19", "opened": 0, "still_open": 1},
+        {"week": "2026-10-26", "opened": 2, "still_open": 4},
+        {"week": "2026-11-02", "opened": 1, "still_open": 2},
+    ]}
+
+
 def test_drop_reasons_feed_the_prompt():
     db = DB(load_settings().db_path)
     for i, (status, reason) in enumerate([("approved", None), ("dropped", "already_done"), ("pending", None)]):

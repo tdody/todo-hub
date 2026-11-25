@@ -374,6 +374,20 @@ def test_today_and_time_blocks(tmp_path):
     assert r["items"][1]["event_link"] and r["items"][0]["event_link"] is None
 
 
+def test_issue_stats(env):
+    from datetime import datetime, timezone
+    client, _, fake, _ = env
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    fake.issue_dates = [
+        {"createdAt": now, "completedAt": None, "canceledAt": None, "state": {"type": "unstarted"}},
+        {"createdAt": now, "completedAt": now, "canceledAt": None, "state": {"type": "completed"}},
+    ]
+    rows = client.get("/api/stats/issues?weeks=4").json()["weeks"]
+    assert len(rows) == 4
+    assert rows[-1]["opened"] == 2 and rows[-1]["still_open"] == 1
+    assert fake.issue_dates_since[:10] == rows[0]["week"]          # the first week's Monday, 00:00 in New York
+
+
 def test_balance_summary_runs_and_logs(env):
     from datetime import datetime, timezone
     from conftest import make_issue

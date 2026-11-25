@@ -301,6 +301,31 @@ class Linear:
             {"since": since_iso},
         )
 
+    def my_issue_dates(self, since_iso: str) -> list[dict]:
+        """The dates and status type of my issues that are open or were closed (completed, canceled
+        or duplicate) since ``since_iso``."""
+        # Open by status type: in an ``or``, a null completedAt also returns issues closed before ``since_iso``.
+        return self._paginate(
+            """
+            query($after: String, $since: DateTimeOrDuration!) {
+              viewer {
+                assignedIssues(
+                  first: 100, after: $after,
+                  filter: { or: [
+                    { completedAt: { gte: $since } }, { canceledAt: { gte: $since } },
+                    { state: { type: { nin: ["completed", "canceled", "duplicate"] } } }
+                  ] }
+                ) {
+                  nodes { createdAt completedAt canceledAt state { type } }
+                  pageInfo { hasNextPage endCursor }
+                }
+              }
+            }
+            """,
+            ["viewer", "assignedIssues"],
+            {"since": since_iso},
+        )
+
     # ---- writes -----------------------------------------------------------------------
     def create_issue(self, *, team_id: str, title: str, description: str, assignee_id: str,
                      state_id: str, priority: int, due_date: str | None,
