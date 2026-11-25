@@ -571,6 +571,13 @@ Paper, 10px corners, up to 760px wide and 85% of the window tall, over a 45% dar
 
 One row that wraps (each at least 150px wide): an 11px uppercase label, a 24px tabular figure, a 12px note. Hover tints the border toward the accent; a tile in trouble gets a Morning Amber wash and amber figure.
 
+### Insights charts
+
+Each chart sits in a panel (Paper, Hairline border, 8px corners): a 14px heading, one sentence with the figures, the legend, the chart, and the definition in Pencil. The charts share one frame, so the weeks line up down the page.
+
+- **Two series a week** (Issues, Pull requests): two 22px bars with a 2px gap, together as wide as a Client vs dev bar, each with its number above it and no axis. The right bar is the work you finished (Closed, Merged), in the accent. The left bar is `--pale-fill`, the accent mixed 50% into Paper, so it follows every theme and Daylight phase.
+- **Toggle** (Issues): the segmented control of the Group control, at the right end of the heading's line. It redraws only its panel.
+
 ### The Today Sky (signature)
 
 The top of Today, and the one place the desk looks out of the window. It changes with the moment of the day, always at 12px corners, with the sun placed where the real one is and hills along the bottom (darkened at night).

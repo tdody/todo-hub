@@ -431,6 +431,10 @@ export interface BalanceStats {
   target: number;
 }
 
+export interface IssueWeeks {
+  weeks: { week: string; opened: number; still_open: number }[];
+}
+
 export interface CandidateEdit {
   title?: string;
   client_label?: string | null;
@@ -672,6 +676,7 @@ export const api = {
   logos: (clients: string[]) =>
     call<Record<string, string | null>>("GET", `/api/logos?clients=${encodeURIComponent(clients.join("|"))}`),
   balance: (weeks: number) => call<BalanceStats>("GET", `/api/stats/balance?weeks=${weeks}`),
+  issueWeeks: (weeks: number) => call<IssueWeeks>("GET", `/api/stats/issues?weeks=${weeks}`),
   approval: (weeks: number) => call<ApprovalStats>("GET", `/api/stats/approval?weeks=${weeks}`),
   digest: (week = 0) => call<Digest>("GET", `/api/digest?week=${week}`),
   runs: (limit: number) => call<Run[]>("GET", `/api/runs?limit=${limit}`),

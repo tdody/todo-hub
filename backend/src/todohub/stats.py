@@ -124,10 +124,6 @@ def balance(completed: list[dict], weeks: int = 8, today: date | None = None, ta
 
 def issue_counts(issues: list[dict], weeks: int = 8, today: date | None = None) -> dict:
     """``issues`` holds the dates of my open issues and of the ones closed since the first week (Linear.my_issue_dates)."""
-    def closed_by(i: dict, day: date) -> bool:
-        closed = i["completedAt"] or i["canceledAt"]
-        return bool(closed) and local_date(closed) < day
-
     rows = []
     for wk in week_starts(weeks, today):
         end = wk + timedelta(days=7)
@@ -135,6 +131,6 @@ def issue_counts(issues: list[dict], weeks: int = 8, today: date | None = None) 
         rows.append({
             "week": wk.isoformat(),
             "opened": sum(local_date(i["createdAt"]) >= wk and i["state"]["type"] not in ("canceled", "duplicate") for i in created),
-            "still_open": sum(not closed_by(i, end) for i in created),
+            "still_open": sum(not (closed := i["completedAt"] or i["canceledAt"]) or local_date(closed) >= end for i in created),
         })
     return {"weeks": rows}
