@@ -37,9 +37,9 @@ def _git(repo: str, *args: str, timeout: int = QUICK_SECONDS) -> subprocess.Comp
 
 
 def _git_problem(repo: str, *args: str, timeout: int) -> str:
-    """Why git did not do it, on one line, or ""."""
+    """Why git did not do it, on one line, or "". No hook runs: in a PR's worktree it can be the PR's own."""
     try:
-        proc = _git(repo, "-c", "advice.diverging=false", *args, timeout=timeout)
+        proc = _git(repo, "-c", "core.hooksPath=/dev/null", "-c", "advice.diverging=false", *args, timeout=timeout)
     except subprocess.TimeoutExpired:
         return f"git {args[0]} took more than {timeout} s."
     return "" if proc.returncode == 0 else " ".join(proc.stderr.split()) or f"git {args[0]} failed."

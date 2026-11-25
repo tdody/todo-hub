@@ -85,7 +85,7 @@ The PR's ticket is the Linear issue that its row shows: `linearOf` in `pulls.ts`
 
 todo-hub makes or updates the worktree on `pr-<N>`:
 
-1. A worktree is already on `pr-<N>`: fetch `pull/<N>/head` there, then `git merge --ff-only`. When one of them fails, use the worktree as it is, with the warning "pr-812 may be behind #812: …" and git's reason. Git refuses the fast-forward when it would overwrite local changes or an ignored file (`--no-overwrite-ignore`), so none is lost.
+1. A worktree is already on `pr-<N>`: fetch `pull/<N>/head` there, then `git merge --ff-only`. When one of them fails, use the worktree as it is, with the warning "pr-812 may be behind #812: …" and git's reason. Git refuses the fast-forward when it would overwrite local changes or an ignored file (`--no-overwrite-ignore`), so none is lost. No git hook runs: with a `core.hooksPath` inside the repo, it would be the PR's own hook.
 2. Else fetch `pull/<N>/head` into the local branch `pr-<N>`, then add the worktree `<repo>-worktrees/pr-<N>` on it. The branch has no upstream, so a push has no default target.
 3. The fetch of step 2 fails and the local branch `pr-<N>` exists (diverged, or offline): add the worktree on the local branch, with the same warning.
 4. The fetch of step 2 fails and there is no local branch: an error toast with git's message.

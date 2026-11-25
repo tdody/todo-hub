@@ -232,6 +232,21 @@ def test_the_fast_forward_keeps_a_local_file_that_gitignore_lists(git_repo, push
     assert (Path(path) / "notes.txt").read_text() == "mine" and head_of(path) == old
 
 
+def test_a_hook_in_the_prs_tree_does_not_run(git_repo, push_pr, tmp_path):
+    git("config", "core.hooksPath", ".husky", cwd=git_repo)
+    hooks, ran = git_repo.parent / "author" / ".husky", tmp_path / "ran"
+    hooks.mkdir()
+    for name in ("post-checkout", "post-merge"):
+        (hooks / name).write_text(f"#!/bin/sh\necho {name} >> {ran}\n")
+        (hooks / name).chmod(0o755)
+    git("add", ".husky", cwd=hooks.parent)
+    push_pr("one")
+    claude_code.find_or_add_pr_worktree(str(git_repo), 812)       # git worktree add runs post-checkout
+    push_pr("two")
+    claude_code.find_or_add_pr_worktree(str(git_repo), 812)       # git merge runs post-merge
+    assert not ran.exists()
+
+
 def test_a_diverged_local_branch_with_no_worktree_stays(git_repo, push_pr):
     push_pr("one")
     path, _, _ = claude_code.find_or_add_pr_worktree(str(git_repo), 812)
