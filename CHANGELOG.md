@@ -2,6 +2,15 @@
 
 What changed in each TodoHub release, newest first. The app's update panel shows the newest section, and anyone can read this file.
 
+## v0.5.0
+
+- **Review a pull request:** in **Pull requests → To review**, each row has **Review** (**p** for the selected row). Pick periscope or Claude Code, a repo and a prompt, then click **Start**. Claude starts on the pull request's code, with the review prompt from **Settings → Start Claude**. The repo list has only the repos whose origin is the pull request's repo.
+- **In Claude Code:** TodoHub checks the pull request out in `<repo>-worktrees/pr-<N>`. If that worktree exists, TodoHub brings it up to the latest commit. Your local changes stay, and a toast says when the worktree stays behind.
+- **The prompt:** it names the pull request and the Linear issue that its row shows. For a pull request with no Linear issue, the prompt leaves out each sentence about the issue. In periscope, such a review needs a periscope from 2026-11-25 or later.
+- **No comment:** a review adds no comment to the Linear issue, because the issue can be the author's. Start in periscope and Start in Claude Code on an issue still add one.
+- **Pull requests tab:** a refresh keeps the place where you scrolled.
+- **An issue with two approved cards:** it shows the type of the latest approval. Before, the type was not always the latest one.
+
 ## v0.4.0
 
 - **Start in Claude Code:** an issue's ⋯ menu has **Start in Claude Code**, after Start in periscope. Pick a repo, a branch and a prompt, then click **Start**. TodoHub uses or adds a worktree for the issue's branch in `<repo>-worktrees/<branch>`. Then your app for `.command` files, for example Terminal, starts `claude` there with the prompt. The issue gets a comment with the Claude session, as with Start in periscope.
