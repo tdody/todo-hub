@@ -1,6 +1,6 @@
 [package]
 name = "todohub"
-version = "0.5.0"
+version = "0.6.0"
 description = "Review queue and task lists for Thibault's Linear"
 edition = "2021"
 

@@ -2,6 +2,14 @@
 
 What changed in each TodoHub release, newest first. The app's update panel shows the newest section, and anyone can read this file.
 
+## v0.6.0
+
+- **Reviewed:** **Pull requests → To review** has a new view, **Reviewed**, between **Waiting 3+ days** and **Asked again** (now key **4**). It lists the open pull requests of others that you reviewed and that do not ask for your review now, the newest review first. A comment counts as a review. The counts of To review and the sidebar leave them out.
+- **Asked again:** it now shows a pull request that asks you directly for another review. Before, it left these out.
+- **Issues in Insights:** **Overview** has a new **Issues** panel, with two bars a week. The right bar is the issues you closed. A toggle sets the left bar: **Opened**, the issues created that week, or **Still open**, the issues open when the week ended. The app remembers the toggle.
+- **Pull requests in Insights:** each week has two bars, **Reviewed** and **Merged**. Before, Reviewed was text under the week.
+- **Looks handled:** an Inbox card also gets this note when you set its Linear issue to Duplicate. Before, only a closed or canceled issue counted.
+
 ## v0.5.0
 
 - **Review a pull request:** in **Pull requests → To review**, each row has **Review** (**p** for the selected row). Pick periscope or Claude Code, a repo and a prompt, then click **Start**. Claude starts on the pull request's code, with the review prompt from **Settings → Start Claude**. The repo list has only the repos whose origin is the pull request's repo.
