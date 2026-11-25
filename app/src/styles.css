@@ -479,12 +479,14 @@ button.star:hover { background: var(--surface-2); }
 .small-btn { padding: 3px 10px; font-size: 13px; }
 
 /* Insights */
-:root { --dev-fill: #c9d3e0; --empty-fill: #eef1f5; }
+:root { --dev-fill: #c9d3e0; --empty-fill: #eef1f5; --pale-fill: color-mix(in srgb, var(--accent) 50%, var(--surface)); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]):not([data-theme="day-light"]) { --dev-fill: #3a4656; --empty-fill: #222934; } }
 :root[data-theme="dark"], :root[data-theme="day-dark"] { --dev-fill: #3a4656; --empty-fill: #222934; }
 .insights { display: flex; flex-direction: column; gap: 16px; }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .panel h2 { font-size: 14px; margin: 0 0 4px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.panel-head h2 { margin: 0; }
 .panel h3 { font-size: 12px; margin: 10px 0 6px; color: var(--muted); font-weight: 600; }
 .panel .lead { margin: 0 0 10px; }
 .chart { width: 100%; height: auto; display: block; }
@@ -494,7 +496,8 @@ button.star:hover { background: var(--surface-2); }
 .chart .bar-client { fill: var(--accent); }
 .chart .bar-dev { fill: var(--dev-fill); }
 .chart .bar-empty { fill: var(--empty-fill); }
-.chart .bar-merged { fill: var(--accent); }
+.chart .bar-main { fill: var(--accent); }
+.chart .bar-pale { fill: var(--pale-fill); }
 .chart .target { stroke: var(--warn-ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .chart .grid { stroke: var(--border); stroke-width: 1; }
 .chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
@@ -503,6 +506,8 @@ button.star:hover { background: var(--surface-2); }
 .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: -8px; }
 .key-client { background: var(--accent); }
 .key-dev { background: var(--dev-fill); }
+.key-main { background: var(--accent); }
+.key-pale { background: var(--pale-fill); }
 .key-target { height: 0; width: 14px; border-top: 2px dashed var(--warn-ink); border-radius: 0; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @container (max-width: 496px) { .two-col { grid-template-columns: 1fr; } }

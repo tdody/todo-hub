@@ -11,6 +11,11 @@ Client vs dev balance, per week:
     client share = completed client-labeled issues / all completed issues
 counting your Linear issues whose completedAt falls in that week. Canceled issues aren't
 counted. The target is 50%.
+
+Issues opened and still open, per week:
+    opened = issues created that week, except the ones that are canceled or duplicates now
+    still open = issues open when the week ended (this week: now), also when canceled later
+counting the issues assigned to you now.
 """
 
 from __future__ import annotations
@@ -115,3 +120,17 @@ def balance(completed: list[dict], weeks: int = 8, today: date | None = None, ta
         total = c["client"] + c["dev"]
         rows.append({"week": wk.isoformat(), **c, "client_share": round(c["client"] / total, 3) if total else None})
     return {"weeks": rows, "target": target}
+
+
+def issue_counts(issues: list[dict], weeks: int = 8, today: date | None = None) -> dict:
+    """``issues`` holds the dates of my open issues and of the ones closed since the first week (Linear.my_issue_dates)."""
+    rows = []
+    for wk in week_starts(weeks, today):
+        end = wk + timedelta(days=7)
+        created = [i for i in issues if local_date(i["createdAt"]) < end]
+        rows.append({
+            "week": wk.isoformat(),
+            "opened": sum(local_date(i["createdAt"]) >= wk and i["state"]["type"] not in ("canceled", "duplicate") for i in created),
+            "still_open": sum(not (closed := i["completedAt"] or i["canceledAt"]) or local_date(closed) >= end for i in created),
+        })
+    return {"weeks": rows}

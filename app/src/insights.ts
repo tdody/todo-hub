@@ -1,12 +1,13 @@
-// Insights tab. Overview: stat tiles over the charts (client vs dev, pull requests this week, slipped
+// Insights tab. Overview: stat tiles over the charts (client vs dev, issues, pull requests, slipped
 // due dates, approval rate, sweep history). Weekly digest: one week written out (backend digest.py).
 import { api, ApiError } from "./api";
-import type { ApprovalStats, BalanceStats, Digest, PullWeeks, Run, Slips } from "./api";
+import type { ApprovalStats, BalanceStats, Digest, IssueWeeks, PullWeeks, Run, Slips } from "./api";
 import { h, link, loadPref, modal, pageHead, savePref, svg } from "./dom";
 
 type GoTab = (tab: "inbox" | "client" | "dev", highlight?: string[]) => void;
 
 let mode: "overview" | "digest" = loadPref("todohub.insightsView") === "digest" ? "digest" : "overview";
+let issuesView: "opened" | "still_open" = loadPref("todohub.insightsIssues") === "still_open" ? "still_open" : "opened";
 let digestWeek = 0;                          // 0 = this week, 1 = last week, …
 const digests = new Map<number, { at: number; data?: Digest; error?: string }>();
 let showAllWins = false;
@@ -20,7 +21,7 @@ const SOURCES: Record<string, string> = {
 };
 
 let cache: { at: number; balance?: BalanceStats; approval?: ApprovalStats; runs?: Run[]; slips?: Slips | null; pulls?: PullWeeks | null;
-  error?: string } = { at: 0 };
+  issues?: IssueWeeks | null; error?: string } = { at: 0 };
 
 function weekLabel(iso: string): string {
   return new Date(iso + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
@@ -66,25 +67,30 @@ function balanceChart(b: BalanceStats): Node {
   return g;
 }
 
-function pullsChart(p: PullWeeks): Node {
-  const W = 860, H = 190, top = 22, bottom = 36, left = 38, right = 78;   // the balance chart's frame: the weeks line up
+/** Two bars a week, each with its number, under their legend: the pale bar on the left, the accent one on the right. ``names`` in that order. */
+function pairChart(label: string, names: [string, string], weeks: { week: string; pale: number; main: number }[]): Node {
+  const W = 860, H = 190, top = 22, bottom = 24, left = 38, right = 78;   // the balance chart's sides: the weeks line up
   const plotH = H - top - bottom;
-  const band = (W - left - right) / p.weeks.length;
-  const barW = Math.min(46, band * 0.6);
-  const max = Math.max(1, ...p.weeks.map((w) => w.merged));
-  const g = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img",
-    "aria-label": "Pull requests you merged each week, with the number you reviewed for others under each week" });
+  const band = (W - left - right) / weeks.length;
+  const barW = 22, gap = 2;
+  const max = Math.max(1, ...weeks.flatMap((w) => [w.pale, w.main]));
+  const g = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": label });
   g.append(svg("line", { x1: left, x2: W - right + 6, y1: top + plotH, y2: top + plotH, class: "grid" }));
-  p.weeks.forEach((w, i) => {
-    const x = left + band * i + (band - barW) / 2, barH = plotH * (w.merged / max);
-    const tip = `${weekLabel(w.week)}: ${w.merged} merged, ${w.reviewed} reviewed for others`;
-    if (w.merged) g.append(svg("rect", { x, y: top + plotH - barH, width: barW, height: barH, class: "bar-merged", rx: 3 }, svg("title", {}, tip)));
-    g.append(svg("text", { x: x + barW / 2, y: top + plotH - barH - 7, class: "value", "text-anchor": "middle" }, String(w.merged),
-      svg("title", {}, tip)));
-    g.append(svg("text", { x: x + barW / 2, y: H - bottom + 16, class: "axis", "text-anchor": "middle" }, weekLabel(w.week)));
-    g.append(svg("text", { x: x + barW / 2, y: H - bottom + 29, class: "axis faint", "text-anchor": "middle" }, `${w.reviewed} reviewed`));
+  weeks.forEach((w, i) => {
+    const mid = left + band * (i + 0.5);
+    const bar = (n: number, x: number, cls: string) => {
+      const y = top + plotH * (1 - n / max);
+      return [n ? svg("rect", { x, y, width: barW, height: top + plotH - y, class: cls, rx: 3 }) : "",
+        svg("text", { x: x + barW / 2, y: y - 7, class: "value", "text-anchor": "middle" }, String(n))];
+    };
+    g.append(svg("g", {},
+      svg("title", {}, `${weekLabel(w.week)}: ${w.pale} ${names[0].toLowerCase()}, ${w.main} ${names[1].toLowerCase()}`),
+      svg("rect", { x: mid - band / 2, y: 0, width: band, height: H, fill: "transparent" }),   // the tooltip covers the whole week
+      ...bar(w.pale, mid - gap / 2 - barW, "bar-pale"), ...bar(w.main, mid + gap / 2, "bar-main"),
+      svg("text", { x: mid, y: H - bottom + 16, class: "axis", "text-anchor": "middle" }, weekLabel(w.week))));
   });
-  return g;
+  return h("div", {},
+    h("div", { class: "legend" }, h("span", { class: "key key-pale" }), names[0], h("span", { class: "key key-main" }), names[1]), g);
 }
 
 function approvalChart(a: ApprovalStats): Node {
@@ -248,27 +254,72 @@ function linesTile(p: PullWeeks | null): HTMLElement {
 
 function pullsPanel(p: PullWeeks | null): Node | "" {
   if (!p) return "";
-  const plural = (n: number) => `${n} pull request${n === 1 ? "" : "s"}`;
   const merged = p.weeks.reduce((n, w) => n + w.merged, 0), reviewed = p.weeks.reduce((n, w) => n + w.reviewed, 0);
   const now = p.weeks.at(-1);
   return h("section", { class: "panel", id: "panel-pulls" },
     h("h2", {}, "Pull requests"),
     p.error ? h("p", { class: "muted small" }, `Couldn't read pull requests from GitHub: ${p.error}`)
-      : h("p", { class: "lead" }, `You merged ${plural(merged)} in the last 8 weeks and reviewed ${reviewed} for others.`,
+      : h("p", { class: "lead" }, `You merged ${prCount(merged)} in the last 8 weeks and reviewed ${reviewed} for others.`,
         now ? ` This week so far: ${now.merged} merged, ${now.reviewed} reviewed.` : ""),
-    p.error ? "" : pullsChart(p),
+    p.error ? "" : pairChart("Pull requests reviewed for others and merged, per week", ["Reviewed", "Merged"],
+      p.weeks.map((w) => ({ week: w.week, pale: w.reviewed, main: w.merged }))),
     h("p", { class: "muted small" },
       "Merged = your pull requests that GitHub merged that week, Monday to Sunday (ET), into any branch. "
       + "Reviewed = other people's pull requests you reviewed that week (approved, asked for changes or commented); each counts once a week."),
   );
 }
 
+/** Issues closed per week, next to the ones opened that week or still open at its end (the toggle). */
+function issuesPanel(p: IssueWeeks | null, b: BalanceStats): HTMLElement {
+  if (!p) {
+    return h("section", { class: "panel", id: "panel-issues" }, h("h2", {}, "Issues"),
+      h("p", { class: "muted small" }, "Couldn't read the issues opened and still open from Linear."));
+  }
+  const weeks = p.weeks.map((w, i) => ({ ...w, closed: b.weeks[i].client + b.weeks[i].dev }));
+  const now = weeks.at(-1)!, last = weeks.at(-2)!;
+  const opened = weeks.reduce((n, w) => n + w.opened, 0), closed = weeks.reduce((n, w) => n + w.closed, 0);
+  const views = [
+    { id: "opened", name: "Opened",
+      lead: `${opened} of your issues ${opened === 1 ? "was" : "were"} opened in the last 8 weeks, and you closed ${closed}. `
+        + `This week so far: ${now.opened} opened, ${now.closed} closed.`,
+      definition: "Opened = issues assigned to you that were created that week, Monday to Sunday (ET), except the ones that are now canceled or duplicates." },
+    { id: "still_open", name: "Still open",
+      lead: `You have ${now.still_open} open issue${now.still_open === 1 ? "" : "s"}, against ${last.still_open} at the end of last week. `
+        + `You closed ${closed} in the last 8 weeks, ${now.closed} of them this week.`,
+      definition: "Still open = issues assigned to you that were open when the week ended, Sunday night (ET); for this week, now." },
+  ] as const;
+  const body = h("div", {});
+  const buttons = views.map((v) => h("button", { class: "seg", onclick: () => {
+    issuesView = v.id;
+    savePref("todohub.insightsIssues", v.id);
+    show();
+  } }, v.name));
+  // Only the body is redrawn: the button keeps the focus and the page keeps its scroll.
+  const show = () => {
+    const v = views.find((x) => x.id === issuesView)!;
+    buttons.forEach((el, i) => {
+      el.classList.toggle("on", views[i] === v);
+      el.setAttribute("aria-pressed", String(views[i] === v));
+    });
+    body.replaceChildren(h("p", { class: "lead" }, v.lead),
+      pairChart(`Issues ${v.name.toLowerCase()} and closed, per week`, [v.name, "Closed"],
+        weeks.map((w) => ({ week: w.week, pale: w[v.id], main: w.closed }))),
+      h("p", { class: "muted small" }, `${v.definition} Closed = your issues completed that week.`));
+  };
+  show();
+  return h("section", { class: "panel", id: "panel-issues" },
+    h("div", { class: "panel-head" }, h("h2", {}, "Issues"),
+      h("span", { class: "segmented", role: "group", "aria-label": "Compare closed issues with" }, ...buttons)),
+    body);
+}
+
 // ---- view ---------------------------------------------------------------------------------------
 async function load(rerender: () => void) {
   try {
-    const [balance, approval, runs, slips, pulls] = await Promise.all([api.balance(8), api.approval(8), api.runs(150),
-      api.slips().catch(() => null), api.pullWeeks().catch(() => null)]);   // slips and pulls are optional: Insights works without them
-    cache = { at: Date.now(), balance, approval, runs, slips, pulls };
+    const [balance, approval, runs, slips, pulls, issues] = await Promise.all([api.balance(8), api.approval(8), api.runs(150),
+      // slips, pulls and issues are optional: Insights works without them
+      api.slips().catch(() => null), api.pullWeeks().catch(() => null), api.issueWeeks(8).catch(() => null)]);
+    cache = { at: Date.now(), balance, approval, runs, slips, pulls, issues };
   } catch (e) {
     cache = { ...cache, at: Date.now(), error: e instanceof ApiError ? e.message : String(e) };
   }
@@ -307,7 +358,7 @@ function overview(rerender: () => void): HTMLElement {
       tile("Closed this week", String(doneNow),
         lastWeekDone ? `${lastWeekDone.client + lastWeekDone.dev} last week` : "",
         "Your Linear issues moved to a completed status this week, Monday to Sunday (ET). Canceled issues don't count.",
-        "panel-balance"),
+        "panel-issues"),
       linesTile(cache.pulls ?? null),
       tile("Pushed 2+ times", repeat === null ? "–" : String(repeat),
         cache.slips && !cache.slips.error ? `of ${cache.slips.checked} open with a due date` : "history unavailable",
@@ -331,6 +382,7 @@ function overview(rerender: () => void): HTMLElement {
       balanceChart(b),
       h("p", { class: "muted small" }, "Share of your completed (not canceled) Linear issues each week, Monday to Sunday. Client = has a client label."),
     ),
+    issuesPanel(cache.issues ?? null, b),
     pullsPanel(cache.pulls ?? null),
     slipsPanel(cache.slips ?? null),
     h("section", { class: "panel", id: "panel-approval" },

@@ -896,6 +896,12 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         weeks = max(1, min(weeks, 26))
         return stats.balance(completed_since_weeks(weeks), weeks)
 
+    @app.get("/api/stats/issues", dependencies=auth)
+    def issue_stats(weeks: int = 8) -> dict:
+        weeks = max(1, min(weeks, 26))
+        since = stats.first_day(weeks).astimezone(timezone.utc).replace(microsecond=0).isoformat()
+        return stats.issue_counts(linear_call(lambda l: l.my_issue_dates(since)), weeks)
+
     @app.get("/api/clients/{client}/summary", dependencies=auth)
     def client_summary(client: str) -> dict:
         if client not in db.get_meta("client_labels", []):

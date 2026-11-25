@@ -112,6 +112,10 @@ class FakeLinear:
     def my_closed_issues(self, since_iso):
         return getattr(self, "closed", [])
 
+    def my_issue_dates(self, since_iso):
+        self.issue_dates_since = since_iso
+        return getattr(self, "issue_dates", [])
+
     def create_client_label(self, name, group):
         from todohub.linear import LinearError
         if self.fail_label:
