@@ -357,14 +357,21 @@ export type StartTarget = "periscope" | "claude-code";
 export interface PullStartOptions {
   issue: { identifier: string; title: string } | null;    // the one that the PR's row shows, as Linear gives it
   issue_hint: string;                           // why the prompt leaves the row's issue out, or ""
-  prompt: string;                               // the review prompt, filled in
-  targets: Partial<Record<StartTarget, PullStartTarget>>;   // only the ones that are on
+  prompt: string;                               // the review prompt, filled in; for your PR's branch, the code prompt or ""
+  targets: Partial<Record<StartTarget, PullStartTarget>>;   // only the ones that are on; for your PR's branch, periscope
 }
 
 export interface PullStartTarget {
   repos: { repo: string; label: string }[];     // the ones whose origin is the PR's repo
-  branch_worktrees: string[];                   // the ones with a worktree already on pr-<N>
+  branch_worktrees: string[];                   // the ones with a worktree already on pr-<N>, or on your PR's branch
   error: string;                                // periscope's, when its repos cannot be read; else ""
+}
+
+/** A Claude in periscope on a branch of a repo whose origin is on GitHub. */
+export interface PeriscopeClaude {
+  repo: string;                                 // "owner/name" of the origin, as git gives it
+  branch: string;
+  pid: string;
 }
 
 export interface PeriscopeStart {
@@ -616,6 +623,7 @@ export const api = {
   startInPeriscope: (issueId: string, body: { repo: string; prompt: string } & ({ branch: string } | { pr: number })) =>
     call<PeriscopeStart>("POST", `/api/issues/${encodeURIComponent(issueId)}/periscope`, body),
   showInPeriscope: (pid: string) => call<{ ok: boolean }>("POST", "/api/periscope/show", { pid }),
+  periscopeClaudes: () => call<PeriscopeClaude[]>("GET", "/api/periscope/claudes"),
   claudeCodeOptions: (issueId: string) =>
     call<StartOptions>("GET", `/api/issues/${encodeURIComponent(issueId)}/claude-code`),
   startInClaudeCode: (issueId: string, body: { repo: string; branch: string; prompt: string }) =>
@@ -653,9 +661,11 @@ export const api = {
   slips: (refresh = false) => call<Slips>("GET", `/api/slips${refresh ? "?refresh=true" : ""}`),
   pulls: (refresh = false) => call<Pulls>("GET", `/api/pulls${refresh ? "?refresh=true" : ""}`),
   pull: (repo: string, number: number) => call<Pulls>("POST", `/api/pulls/${repo}/${number}`),
-  pullStartOptions: (p: PullRequest, ident: string) =>
-    call<PullStartOptions>("GET", `/api/pulls/${p.repo}/${p.number}/start?ident=${encodeURIComponent(ident)}`),
-  reviewInPeriscope: (p: PullRequest, body: { repo: string; prompt: string; title: string; ticket: string; ticket_title: string }) =>
+  /** ``branch``: your PR's, to start on it; "": a review. */
+  pullStartOptions: (p: PullRequest, ident: string, branch: string) =>
+    call<PullStartOptions>("GET", `/api/pulls/${p.repo}/${p.number}/start?ident=${encodeURIComponent(ident)}&branch=${encodeURIComponent(branch)}`),
+  reviewInPeriscope: (p: PullRequest, body: { repo: string; prompt: string; title: string; ticket: string; ticket_title: string;
+                                              branch: string }) =>
     call<PeriscopeStart>("POST", `/api/pulls/${p.repo}/${p.number}/periscope`, body),
   reviewInClaudeCode: (p: PullRequest, body: { repo: string; prompt: string; title: string }) =>
     call<ClaudeCodeStart>("POST", `/api/pulls/${p.repo}/${p.number}/claude-code`, body),

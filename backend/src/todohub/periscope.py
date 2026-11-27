@@ -1,5 +1,5 @@
-"""Periscope, the tmux dashboard: start Claude on a Linear issue's branch there, and bring periscope to
-the front with that Claude selected. Periscope listens on 127.0.0.1 with no auth (``periscope_url``)."""
+"""Periscope, the tmux dashboard: start Claude on a Linear issue's branch there, find the Claude on a branch, and
+bring periscope to the front with that Claude selected. Periscope listens on 127.0.0.1 with no auth (``periscope_url``)."""
 
 from __future__ import annotations
 
@@ -70,6 +70,11 @@ class Periscope:
     def select(self, pid: str) -> None:
         self._call("POST", "/api/select", {"pid": pid})
 
+    def state(self) -> dict:
+        """Its dashboard's state: {windows: [{pid, agent, repo_key, branch, activity, …}], …}. Periscope reads it for
+        itself; it is not an API made for other apps."""
+        return self._call("GET", "/api/state")
+
 
 def bring_to_front(app_id: str) -> None:
     try:
@@ -89,15 +94,30 @@ def pr_links(urls: list[str]) -> list[tuple[str, int]]:
     return list(found.values())
 
 
-def pr_repos(catalog: dict, slug: str, number: int) -> dict:
+def claudes(state: dict, catalog: dict) -> list[dict]:
+    """The Claudes in periscope's ``state`` on a branch of a repo whose origin is on GitHub: {repo (``owner/name``),
+    branch, pid}. One for each branch: the most recently active, as periscope picks it for a start."""
+    slugs = {r["repo"]: r["slug"] for r in catalog["repos"] if r.get("slug")}
+    found: dict[tuple[str, str], dict] = {}
+    for w in state.get("windows", []):
+        slug = slugs.get(w.get("repo_key"))
+        if w.get("agent") != "claude" or not slug or not w.get("branch"):
+            continue
+        key = (slug.lower(), w["branch"])
+        if key not in found or (w.get("activity") or 0) > (found[key].get("activity") or 0):
+            found[key] = w
+    return [{"repo": slugs[w["repo_key"]], "branch": w["branch"], "pid": w["pid"]} for w in found.values()]
+
+
+def pr_repos(catalog: dict, slug: str, branch: str) -> dict:
     """{repos, branch_worktrees}: the catalog's repos whose origin is the GitHub repo ``slug``, and the ones with a
-    worktree on ``pr-<N>``."""
+    worktree on ``branch``."""
     repos = [{"repo": r["repo"], "label": r["label"]} for r in catalog["repos"]
              if (r.get("slug") or "").lower() == slug.lower()]
     paths = {r["repo"] for r in repos}
     return {"repos": repos,
             "branch_worktrees": sorted({w["repo"] for w in catalog["worktrees"]
-                                        if w["repo"] in paths and w["branch"] == f"pr-{number}"})}
+                                        if w["repo"] in paths and w["branch"] == branch})}
 
 
 def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue: dict) -> tuple[list[dict], str]:
@@ -106,7 +126,7 @@ def review_prs(links: list[tuple[str, int]], catalog: dict, template: str, issue
     prs: list[dict] = []
     missing: dict[str, None] = {}
     for slug, number in links:
-        found = pr_repos(catalog, slug, number)
+        found = pr_repos(catalog, slug, f"pr-{number}")
         if not found["repos"]:
             missing.setdefault(slug, None)
             continue

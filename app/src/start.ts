@@ -3,8 +3,9 @@
 // periscope, or todo-hub, to start Claude on that branch. For a review ticket, Start in periscope's popover
 // selects one of its PRs, and periscope checks the PR out in place of the branch. Start in Claude Desktop opens a
 // new chat with the chat prompt in its message box. Review's popover picks periscope or Claude Code, a repo of the
-// PR and the review prompt, and Start checks the PR out there. Periscope's toast has Show, which brings periscope
-// to the front with that Claude selected.
+// PR and the review prompt, and Start checks the PR out there. Open in periscope, in Mine, opens the same popover on
+// your PR's branch when no Claude is on it. Periscope's toast has Show, which brings periscope to the front with that
+// Claude selected.
 import { api } from "./api";
 import type { ClaudeCodeStart, Issue, Meta, PeriscopePr, PeriscopeStart, PullRequest, PullStartOptions, StartOptions, StartTarget } from "./api";
 import { h } from "./dom";
@@ -35,7 +36,11 @@ interface Review extends Fields {
   pull: PullRequest;
   options: PullStartOptions | null;     // null while they load
   target: StartTarget | null;           // null: no target that is on has the PR's repo
+  own: Own | null;                      // your PR: start on its branch; null: a review, on pr-<N>
 }
+
+/** Your PR's branch, and what to do with the pid of the Claude that a start gives. */
+export interface Own { branch: string; started: (pid: string) => void }
 
 const TARGET_NAME: Record<StartTarget, string> = { periscope: "periscope", "claude-code": "Claude Code" };
 
@@ -148,7 +153,7 @@ function canStart(p: Popover): boolean {
 /** Run ``request`` as the start ``key`` of ``p``. The popover can be closed, or opened again, while it runs: ``openNow``
  *  gives the one that is open for this start, if any. ``what`` names the start in the toast. */
 async function runStart(p: Fields, key: string, openNow: () => Fields | null, what: string,
-                        request: () => Promise<PeriscopeStart | ClaudeCodeStart>) {
+                        request: () => Promise<PeriscopeStart | ClaudeCodeStart>): Promise<PeriscopeStart | ClaudeCodeStart | null> {
   runningStarts.add(key);
   p.starting = true;
   ctx.render();
@@ -160,10 +165,12 @@ async function runStart(p: Fields, key: string, openNow: () => Fields | null, wh
         { label: "Show", run: () => void api.showInPeriscope(r.pid).catch(ctx.fail) });
     } else ctx.toast(`Started ${what} in Claude Code`);
     for (const w of r.warnings) ctx.fail(w);
+    return r;
   } catch (e) {
     const open = openNow();
     if (open) { open.starting = false; ctx.render(); }
     ctx.fail(e);
+    return null;
   } finally {
     runningStarts.delete(key);
   }
@@ -300,25 +307,25 @@ function selectTarget(r: Review, o: PullStartOptions, target: StartTarget) {
   r.starting = runningStarts.has(`${target}:${r.pull.url}`);
 }
 
-/** Focus Start, else Cancel, else the popover, after the tab has put it under its row. */
+/** Focus Start, else the prompt (empty), else Cancel, else the popover, after the tab has put it under its row. */
 function focusReview() {
   queueMicrotask(() => {
     const pop = document.querySelector<HTMLElement>(".start-pop");
     pop?.scrollIntoView({ block: "nearest" });
-    (pop?.querySelector<HTMLElement>(".start-go:not(:disabled)") ?? pop?.querySelector<HTMLElement>(".start-cancel:not(:disabled)")
-      ?? pop)?.focus();
+    (pop?.querySelector<HTMLElement>(".start-go:not(:disabled)") ?? pop?.querySelector<HTMLElement>("textarea:not([readonly])")
+      ?? pop?.querySelector<HTMLElement>(".start-cancel:not(:disabled)") ?? pop)?.focus();
   });
 }
 
 /** ``ident`` is the Linear issue that the PR's row shows, or "". */
-export async function openReview(pull: PullRequest, ident: string) {
+export async function openReview(pull: PullRequest, ident: string, own: Own | null = null) {
   if (review?.pull.url === pull.url) return;
   popover = null;
-  const mine: Review = review = { pull, options: null, target: null, repo: "", prompt: "", starting: false };
+  const mine: Review = review = { pull, options: null, target: null, repo: "", prompt: "", starting: false, own };
   ctx.render();
   focusReview();
   try {
-    const o = await api.pullStartOptions(pull, ident);
+    const o = await api.pullStartOptions(pull, ident, own?.branch ?? "");
     if (review !== mine) return;      // closed, or opened for another PR, meanwhile
     mine.options = o;
     mine.prompt = o.prompt;
@@ -341,10 +348,13 @@ function canReview(r: Review): boolean {
 async function startReview() {
   const r = review;
   if (!r?.options || !r.target || !canReview(r)) return;
-  const { pull, target } = r, { issue } = r.options, body = { repo: r.repo, prompt: r.prompt, title: pull.title };
-  await runStart(r, `${target}:${pull.url}`, () => (review?.pull.url === pull.url && review.target === target ? review : null),
+  const { pull, target, own } = r, { issue } = r.options, body = { repo: r.repo, prompt: r.prompt, title: pull.title };
+  const started = await runStart(r, `${target}:${pull.url}`,
+    () => (review?.pull.url === pull.url && review.target === target ? review : null),
     `#${pull.number}`, () => (target === "claude-code" ? api.reviewInClaudeCode(pull, body)
-      : api.reviewInPeriscope(pull, { ...body, ticket: issue?.identifier ?? "", ticket_title: issue?.title ?? "" })));
+      : api.reviewInPeriscope(pull, { ...body, ticket: issue?.identifier ?? "", ticket_title: issue?.title ?? "",
+          branch: own?.branch ?? "" })));
+  if (own && started && "pid" in started) own.started(started.pid);
 }
 
 /** The PR that Review's popover is open for. */
@@ -354,9 +364,9 @@ export const popoverPull = (): PullRequest | null => review?.pull ?? null;
 export function reviewPopover(): HTMLElement | "" {
   const r = review;
   if (!r) return "";
-  const n = r.pull.number, o = r.options;
+  const n = r.pull.number, o = r.options, own = r.own;
   const run = () => void startReview();
-  if (!o) return frame(`Review #${n}`, run, h("p", { class: "start-wait" }, "Loading…"));
+  if (!o) return frame(own ? `Start #${n} in periscope` : `Review #${n}`, run, h("p", { class: "start-wait" }, "Loading…"));
   const targets = targetsOf(o), only = targets.length === 1;
   const go = startButton(r, run);
   const update = () => { go.disabled = !canReview(r); };
@@ -369,13 +379,15 @@ export function reviewPopover(): HTMLElement | "" {
     }, TARGET_NAME[t]))));
   const hintClass = only ? "start-hint lead" : "start-hint";      // under the title when there is no Where
   const selected = r.target && o.targets[r.target];
+  const branch = own?.branch ?? `pr-${n}`;
   const hint = !selected ? ""
-    : selected.branch_worktrees.includes(r.repo) ? `A worktree is already on pr-${n}.`
+    : selected.branch_worktrees.includes(r.repo) ? `A worktree is already on ${branch}.`
+    : own ? `Periscope adds a worktree on ${branch}.`
     : r.target === "periscope" ? "Periscope checks out the PR in a new worktree."
     : `A new worktree next to the repo, on pr-${n}.`;
   const reasons = targets.filter((t) => !o.targets[t]!.repos.length).map((t) => h("p", { class: `${hintClass} off` },
     o.targets[t]!.error || `No repo in ${t === "periscope" ? "periscope" : "Settings"} has ${r.pull.repo} as its origin.`));
-  return frame(`Review #${n}${only ? ` in ${TARGET_NAME[targets[0]]}` : ""}`, run,
+  return frame(`${own ? "Start" : "Review"} #${n}${only ? ` in ${TARGET_NAME[targets[0]]}` : ""}`, run,
     o.issue_hint ? h("p", { class: "start-hint lead" }, o.issue_hint) : "",
     where,
     hint ? h("p", { class: hintClass }, hint) : "",

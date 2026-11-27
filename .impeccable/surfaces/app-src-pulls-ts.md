@@ -42,6 +42,8 @@ Point at one pull request of a stack and the whole stack lights up; the stack's 
 - Pull requests with no client or project share one group, not one group for each repo.
 - To review has a Reviewed view, third, between Waiting 3+ days and Asked again (2026-11-24): open pull requests of others that he reviewed and that do not ask for his review now. They do not wait on him, so the To review count and the sidebar count leave them out.
 - To review has no column and no groups: on 2026-11-16, none of its 7 pull requests named one of his open issues.
+- Open in periscope (2026-11-26) is prototype C: a secondary button in the opened row of Mine (p), and a "Claude" chip in the meta line when a Claude in periscope is on the branch. The chip drops out of the full meta line at the default 1120px window. A button on each row, as Review in To review, was rejected: at 1120px it cut Next step to one letter.
+- With no Claude on the branch, Open in periscope opens the start popover on the pull request's own branch (not pr-<N>), with the code prompt.
 - The Client / project column shows only on pages wider than 1120px (a 1400px window with the default sidebar). At the default 1120px window (an 840px page), the titles would get no room. The groups work at every width.
 - Size folds at a 920px page and narrower: with **#** and Size, the titles had about 135px at the default 1120px window.
 

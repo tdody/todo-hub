@@ -34,7 +34,7 @@ from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, DEFAULT_REVIEW_PR
                      read_overrides, source_state, write_overrides)
 from .db import DB
 from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, shape_issue
-from .periscope import Periscope, PeriscopeError, bring_to_front, pr_links, pr_repos, review_prs
+from .periscope import Periscope, PeriscopeError, bring_to_front, claudes, pr_links, pr_repos, review_prs
 from .selfcmd import self_command
 from .sources import SourceError
 from .start import StartError, claude_name, default_repo, fill_prompt, fill_review_prompt, remember_repo
@@ -139,6 +139,7 @@ class PullStartIn(BaseModel):
 class PullPeriscopeStartIn(PullStartIn):
     ticket: str = Field(default="", max_length=50)        # periscope's field: the Linear issue on the card, or ""
     ticket_title: str = Field(default="", max_length=500)
+    branch: str = Field(default="", max_length=250)       # your PR's branch to start on; "": a review, on pr-<N>
 
 
 class PeriscopeShowIn(BaseModel):
@@ -1137,6 +1138,11 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         periscope_call(select_then_front)
         return {"ok": True}
 
+    @app.get("/api/periscope/claudes", dependencies=periscope_auth)
+    def periscope_claudes() -> list[dict]:
+        """The Claude on each branch in periscope, with the GitHub repo of its repo's origin."""
+        return periscope_call(lambda p: claudes(p.state(), p.catalog()))
+
     # ---- Start in Claude Code -----------------------------------------------------------------
     def require_claude_code() -> None:
         if not settings.claude_code_on:
@@ -1247,11 +1253,13 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     # ---- Review a pull request ------------------------------------------------------------------
     # No session comment: the Linear issue that a PR names can be its author's, and a comment can notify them.
     @app.get("/api/pulls/{owner}/{name}/{number}/start", dependencies=auth)
-    def pull_start_options(owner: str, name: str, number: int, ident: str = "") -> dict:
+    def pull_start_options(owner: str, name: str, number: int, ident: str = "", branch: str = "") -> dict:
         """What Review's popover shows first: ``ident``, the Linear issue that the PR's row shows, the review prompt
         filled in, and for each target that is on, its repos whose origin is the PR's repo and the ones with a worktree
-        on pr-<N>."""
-        slug = f"{owner}/{name}"
+        on pr-<N>. With ``branch``, your PR's: periscope only, the worktrees on that branch, and the code prompt for the
+        issue, or no prompt when there is none."""
+        slug, url = f"{owner}/{name}", f"https://github.com/{owner}/{name}/pull/{number}"
+        on = branch or f"pr-{number}"
         issue, issue_hint = None, ""
         if ident:
             try:
@@ -1261,25 +1269,31 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         targets = {}
         if settings.periscope_on:
             try:
-                targets["periscope"] = {**pr_repos(periscope_call(lambda p: p.catalog()), slug, number), "error": ""}
+                targets["periscope"] = {**pr_repos(periscope_call(lambda p: p.catalog()), slug, on), "error": ""}
             except HTTPException as exc:
                 targets["periscope"] = {"repos": [], "branch_worktrees": [], "error": exc.detail}
-        if settings.claude_code_on:
-            targets["claude-code"] = {**pr_repos(claude_code.catalog(repo_labels()), slug, number), "error": ""}
+        if settings.claude_code_on and not branch:
+            targets["claude-code"] = {**pr_repos(claude_code.catalog(repo_labels()), slug, on), "error": ""}
+        if branch:
+            prompt = fill_prompt(settings.code_prompt, issue, pr=url) if issue else ""
+        else:
+            prompt = fill_review_prompt(settings.review_prompt, issue, url)
         return {
             "issue": {"identifier": issue["identifier"], "title": issue["title"]} if issue else None,
             "issue_hint": issue_hint,
-            "prompt": fill_review_prompt(settings.review_prompt, issue, f"https://github.com/{slug}/pull/{number}"),
+            "prompt": prompt,
             "targets": targets,
         }
 
     @app.post("/api/pulls/{owner}/{name}/{number}/periscope", dependencies=periscope_auth)
     def pull_periscope_start(owner: str, name: str, number: int, body: PullPeriscopeStartIn) -> dict:
-        """Ask periscope to start Claude on the PR with the prompt and a name from Haiku. The repo is one of the
-        options, whose origin is the PR's repo. A Claude already on pr-<N> is answered as mode "existing"."""
+        """Ask periscope to start Claude on the PR with the prompt and a name from Haiku: on pr-<N>, or on ``branch``
+        for your own PR. The repo is one of the options, whose origin is the PR's repo. A Claude already on the branch
+        is answered as mode "existing"."""
+        branch = body.branch.strip()
         return start_in_periscope(
-            f"#{number}", repo=body.repo, pr=number, ticket=body.ticket, title=body.ticket_title, prompt=body.prompt,
-            name=name_claude(f"pr-{number}", body.title))
+            f"#{number}", repo=body.repo, branch=branch, pr=None if branch else number, ticket=body.ticket,
+            title=body.ticket_title, prompt=body.prompt, name=name_claude(f"pr-{number}", body.title))
 
     @app.post("/api/pulls/{owner}/{name}/{number}/claude-code", dependencies=claude_code_auth)
     def pull_claude_code_start(owner: str, name: str, number: int, body: PullStartIn) -> dict:
