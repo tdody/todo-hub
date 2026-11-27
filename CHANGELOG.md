@@ -2,6 +2,12 @@
 
 What changed in each TodoHub release, newest first. The app's update panel shows the newest section, and anyone can read this file.
 
+## v0.7.0
+
+- **Open in periscope:** in **Pull requests → Mine**, an opened row has **Open in periscope** (**p** for the selected row) when periscope is on. When a Claude in periscope is on the pull request's branch, the button selects that Claude and brings periscope to the front. That row also shows a **Claude** chip after its Linear issue, when the line has room.
+- **Start from Mine:** with no Claude on the branch, **Open in periscope** opens the start popover. **Start** starts Claude on the pull request's own branch, in the worktree that is already on it, with the code prompt. With no worktree on the branch, Start is off: check out the branch first, so that Claude gets its latest commits. A start from Mine adds no comment to the Linear issue.
+- **Links in descriptions and comments:** a link that Linear saves in angle brackets works now. Before, it showed as plain text. A link whose text is an address opens one page, not two. Links are underlined, so you can tell them from the text around them.
+
 ## v0.6.0
 
 - **Reviewed:** **Pull requests → To review** has a new view, **Reviewed**, between **Waiting 3+ days** and **Asked again** (now key **4**). It lists the open pull requests of others that you reviewed and that do not ask for your review now, the newest review first. A comment counts as a review. The counts of To review and the sidebar leave them out.
