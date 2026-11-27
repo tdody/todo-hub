@@ -1701,6 +1701,10 @@ tr.pr-row.open > td:not(.rail), .pr-table tr.detail > td:not(.rail) { background
 .prs .m .pill { font-size: 11px; line-height: 15px; padding: 0 7px; gap: 5px; }
 .prs .m .pill .pdot { width: 6px; height: 6px; }
 .prs .m .ref { font-size: 12px; line-height: 15px; vertical-align: 0; }
+/* Mine: the branch has a Claude in periscope */
+.prs .m .pcl { gap: 4px; }
+/* centered by itself, so the text keeps the chip's baseline, as in the Linear chip */
+.pcl-dot { align-self: center; width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
 .pill.pr-draft { background: var(--surface-2); color: var(--muted); }
 .pill.pr-draft .pdot { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }    /* a dashed outline means Backlog */
 .pill.pr-chg { background: var(--warn-bg); color: var(--warn-ink); }

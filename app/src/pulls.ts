@@ -1,6 +1,7 @@
 // Pull requests tab: your open pull requests (Mine) and the ones that ask for your review or that you
 // reviewed (To review), read from GitHub by the backend (pulls.py). Each of yours gets one next step,
-// worked out from GitHub data only. A stack (pull requests built on each other) sorts and shows as one unit.
+// worked out from GitHub data only. A stack (pull requests built on each other) sorts and shows as one unit. With
+// periscope on, Mine shows which branches have a Claude there, and Open in periscope selects it or starts one.
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, ApiError } from "./api";
 import type { Issue, Meta, PullRequest, Pulls } from "./api";
@@ -66,10 +67,14 @@ const st = {
   sel: null as string | null,
   filter: "",
   fold: false,                          // drafts in no stack
+  claudes: new Map<string, string>(),   // the pid of the Claude in periscope on each branch, by claudeKey
 };
 
 // ---- small helpers ------------------------------------------------------------------------------
 const keyOf = (p: PullRequest) => `${p.repo}#${p.number}`;
+// GitHub ignores the case of owner/name, and git's origin can spell it in another case.
+const claudeKey = (repo: string, branch: string) => `${repo.toLowerCase()} ${branch}`;
+const claudeOf = (p: PullRequest) => st.claudes.get(claudeKey(p.repo, p.head));
 const domId = (key: string) => `pr-${key.replace(/[^A-Za-z0-9]/g, "-")}`;
 const since = (iso: string | null) => (iso ? Math.max(0, Date.now() - Date.parse(iso)) : 0);
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -287,6 +292,8 @@ function commentsCell(comments: number, open: number): Node {
 
 /** Review shows in To review when periscope or Claude Code can start one. */
 const showsReview = () => st.side === "review" && reviewTargets(ctx.meta()).length > 0;
+/** Open in periscope and the Claude chip show in Mine when periscope is on. */
+const showsPeriscope = () => st.side === "mine" && !!ctx.meta()?.periscope;
 
 function stepCell(p: PullRequest): Node {
   if (st.side === "review") {
@@ -322,6 +329,10 @@ function metaLine(p: PullRequest, u: Unit): HTMLElement {
   }
   const lin = linearOf(p);
   if (lin) rest.push(linearRef(lin.ident));
+  if (showsPeriscope() && claudeOf(p)) {
+    rest.push(h("button", { class: "ref pcl", "data-act": "periscope", tabindex: "-1", title: "Open its Claude in periscope (p)" },
+      h("span", { class: "pcl-dot", "aria-hidden": "true" }), "Claude"));
+  }
   // a stack sits in its base's section, so a member in another client or project names it
   const own = groupOf(p);
   if (isGrouped() && u.all.length > 1 && groupKey(own) !== groupKey(groupOf(u.all[0]))) rest.push(groupName(own));
@@ -459,6 +470,7 @@ function detailRow(p: PullRequest, u: Unit): HTMLElement {
         h("section", { class: "box" }, ...sideBox(p))),
       h("div", { class: "acts" },
         h("button", { class: "secondary pr-main", "data-act": "gh" }, "Open in GitHub", h("kbd", {}, "o")),
+        showsPeriscope() && h("button", { class: "secondary", "data-act": "periscope" }, "Open in periscope", h("kbd", {}, "p")),
         lin?.url && h("button", { class: "secondary", "data-act": "lin" }, `Open ${lin.ident}`, h("kbd", {}, "l")),
         h("button", { class: "secondary", "data-act": "copy" }, "Copy branch name"),
         refreshButton(p))));
@@ -650,18 +662,22 @@ function panel(): HTMLElement {
       : h("div", { class: "empty pr-empty" }, ...empty),
     rows && h("p", { class: "pr-hint" }, kbd("j"), kbd("k"), " move · ", kbd("Space"), " opens or closes · ",
       showsReview() && kbd("p"), showsReview() && " review · ", kbd("o"), " GitHub · ",
+      showsPeriscope() && kbd("p"), showsPeriscope() && " periscope · ",
       kbd("l"), " Linear · ", side === "mine" && kbd("g"), side === "mine" && " groups · ",
       kbd("1"), "–", kbd(String(VIEWS[side].length)), " pick a view · ", kbd("?"), " all keys"));
 }
 
-type Focus = { on: "filter"; from: number | null; to: number | null } | { on: "act"; act: string; key: string | null }
+type Focus = { on: "filter"; from: number | null; to: number | null }
+  | { on: "act"; act: string; key: string | null; detail: boolean }
   | { on: "start" } | { on: "stack"; id: string } | { on: "section"; key: string } | { on: "table" } | { on: "tab" } | null;
 function focusNow(): Focus {
   const a = document.activeElement;
   if (a === filterInput) return { on: "filter", from: filterInput.selectionStart, to: filterInput.selectionEnd };
   if (a?.closest(".start-pop")) return { on: "start" };
   if (a instanceof HTMLElement && a.dataset.act && root?.contains(a)) {
-    return { on: "act", act: a.dataset.act, key: a.closest<HTMLElement>("tr")?.dataset.key ?? null };
+    // a row and its opened part can have the same action (the Linear chip and Open ENG-123, the Claude chip and Open in periscope)
+    const tr = a.closest<HTMLElement>("tr");
+    return { on: "act", act: a.dataset.act, key: tr?.dataset.key ?? null, detail: !!tr?.classList.contains("detail") };
   }
   const stack = a?.matches(".sk") && a.closest<HTMLElement>("tr")?.dataset.stack;
   if (stack) return { on: "stack", id: stack };
@@ -681,7 +697,7 @@ function refocus(f: Focus) {
     if (!pop) focusSel(false);
     else if (!pop.contains(document.activeElement)) pop.focus({ preventScroll: true });
   } else if (f?.on === "act") {
-    const row = f.key ? `tr[data-key="${CSS.escape(f.key)}"] ` : "";
+    const row = f.key ? `tr${f.detail ? ".detail" : ".pr-row"}[data-key="${CSS.escape(f.key)}"] ` : "";
     root?.querySelector<HTMLElement>(`${row}[data-act="${f.act}"]`)?.focus();
   } else if (f?.on === "stack") root?.querySelector<HTMLElement>(`tr.sum[data-stack="${CSS.escape(f.id)}"] .sk`)?.focus();
   else if (f?.on === "section") {
@@ -712,12 +728,19 @@ export function pullsView(): HTMLElement {
   return root;
 }
 
-/** Put Review's popover under its row, and let the page grow to show all of it. */
+/** Put Review's popover under its row, or under Open in periscope in Mine, and let the page grow to show all of it. */
 function placeReview() {
   const pop = root?.querySelector<HTMLElement>(".pr-wrap > .start-pop"), p = popoverPull();
   const row = p && root?.querySelector<HTMLElement>(`tr.pr-row[data-key="${CSS.escape(keyOf(p))}"]`);
   if (!pop || !row) return;
-  const top = row.offsetTop + row.offsetHeight - 4;
+  const btn = st.side === "mine" && root?.querySelector<HTMLElement>(`tr.detail[data-key="${CSS.escape(keyOf(p!))}"] [data-act="periscope"]`);
+  let top = row.offsetTop + row.offsetHeight - 4;
+  if (btn) {
+    const wrap = pop.parentElement!.getBoundingClientRect(), b = btn.getBoundingClientRect();
+    top = b.bottom - wrap.top + 6;
+    pop.style.left = `${Math.max(0, Math.min(b.left - wrap.left, wrap.width - pop.offsetWidth))}px`;   // inside the page
+    pop.style.right = "auto";
+  }
   pop.style.top = `${top}px`;
   pop.parentElement!.style.setProperty("--pop-bottom", `${top + pop.offsetHeight}px`);
 }
@@ -738,8 +761,20 @@ export function pullsCount(): number | null {
   return d?.read_at ? d.mine.filter(needsYou).length + d.review.length : null;
 }
 
+/** The Claude on each branch in periscope. None when periscope does not answer: the button then offers a start. */
+async function loadClaudes(): Promise<void> {
+  try {
+    st.claudes = new Map((await api.periscopeClaudes()).map((c) => [claudeKey(c.repo, c.branch), c.pid]));
+  } catch (e) {
+    console.warn("Could not read the Claudes in periscope:", e);
+    st.claudes = new Map();
+  }
+  paint();
+}
+
 export async function loadPulls(force = false): Promise<void> {
   if (st.loading) return;
+  if (ctx.meta()?.periscope) void loadClaudes();
   st.loading = true;
   st.askedAt = Date.now();
   paint();
@@ -847,10 +882,27 @@ function act(kind: string, p: PullRequest | undefined) {
   } else if (kind === "review") {
     st.sel = keyOf(p);
     void openReview(p, linearOf(p)?.ident ?? "");
-  } else if (kind === "refresh") void refreshOne(p);
+  } else if (kind === "periscope") void openInPeriscope(p); else if (kind === "refresh") void refreshOne(p);
   else if (kind === "copy") {
     navigator.clipboard.writeText(p.head).then(() => ctx.toast(`Copied ${p.head}`), () => ctx.toast("Could not copy the branch name."));
   }
+}
+
+/** Select the Claude on the PR's branch in periscope, or open the start popover under the opened row. It reads the
+ *  Claudes first: one may have closed, or started, since the last read. */
+async function openInPeriscope(p: PullRequest) {
+  st.sel = keyOf(p);
+  await loadClaudes();
+  const pid = claudeOf(p);
+  if (pid) {
+    api.showInPeriscope(pid).catch((e) => ctx.toast(`Could not open #${p.number} in periscope: ${e instanceof ApiError ? e.message : String(e)}`));
+    return;
+  }
+  st.open.add(keyOf(p));
+  void openReview(p, linearOf(p)?.ident ?? "", { branch: p.head, started: (newPid) => {
+    st.claudes.set(claudeKey(p.repo, p.head), newPid);
+    paint();
+  } });
 }
 
 function onClick(e: MouseEvent) {
@@ -936,6 +988,7 @@ export function pullsKey(e: KeyboardEvent): boolean {
       paint();
       return true;
     case "p":
+      if (showsPeriscope()) { act("periscope", prOf(st.sel)); return true; }
       if (!showsReview()) return false;
       act("review", prOf(st.sel));
       return true;

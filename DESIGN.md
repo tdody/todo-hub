@@ -545,6 +545,12 @@ Mine shows the client or project of each pull request: in a column when the grou
 - **Section heading:** a row across the table. A chevron (down when open, right when folded), the 26px logo or initial, the name at 16px and 700, the 12px Pencil summary ("5 open · 2 need you · 1 CI failing", the CI part in Alarm Red), then a Hairline rule to the edge. 22px above it (10px for the first), 6px below it, a Hairline under it. A click folds the section to its heading.
 - **Narrow pages:** Client / project folds at a 1120px page and narrower, and Size at 920px, so the titles keep about 235px at the default 1120px window (an 840px page). Comments folds at 620px. At 720px the "Group" label hides, Refresh all shows only its icon, and the filter can shrink to 120px, so the header line fits on the narrowest page (about 530px).
 
+### Open in periscope (Pull requests)
+
+- **Button:** in an opened row of Mine, a secondary button after Open in GitHub, with its `p` key. Open in GitHub stays the one filled button. It shows when periscope is on.
+- **Claude chip:** an issue chip after the Linear issue in the meta line, when a Claude in periscope is on the branch: a 6px Done Green dot, then "Claude". It drops out with the rest of the line when the line is full, as at the default 1120px window.
+- **Start popover:** with no Claude on the branch, the start popover opens under the button, aligned with its left edge and kept inside the page. With no worktree on the branch, Start is off and the hint is in Morning Amber ink, as the start popover's other "off" lines.
+
 ### Inputs / Fields
 
 - **Style:** Paper with a Hairline border, 6px corners, 13px text.
