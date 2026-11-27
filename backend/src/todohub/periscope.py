@@ -71,8 +71,9 @@ class Periscope:
         self._call("POST", "/api/select", {"pid": pid})
 
     def state(self) -> dict:
-        """Its dashboard's state: {windows: [{pid, agent, repo_key, branch, activity, …}], …}. Periscope reads it for
-        itself; it is not an API made for other apps."""
+        """Its dashboard's state: {windows: [{pid, agent, repo_slug, branch, activity, …}], …}."""
+        # shortcut: periscope's own dashboard data, not an API for other apps; switch when periscope answers "the Claude
+        # on this branch" itself.
         return self._call("GET", "/api/state")
 
 
@@ -94,19 +95,18 @@ def pr_links(urls: list[str]) -> list[tuple[str, int]]:
     return list(found.values())
 
 
-def claudes(state: dict, catalog: dict) -> list[dict]:
+def claudes(state: dict) -> list[dict]:
     """The Claudes in periscope's ``state`` on a branch of a repo whose origin is on GitHub: {repo (``owner/name``),
-    branch, pid}. One for each branch: the most recently active, as periscope picks it for a start."""
-    slugs = {r["repo"]: r["slug"] for r in catalog["repos"] if r.get("slug")}
+    branch, pid}. One for each branch: the most recently active, as periscope picks it for a start. A state with no
+    ``windows`` raises, so a change in periscope shows in the log."""
     found: dict[tuple[str, str], dict] = {}
-    for w in state.get("windows", []):
-        slug = slugs.get(w.get("repo_key"))
-        if w.get("agent") != "claude" or not slug or not w.get("branch"):
+    for w in state["windows"]:
+        if w.get("agent") != "claude" or not w.get("repo_slug") or not w.get("branch"):
             continue
-        key = (slug.lower(), w["branch"])
+        key = (w["repo_slug"].lower(), w["branch"])
         if key not in found or (w.get("activity") or 0) > (found[key].get("activity") or 0):
             found[key] = w
-    return [{"repo": slugs[w["repo_key"]], "branch": w["branch"], "pid": w["pid"]} for w in found.values()]
+    return [{"repo": w["repo_slug"], "branch": w["branch"], "pid": w["pid"]} for w in found.values()]
 
 
 def pr_repos(catalog: dict, slug: str, branch: str) -> dict:

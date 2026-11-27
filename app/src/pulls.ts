@@ -667,14 +667,17 @@ function panel(): HTMLElement {
       kbd("1"), "–", kbd(String(VIEWS[side].length)), " pick a view · ", kbd("?"), " all keys"));
 }
 
-type Focus = { on: "filter"; from: number | null; to: number | null } | { on: "act"; act: string; key: string | null }
+type Focus = { on: "filter"; from: number | null; to: number | null }
+  | { on: "act"; act: string; key: string | null; detail: boolean }
   | { on: "start" } | { on: "stack"; id: string } | { on: "section"; key: string } | { on: "table" } | { on: "tab" } | null;
 function focusNow(): Focus {
   const a = document.activeElement;
   if (a === filterInput) return { on: "filter", from: filterInput.selectionStart, to: filterInput.selectionEnd };
   if (a?.closest(".start-pop")) return { on: "start" };
   if (a instanceof HTMLElement && a.dataset.act && root?.contains(a)) {
-    return { on: "act", act: a.dataset.act, key: a.closest<HTMLElement>("tr")?.dataset.key ?? null };
+    // a row and its opened part can have the same action (the Linear chip and Open ENG-123, the Claude chip and Open in periscope)
+    const tr = a.closest<HTMLElement>("tr");
+    return { on: "act", act: a.dataset.act, key: tr?.dataset.key ?? null, detail: !!tr?.classList.contains("detail") };
   }
   const stack = a?.matches(".sk") && a.closest<HTMLElement>("tr")?.dataset.stack;
   if (stack) return { on: "stack", id: stack };
@@ -694,7 +697,7 @@ function refocus(f: Focus) {
     if (!pop) focusSel(false);
     else if (!pop.contains(document.activeElement)) pop.focus({ preventScroll: true });
   } else if (f?.on === "act") {
-    const row = f.key ? `tr[data-key="${CSS.escape(f.key)}"] ` : "";
+    const row = f.key ? `tr${f.detail ? ".detail" : ".pr-row"}[data-key="${CSS.escape(f.key)}"] ` : "";
     root?.querySelector<HTMLElement>(`${row}[data-act="${f.act}"]`)?.focus();
   } else if (f?.on === "stack") root?.querySelector<HTMLElement>(`tr.sum[data-stack="${CSS.escape(f.id)}"] .sk`)?.focus();
   else if (f?.on === "section") {
@@ -735,7 +738,7 @@ function placeReview() {
   if (btn) {
     const wrap = pop.parentElement!.getBoundingClientRect(), b = btn.getBoundingClientRect();
     top = b.bottom - wrap.top + 6;
-    pop.style.left = `${b.left - wrap.left}px`;
+    pop.style.left = `${Math.max(0, Math.min(b.left - wrap.left, wrap.width - pop.offsetWidth))}px`;   // inside the page
     pop.style.right = "auto";
   }
   pop.style.top = `${top}px`;
@@ -879,16 +882,18 @@ function act(kind: string, p: PullRequest | undefined) {
   } else if (kind === "review") {
     st.sel = keyOf(p);
     void openReview(p, linearOf(p)?.ident ?? "");
-  } else if (kind === "periscope") openInPeriscope(p); else if (kind === "refresh") void refreshOne(p);
+  } else if (kind === "periscope") void openInPeriscope(p); else if (kind === "refresh") void refreshOne(p);
   else if (kind === "copy") {
     navigator.clipboard.writeText(p.head).then(() => ctx.toast(`Copied ${p.head}`), () => ctx.toast("Could not copy the branch name."));
   }
 }
 
-/** Select the Claude on the PR's branch in periscope, or open the start popover under the opened row. */
-function openInPeriscope(p: PullRequest) {
-  const pid = claudeOf(p);
+/** Select the Claude on the PR's branch in periscope, or open the start popover under the opened row. It reads the
+ *  Claudes first: one may have closed, or started, since the last read. */
+async function openInPeriscope(p: PullRequest) {
   st.sel = keyOf(p);
+  await loadClaudes();
+  const pid = claudeOf(p);
   if (pid) {
     api.showInPeriscope(pid).catch((e) => ctx.toast(`Could not open #${p.number} in periscope: ${e instanceof ApiError ? e.message : String(e)}`));
     return;

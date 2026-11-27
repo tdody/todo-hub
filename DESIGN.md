@@ -549,7 +549,7 @@ Mine shows the client or project of each pull request: in a column when the grou
 
 - **Button:** in an opened row of Mine, a secondary button after Open in GitHub, with its `p` key. Open in GitHub stays the one filled button. It shows when periscope is on.
 - **Claude chip:** an issue chip after the Linear issue in the meta line, when a Claude in periscope is on the branch: a 6px Done Green dot, then "Claude". It drops out with the rest of the line when the line is full, as at the default 1120px window.
-- **Start popover:** with no Claude on the branch, the start popover opens under the button, aligned with its left edge.
+- **Start popover:** with no Claude on the branch, the start popover opens under the button, aligned with its left edge and kept inside the page. With no worktree on the branch, Start is off and the hint is in Morning Amber ink, as the start popover's other "off" lines.
 
 ### Inputs / Fields
 

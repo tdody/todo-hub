@@ -36,11 +36,11 @@ interface Review extends Fields {
   pull: PullRequest;
   options: PullStartOptions | null;     // null while they load
   target: StartTarget | null;           // null: no target that is on has the PR's repo
-  own: Own | null;                      // your PR: start on its branch; null: a review, on pr-<N>
+  mineStart: MineStart | null;          // your PR, from Mine: start on its branch; null: a review, on pr-<N>
 }
 
 /** Your PR's branch, and what to do with the pid of the Claude that a start gives. */
-export interface Own { branch: string; started: (pid: string) => void }
+interface MineStart { branch: string; started: (pid: string) => void }
 
 const TARGET_NAME: Record<StartTarget, string> = { periscope: "periscope", "claude-code": "Claude Code" };
 
@@ -307,25 +307,26 @@ function selectTarget(r: Review, o: PullStartOptions, target: StartTarget) {
   r.starting = runningStarts.has(`${target}:${r.pull.url}`);
 }
 
-/** Focus Start, else the prompt (empty), else Cancel, else the popover, after the tab has put it under its row. */
+/** Focus Start, else an empty prompt, else Cancel, else the popover, after the tab has put it under its row. */
 function focusReview() {
   queueMicrotask(() => {
     const pop = document.querySelector<HTMLElement>(".start-pop");
     pop?.scrollIntoView({ block: "nearest" });
-    (pop?.querySelector<HTMLElement>(".start-go:not(:disabled)") ?? pop?.querySelector<HTMLElement>("textarea:not([readonly])")
+    const prompt = pop?.querySelector<HTMLTextAreaElement>("textarea:not([readonly])");
+    (pop?.querySelector<HTMLElement>(".start-go:not(:disabled)") ?? (prompt && !prompt.value.trim() ? prompt : null)
       ?? pop?.querySelector<HTMLElement>(".start-cancel:not(:disabled)") ?? pop)?.focus();
   });
 }
 
 /** ``ident`` is the Linear issue that the PR's row shows, or "". */
-export async function openReview(pull: PullRequest, ident: string, own: Own | null = null) {
+export async function openReview(pull: PullRequest, ident: string, mineStart: MineStart | null = null) {
   if (review?.pull.url === pull.url) return;
   popover = null;
-  const mine: Review = review = { pull, options: null, target: null, repo: "", prompt: "", starting: false, own };
+  const mine: Review = review = { pull, options: null, target: null, repo: "", prompt: "", starting: false, mineStart };
   ctx.render();
   focusReview();
   try {
-    const o = await api.pullStartOptions(pull, ident, own?.branch ?? "");
+    const o = await api.pullStartOptions(pull, ident, mineStart?.branch ?? "");
     if (review !== mine) return;      // closed, or opened for another PR, meanwhile
     mine.options = o;
     mine.prompt = o.prompt;
@@ -340,21 +341,27 @@ export async function openReview(pull: PullRequest, ident: string, own: Own | nu
   }
 }
 
-/** Start can run: a target with a repo, and a prompt, and no start already running there. */
+/** From Mine, the repo has a worktree on the branch. Periscope would make a branch that is not local from the default
+ *  branch, and would not fetch one that is: Claude would not get the PR's latest commits. */
+const hasBranchWorktree = (r: Review): boolean =>
+  !!r.target && !!r.mineStart && !!r.options?.targets[r.target]?.branch_worktrees.includes(r.repo);
+
+/** Start can run: a target with a repo (from Mine, one with a worktree on the branch), and a prompt, and no start
+ *  already running there. */
 function canReview(r: Review): boolean {
-  return !r.starting && r.target !== null && !!r.prompt.trim();
+  return !r.starting && r.target !== null && (!r.mineStart || hasBranchWorktree(r)) && !!r.prompt.trim();
 }
 
 async function startReview() {
   const r = review;
   if (!r?.options || !r.target || !canReview(r)) return;
-  const { pull, target, own } = r, { issue } = r.options, body = { repo: r.repo, prompt: r.prompt, title: pull.title };
+  const { pull, target, mineStart } = r, { issue } = r.options, body = { repo: r.repo, prompt: r.prompt, title: pull.title };
   const started = await runStart(r, `${target}:${pull.url}`,
     () => (review?.pull.url === pull.url && review.target === target ? review : null),
     `#${pull.number}`, () => (target === "claude-code" ? api.reviewInClaudeCode(pull, body)
       : api.reviewInPeriscope(pull, { ...body, ticket: issue?.identifier ?? "", ticket_title: issue?.title ?? "",
-          branch: own?.branch ?? "" })));
-  if (own && started && "pid" in started) own.started(started.pid);
+          branch: mineStart?.branch ?? "" })));
+  if (mineStart && started && "pid" in started) mineStart.started(started.pid);
 }
 
 /** The PR that Review's popover is open for. */
@@ -364,9 +371,9 @@ export const popoverPull = (): PullRequest | null => review?.pull ?? null;
 export function reviewPopover(): HTMLElement | "" {
   const r = review;
   if (!r) return "";
-  const n = r.pull.number, o = r.options, own = r.own;
+  const n = r.pull.number, o = r.options, mineStart = r.mineStart;
   const run = () => void startReview();
-  if (!o) return frame(own ? `Start #${n} in periscope` : `Review #${n}`, run, h("p", { class: "start-wait" }, "Loading…"));
+  if (!o) return frame(mineStart ? `Start #${n} in periscope` : `Review #${n}`, run, h("p", { class: "start-wait" }, "Loading…"));
   const targets = targetsOf(o), only = targets.length === 1;
   const go = startButton(r, run);
   const update = () => { go.disabled = !canReview(r); };
@@ -379,18 +386,19 @@ export function reviewPopover(): HTMLElement | "" {
     }, TARGET_NAME[t]))));
   const hintClass = only ? "start-hint lead" : "start-hint";      // under the title when there is no Where
   const selected = r.target && o.targets[r.target];
-  const branch = own?.branch ?? `pr-${n}`;
+  const branch = mineStart?.branch ?? `pr-${n}`;
+  const noWorktree = !!selected && !!mineStart && !hasBranchWorktree(r);
   const hint = !selected ? ""
     : selected.branch_worktrees.includes(r.repo) ? `A worktree is already on ${branch}.`
-    : own ? `Periscope adds a worktree on ${branch}.`
+    : mineStart ? `Start needs a worktree on ${branch}. Check out the branch first, so that Claude gets its latest commits.`
     : r.target === "periscope" ? "Periscope checks out the PR in a new worktree."
     : `A new worktree next to the repo, on pr-${n}.`;
   const reasons = targets.filter((t) => !o.targets[t]!.repos.length).map((t) => h("p", { class: `${hintClass} off` },
     o.targets[t]!.error || `No repo in ${t === "periscope" ? "periscope" : "Settings"} has ${r.pull.repo} as its origin.`));
-  return frame(`${own ? "Start" : "Review"} #${n}${only ? ` in ${TARGET_NAME[targets[0]]}` : ""}`, run,
+  return frame(`${mineStart ? "Start" : "Review"} #${n}${only ? ` in ${TARGET_NAME[targets[0]]}` : ""}`, run,
     o.issue_hint ? h("p", { class: "start-hint lead" }, o.issue_hint) : "",
     where,
-    hint ? h("p", { class: hintClass }, hint) : "",
+    hint ? h("p", { class: noWorktree ? `${hintClass} off` : hintClass }, hint) : "",
     ...reasons,
     selected ? repoField(r, selected.repos) : "",
     selected ? promptField(r, update) : "",

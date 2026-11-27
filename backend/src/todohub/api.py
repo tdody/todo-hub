@@ -1141,7 +1141,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.get("/api/periscope/claudes", dependencies=periscope_auth)
     def periscope_claudes() -> list[dict]:
         """The Claude on each branch in periscope, with the GitHub repo of its repo's origin."""
-        return periscope_call(lambda p: claudes(p.state(), p.catalog()))
+        return periscope_call(lambda p: claudes(p.state()))
 
     # ---- Start in Claude Code -----------------------------------------------------------------
     def require_claude_code() -> None:
@@ -1250,14 +1250,15 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
             pull_cache["data"] = pulls.updated(pull_cache["data"], f"{owner}/{name}", number, pr)
             return pulls_payload()
 
-    # ---- Review a pull request ------------------------------------------------------------------
-    # No session comment: the Linear issue that a PR names can be its author's, and a comment can notify them.
+    # ---- Review a pull request, or start on your own (Open in periscope, in Mine) ------------------
+    # No session comment: the Linear issue that a PR names can be its author's, and a comment can notify them. A start
+    # from Mine goes through the same routes, so it adds none either.
     @app.get("/api/pulls/{owner}/{name}/{number}/start", dependencies=auth)
     def pull_start_options(owner: str, name: str, number: int, ident: str = "", branch: str = "") -> dict:
         """What Review's popover shows first: ``ident``, the Linear issue that the PR's row shows, the review prompt
         filled in, and for each target that is on, its repos whose origin is the PR's repo and the ones with a worktree
-        on pr-<N>. With ``branch``, your PR's: periscope only, the worktrees on that branch, and the code prompt for the
-        issue, or no prompt when there is none."""
+        on pr-<N>. With ``branch``, your PR's: periscope only, the worktrees on that branch, and the code prompt filled in
+        as Start in periscope fills it, or no prompt when there is no issue."""
         slug, url = f"{owner}/{name}", f"https://github.com/{owner}/{name}/pull/{number}"
         on = branch or f"pr-{number}"
         issue, issue_hint = None, ""
@@ -1275,7 +1276,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if settings.claude_code_on and not branch:
             targets["claude-code"] = {**pr_repos(claude_code.catalog(repo_labels()), slug, on), "error": ""}
         if branch:
-            prompt = fill_prompt(settings.code_prompt, issue, pr=url) if issue else ""
+            prompt = fill_prompt(settings.code_prompt, issue) if issue else ""
         else:
             prompt = fill_review_prompt(settings.review_prompt, issue, url)
         return {
@@ -1288,11 +1289,10 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
     @app.post("/api/pulls/{owner}/{name}/{number}/periscope", dependencies=periscope_auth)
     def pull_periscope_start(owner: str, name: str, number: int, body: PullPeriscopeStartIn) -> dict:
         """Ask periscope to start Claude on the PR with the prompt and a name from Haiku: on pr-<N>, or on ``branch``
-        for your own PR. The repo is one of the options, whose origin is the PR's repo. A Claude already on the branch
-        is answered as mode "existing"."""
-        branch = body.branch.strip()
+        for your own PR, in a worktree already on it (the app offers no other). The repo is one of the options, whose
+        origin is the PR's repo. A Claude already on the branch is answered as mode "existing"."""
         return start_in_periscope(
-            f"#{number}", repo=body.repo, branch=branch, pr=None if branch else number, ticket=body.ticket,
+            f"#{number}", repo=body.repo, branch=body.branch, pr=None if body.branch else number, ticket=body.ticket,
             title=body.ticket_title, prompt=body.prompt, name=name_claude(f"pr-{number}", body.title))
 
     @app.post("/api/pulls/{owner}/{name}/{number}/claude-code", dependencies=claude_code_auth)

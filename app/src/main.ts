@@ -3596,6 +3596,7 @@ const SHORTCUTS: [string, string, (() => boolean)?][] = [
   ["⇧E · ⇧S · ⇧C", "Today, Client, Dev: edit the description · add a sub-issue · comment (⌘↵ posts)"],
   ["p", "Today, Client, Dev: start the issue in periscope (a worktree, Claude and a prompt)", () => !!state.meta?.periscope],
   ["p", "Pull requests (To review): review the selected pull request (a worktree, Claude and a prompt)", () => reviewTargets(state.meta).length > 0],
+  ["p", "Pull requests (Mine): open the selected pull request's Claude in periscope, or start one on its branch", () => !!state.meta?.periscope],
   ["c", "Capture a task"],
   ["/", "Filter"],
   ["⌘1 – ⌘7", "Inbox, Today, Client, Dev, Pull requests, Insights, Settings (also ⌘,)"],

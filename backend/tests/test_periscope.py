@@ -36,16 +36,16 @@ SLUGGED = {
                   {"path": "/dev/worktrees/api/pr-812", "repo": "/dev/api", "branch": "pr-812", "is_main": False}],
 }
 PR = "https://github.com/acme/api/pull/812"
-# Periscope's windows: two Claudes on api's me/eng-1 (k2 more recently active), a shell, a Claude on notes (no GitHub
-# origin), a Claude on no branch, and Codex.
+# Periscope's windows: two Claudes on api's me/eng-1 (k2, first, more recently active), a shell, a Claude on notes (no
+# GitHub origin), a Claude on no branch, and Codex. web's slug has capitals: GitHub ignores case.
 STATE = {"windows": [
-    {"pid": "k1", "agent": "claude", "repo_key": "/dev/api", "branch": "me/eng-1", "activity": 10},
-    {"pid": "k2", "agent": "claude", "repo_key": "/dev/api", "branch": "me/eng-1", "activity": 20},
-    {"pid": "k3", "agent": "claude", "repo_key": "/dev/web", "branch": "me/eng-2", "activity": None},
-    {"pid": "s1", "agent": None, "repo_key": "/dev/api", "branch": "main"},
-    {"pid": "k4", "agent": "claude", "repo_key": "/dev/notes", "branch": "main", "activity": 5},
-    {"pid": "k5", "agent": "claude", "repo_key": None, "branch": None},
-    {"pid": "c1", "agent": "codex", "repo_key": "/dev/web", "branch": "me/eng-3"},
+    {"pid": "k2", "agent": "claude", "repo_slug": "acme/api", "branch": "me/eng-1", "activity": 20},
+    {"pid": "k1", "agent": "claude", "repo_slug": "acme/api", "branch": "me/eng-1", "activity": 10},
+    {"pid": "k3", "agent": "claude", "repo_slug": "Acme/Web", "branch": "me/eng-2", "activity": None},
+    {"pid": "s1", "agent": None, "repo_slug": "acme/api", "branch": "main"},
+    {"pid": "k4", "agent": "claude", "repo_slug": None, "branch": "main", "activity": 5},
+    {"pid": "k5", "agent": "claude", "repo_slug": "acme/api", "branch": None},
+    {"pid": "c1", "agent": "codex", "repo_slug": "Acme/Web", "branch": "me/eng-3"},
 ]}
 
 
@@ -165,10 +165,12 @@ def test_review_prs_match_repos_by_origin_and_name_the_missing_ones():
 
 
 def test_claudes_are_the_most_recent_one_on_each_branch_of_a_github_repo():
-    assert claudes(STATE, SLUGGED) == [{"repo": "acme/api", "branch": "me/eng-1", "pid": "k2"},
-                                       {"repo": "Acme/Web", "branch": "me/eng-2", "pid": "k3"}]
-    assert claudes(STATE, CATALOG) == []                          # an older periscope sends no slug
-    assert claudes({}, SLUGGED) == []
+    assert claudes(STATE) == [{"repo": "acme/api", "branch": "me/eng-1", "pid": "k2"},
+                              {"repo": "Acme/Web", "branch": "me/eng-2", "pid": "k3"}]
+    older = {"windows": [{k: v for k, v in w.items() if k != "repo_slug"} for w in STATE["windows"]]}
+    assert claudes(older) == []                                   # a periscope that sends no slug
+    with pytest.raises(KeyError):                                 # a change in periscope's state shows in the log
+        claudes({})
 
 
 def test_pr_repos_are_the_ones_whose_origin_is_the_prs_repo():
@@ -467,11 +469,10 @@ def test_a_start_needs_a_branch_or_a_pr(env, peri, target):
     assert peri.calls == []
 
 
-def test_claudes_reads_periscopes_state_and_catalog(env, peri):
+def test_claudes_reads_periscopes_state(env, peri):
     client, _, _ = env
-    peri.catalog = SLUGGED
-    assert client.get("/api/periscope/claudes").json() == claudes(STATE, SLUGGED)
-    assert [c[:2] for c in peri.calls] == [("GET", "/api/state"), ("GET", "/api/open/catalog")]
+    assert client.get("/api/periscope/claudes").json() == claudes(STATE)
+    assert [c[:2] for c in peri.calls] == [("GET", "/api/state")]
 
 
 def test_show_when_periscope_cannot_be_brought_forward(peri):
@@ -624,7 +625,7 @@ def test_pull_options_for_your_own_branch_leave_claude_code_out(git_repo):
 
 def test_pull_start_on_your_branch_sends_the_branch(env, peri):
     client, _, _ = env
-    r = client.post(f"{PULL}/periscope", json={**PULL_START, "ticket": "ENG-1", "branch": " me/eng-1 "})
+    r = client.post(f"{PULL}/periscope", json={**PULL_START, "ticket": "ENG-1", "branch": "me/eng-1"})
     assert r.status_code == 200
     assert peri.calls == [("POST", "/api/linear/start", {
         "repo": "/dev/api", "branch": "me/eng-1", "ticket": "ENG-1", "title": "", "prompt": "Review it.",
