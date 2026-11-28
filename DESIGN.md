@@ -503,6 +503,11 @@ A card for a customer that has no client label yet. Approving it creates the lab
 - **Decision group:** in every Inbox card, Snooze ▾, Drop ▾ (when the card has it) and the primary button stay together at the right edge. When they do not fit on one line, the primary button goes to the next line, also at the right edge.
 - **Other cards:** when approve creates or finds the label, the other cards for that customer get it, and their box goes.
 
+### New project (Inbox cards and reading panes)
+
+- **Select:** the project select ends with "New project…". Picking it keeps the old pick and opens the dialog.
+- **Dialog:** the simple dialog, titled "New project": a "Name" field in the check-in field style, then a 12px Pencil line: "Create adds the project to your team in Linear now. Everyone on the team sees it." Cancel and Create (primary). Enter creates; Esc cancels.
+
 ### List items and the reading pane
 
 - **List item:** no border or fill at rest; hover shows a 60% Paper wash; selected becomes Paper with an accent-tinted border, the Selected row shadow and a 600 title. One line of 12px meta under the title.
