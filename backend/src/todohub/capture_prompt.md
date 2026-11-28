@@ -15,6 +15,7 @@ $input
    - `links`: the documents, files, PRs and dashboards the task needs.
    - `subtasks`: only when the steps are spelled out.
    - `client_label`: one of: $client_labels. $client_rule Otherwise leave it empty (development or internal work).
+   - `project`: when the task clearly belongs to one of these active Linear projects, give its exact name; otherwise leave it empty: $projects
    - `due_date` only when stated; `priority` 2 when a client is waiting, 3 normal, 4 small.
 4. Don't call `is_seen` or `mark_seen`; this is a one-off.
 

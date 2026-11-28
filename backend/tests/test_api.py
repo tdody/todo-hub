@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from todohub import tools
 from todohub.api import PREVIEW_DESCRIPTION, create_app, issue_description
+from todohub.capture import named_project
 from todohub.config import load_settings
 from todohub.db import DB
 from todohub.linear import LinearError
@@ -281,6 +282,16 @@ def test_capture_note_is_immediate(env):
     assert c["why"] == "for Friday"
     assert launched == []
     assert client.post("/api/capture", json={"text": "   "}).status_code == 400
+
+
+def test_capture_note_suggests_the_project_it_names(env):
+    client, db, _, _ = env
+    db.set_meta("projects", ["TodoHub", "Globex", "Globex renewal", "AI"])
+    r = client.post("/api/capture", json={"text": "Todo-hub: show the sprint"})
+    assert r.json()["candidate"]["project"] == "TodoHub"
+    assert named_project("Prep the globex RENEWAL call", ["Globex", "Globex renewal"]) == "Globex renewal"
+    assert named_project("Maintain the docs", ["AI"]) is None          # a name only counts on word edges
+    assert named_project("Fix it", ["🚀"]) is None             # a name with no letters names nothing
 
 
 def test_capture_link_starts_claude(env):
