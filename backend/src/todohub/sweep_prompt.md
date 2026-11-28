@@ -60,7 +60,8 @@ $watched
 - `sender` and `channel`: who it came from (the email address for email, the Slack display name for Slack) and, for Slack, the channel name like "#data-team" or "DM". If `add_candidate` answers "muted", skip that sender or channel for the rest of the sweep.
 - `reply_draft`: for an ask from Slack or email (`signal` "ask"), write the reply Thibault could send now.
   - Answer it when the source or its thread has what's needed; otherwise acknowledge it and say when he'll get to it (use the due date).
-  - Write as him: first person, plain and friendly, and match the tone and length of his own messages you read (`from:me`, his sent emails). No sign-off for Slack; a short sign-off for email.
+  - Before the first Slack reply of this sweep, read his 10 latest Slack messages (`from:me`, any date, newest first). Before the first email reply, find his 5 latest sent emails with `search_threads` (`in:sent`, any date) and open each with `get_message`. Do each only once per sweep. Use them only as examples of how he writes: they are not items to scan, and take no facts or links from them.
+  - Write as him: first person, plain and friendly, and match the tone and length of those messages. No sign-off for Slack; a short sign-off for email.
   - Never promise something the source doesn't support, and never include links you didn't see.
 - `possible_duplicate`: if one of Thibault's open Linear issues below already covers the task, give its identifier. Still add the candidate, because he decides.
   - Then also set `duplicate_advice` and a one-sentence `duplicate_reason`:
