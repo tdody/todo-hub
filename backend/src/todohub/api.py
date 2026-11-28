@@ -33,7 +33,8 @@ from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, DEFAULT_REVIEW_PR
                      SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings, get_linear_key, load_settings,
                      read_overrides, source_state, write_overrides)
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, shape_issue
+from .linear import (Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, name_key,
+                     shape_issue)
 from .periscope import Periscope, PeriscopeError, bring_to_front, claudes, pr_links, pr_repos, review_prs
 from .selfcmd import self_command
 from .sources import SourceError
@@ -589,13 +590,14 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     @app.post("/api/projects", dependencies=auth)
     def create_project(body: ProjectIn) -> dict:
-        """The open project with this name (any case), added to the team in Linear when there is none."""
+        """The open project with the same name key ("Todo Hub" is TodoHub), added to the team in Linear
+        when there is none."""
         name = body.name.strip()
         if not name:
             raise HTTPException(400, "The project name can't be empty")
         with create_lock:
             m = team_meta(refresh=True)
-            project = next((p for p in m.projects if p["name"].lower() == name.lower()), None)
+            project = next((p for p in m.projects if name_key(p["name"]) == name_key(name)), None)
             if not project:
                 project = linear_call(lambda l: l.create_project(name, m.team_id))
                 team_meta(refresh=True)      # the pickers and the card edit check know the project now

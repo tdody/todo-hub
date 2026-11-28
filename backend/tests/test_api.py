@@ -291,6 +291,8 @@ def test_capture_note_suggests_the_project_it_names(env):
     assert r.json()["candidate"]["project"] == "TodoHub"
     assert named_project("Prep the globex RENEWAL call", ["Globex", "Globex renewal"]) == "Globex renewal"
     assert named_project("Maintain the docs", ["AI"]) is None          # a name only counts on word edges
+    assert named_project("Not able to log in", ["Notable"]) is None    # nor split inside one word
+    assert named_project("the todo hub sprint", ["TodoHub"]) == "TodoHub"
     assert named_project("Fix it", ["🚀"]) is None             # a name with no letters names nothing
 
 
@@ -364,11 +366,11 @@ def test_new_project_is_created_once_and_can_be_picked(env):
     client, db, fake, _ = env
     assert client.post("/api/projects", json={"name": " globex "}).json() == {"id": "p-globex", "name": "Globex"}
     assert client.post("/api/projects", json={"name": "Hooli"}).json() == {"id": "p-Hooli", "name": "Hooli"}
-    assert client.post("/api/projects", json={"name": "hooli"}).json()["name"] == "Hooli"
-    assert [p["name"] for p in fake.projects].count("Hooli") == 1
-    assert "Hooli" in client.get("/api/meta").json()["projects"]
+    assert "Hooli" in client.get("/api/meta").json()["projects"]       # known right after the create
     cid = seed(db)
     assert client.patch(f"/api/candidates/{cid}", json={"project": "Hooli"}).status_code == 200
+    assert client.post("/api/projects", json={"name": "hoo-li"}).json()["name"] == "Hooli"
+    assert [p["name"] for p in fake.projects].count("Hooli") == 1
     assert client.post("/api/projects", json={"name": "  "}).status_code == 400
 
 

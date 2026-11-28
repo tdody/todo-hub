@@ -37,12 +37,13 @@ def needs_claude(settings: Settings, text: str) -> bool:
 
 
 def named_project(text: str, projects: list[str]) -> str | None:
-    """The project that ``text`` names, ignoring case, spaces and punctuation ("Todo-hub" names
-    TodoHub). The longest name wins, so "Globex renewal" beats "Globex"."""
+    """The project that ``text`` names, in any case. Spaces and punctuation may differ only between the
+    name's words, so "Todo-hub" names TodoHub but "not able" does not name Notable. The longest name
+    wins, so "Globex renewal" beats "Globex"."""
     def is_named(project: str) -> bool:
-        chars = re.sub(r"[\W_]", "", project)
-        pattern = r"\b" + r"[\W_]*".join(chars) + r"\b"
-        return bool(chars) and re.search(pattern, text, re.IGNORECASE) is not None
+        words = re.findall(r"[^\W_]+", re.sub(r"(?<=[a-z])(?=[A-Z])", " ", project))   # TodoHub: Todo, Hub
+        pattern = r"\b" + r"[\W_]*".join(words) + r"\b"
+        return bool(words) and re.search(pattern, text, re.IGNORECASE) is not None
     return max(filter(is_named, projects), key=len, default=None)
 
 

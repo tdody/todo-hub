@@ -254,6 +254,26 @@ def test_create_client_label_refused():
         Linear("k", transport=transport(handler)).create_client_label("Hooli", {"id": "g1", "color": "#fff", "team_id": None})
 
 
+def test_create_project_sends_the_name_and_team():
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content)["variables"]["input"])
+        return httpx.Response(200, json={"data": {"projectCreate": {
+            "success": True, "project": {"id": "p9", "name": "Hooli"}}}})
+
+    assert Linear("k", transport=transport(handler)).create_project("Hooli", "t1") == {"id": "p9", "name": "Hooli"}
+    assert sent == [{"name": "Hooli", "teamIds": ["t1"]}]
+
+
+def test_create_project_refused():
+    def handler(request):
+        return httpx.Response(200, json={"data": {"projectCreate": {"success": False, "project": None}}})
+
+    with pytest.raises(LinearError, match="did not create the project"):
+        Linear("k", transport=transport(handler)).create_project("Hooli", "t1")
+
+
 def test_my_issue_dates_asks_for_open_issues_and_the_ones_closed_since():
     calls = []
 
