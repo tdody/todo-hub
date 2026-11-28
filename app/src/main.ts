@@ -673,16 +673,58 @@ function newClientBox(name: string, verb: string): HTMLElement {
     h("div", { class: "link-facts" }, `${verb} creates it in the client label group, where everyone in the workspace sees it.`));
 }
 
+/** The select's value for "New project…" (no project name has this character). */
+const NEW_PROJECT = "\u0001new";
+
 function projectSelect(value: string | null, onChange: (v: string | null) => void) {
   // The list holds open projects only; an issue in a completed or canceled one still shows it.
   const open = state.meta?.projects ?? [];
   const projects = value && !open.includes(value) ? [value, ...open] : open;
   return quietSelect(h(
     "select",
-    { class: "project", title: "Linear project", onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value || null) },
+    {
+      class: "project", title: "Linear project",
+      onchange: (e: Event) => {
+        const select = e.target as HTMLSelectElement;
+        if (select.value !== NEW_PROJECT) return onChange(select.value || null);
+        select.value = value ?? "";       // the old pick stays until the new project exists
+        newProjectDialog(onChange);
+      },
+    },
     h("option", { value: "", selected: !value }, "No project"),
     ...projects.map((p) => h("option", { value: p, selected: p === value }, p)),
+    h("option", { value: NEW_PROJECT }, "New project…"),
   ));
+}
+
+/** Create adds the project to the team in Linear now, then picks it. */
+function newProjectDialog(onChange: (v: string) => void) {
+  const input = h("input", {
+    type: "text", placeholder: "Project name", "aria-label": "Project name",
+    onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter" && !e.isComposing) void create(); },
+  }) as HTMLInputElement;
+  const go = h("button", { class: "primary", onclick: () => void create() }, "Create") as HTMLButtonElement;
+  const close = modal("New project", h("div", { class: "confirm-body" },
+    h("label", { class: "ck-field" }, h("span", {}, "Name"), input),
+    h("p", { class: "muted small" }, "Create adds the project to your team in Linear now. Everyone on the team sees it.")),
+    [h("button", { class: "ghost", onclick: () => close() }, "Cancel"), go]);
+  input.focus();
+
+  async function create() {
+    const name = input.value.trim();
+    if (!name || go.disabled) return;
+    go.disabled = true;
+    try {
+      const project = await api.createProject(name);
+      state.meta = await api.meta();
+      close();
+      onChange(project.name);
+      render();
+    } catch (e) {
+      fail(e);
+      go.disabled = false;
+    }
+  }
 }
 
 /** "Nov 9" ("Today" for today), the quiet face of a date field. */

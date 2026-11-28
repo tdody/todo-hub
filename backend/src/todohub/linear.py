@@ -376,6 +376,21 @@ class Linear:
             raise LinearError("Linear did not create the label.")
         return result["issueLabel"]
 
+    def create_project(self, name: str, team_id: str) -> dict:
+        """Add a project to the team."""
+        data = self.gql(
+            """
+            mutation($input: ProjectCreateInput!) {
+              projectCreate(input: $input) { success project { id name } }
+            }
+            """,
+            {"input": {"name": name, "teamIds": [team_id]}},
+        )
+        result = data["projectCreate"]
+        if not result["success"]:
+            raise LinearError("Linear did not create the project.")
+        return result["project"]
+
     def get_issue(self, id_or_identifier: str) -> dict:
         """Look an issue up by UUID or by identifier such as ENG-123."""
         data = self.gql(f"query($id: String!) {{ issue(id: $id) {{ {ISSUE_FIELDS} }} }}", {"id": id_or_identifier})

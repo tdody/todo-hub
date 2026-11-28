@@ -360,6 +360,18 @@ def test_project_suggestion_flows_to_linear(env):
     assert "Globex" in client.get("/api/meta").json()["projects"]
 
 
+def test_new_project_is_created_once_and_can_be_picked(env):
+    client, db, fake, _ = env
+    assert client.post("/api/projects", json={"name": " globex "}).json() == {"id": "p-globex", "name": "Globex"}
+    assert client.post("/api/projects", json={"name": "Hooli"}).json() == {"id": "p-Hooli", "name": "Hooli"}
+    assert client.post("/api/projects", json={"name": "hooli"}).json()["name"] == "Hooli"
+    assert [p["name"] for p in fake.projects].count("Hooli") == 1
+    assert "Hooli" in client.get("/api/meta").json()["projects"]
+    cid = seed(db)
+    assert client.patch(f"/api/candidates/{cid}", json={"project": "Hooli"}).status_code == 200
+    assert client.post("/api/projects", json={"name": "  "}).status_code == 400
+
+
 def test_today_and_time_blocks(tmp_path):
     settings = load_settings()
     db = DB(settings.db_path)

@@ -82,6 +82,7 @@ class FakeLinear:
         self.created_labels = []   # (name, group id)
         self.client_group = {"id": "g-client", "color": "#f7c8c1", "team_id": None}
         self.fail_label = False    # create_client_label raises
+        self.projects = [{"id": "p-globex", "name": "Globex"}, {"id": "p-out", "name": "Improve our \"Forecast\" models"}]
         self.issues = [
             make_issue("ENG-1", "Rebin Globex grades", client="Globex"),
             make_issue("ENG-2", "Fix outcome report copy"),
@@ -99,7 +100,7 @@ class FakeLinear:
             client_labels=list(self.client_labels),
             client_group=self.client_group,
             viewer_id="me",
-            projects=[{"id": "p-globex", "name": "Globex"}, {"id": "p-out", "name": "Improve our \"Forecast\" models"}],
+            projects=list(self.projects),
         )
 
     def my_open_issues(self):
@@ -124,6 +125,11 @@ class FakeLinear:
         self.created_labels.append((name, group["id"]))
         self.client_labels.append(label)
         return label
+
+    def create_project(self, name, team_id):
+        project = {"id": f"p-{name}", "name": name}
+        self.projects.append(project)
+        return project
 
     def create_issue(self, **kw):
         from todohub.linear import LinearError
