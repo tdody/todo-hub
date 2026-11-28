@@ -606,6 +606,8 @@ export async function waitForBackend(): Promise<void> {
 
 export const api = {
   meta: (refresh = false) => call<Meta>("GET", `/api/meta${refresh ? "?refresh=true" : ""}`),
+  /** The open project with this name, added to the team in Linear when there is none. */
+  createProject: (name: string) => call<{ id: string; name: string }>("POST", "/api/projects", { name }),
   candidates: (status: "pending" | "snoozed" = "pending") => call<Candidate[]>("GET", `/api/candidates?status=${status}`),
   snooze: (id: number, until: string | null) => call<Candidate>("POST", `/api/candidates/${id}/snooze`, { until }),
   editCandidate: (id: number, edit: CandidateEdit) => call<Candidate>("PATCH", `/api/candidates/${id}`, edit),

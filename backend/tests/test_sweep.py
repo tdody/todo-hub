@@ -129,6 +129,8 @@ def test_capture_run(settings):
     argv = json.loads((settings.home / "argv.json").read_text())
     prompt = argv[argv.index("-p") + 1]
     assert "https://example.slack.com/archives/C9/p20" in prompt and "$" not in prompt
+    # the open projects, and each open issue's client and project, as in a sweep
+    assert 'Improve our "Forecast" models' in prompt and "ENG-1: Rebin Globex grades  [client: Globex]" in prompt
     # captures don't move the sweep window
     assert DB(settings.db_path).last_successful_start() is None
 

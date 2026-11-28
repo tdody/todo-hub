@@ -33,7 +33,8 @@ from .config import (DEFAULT_CHAT_PROMPT, DEFAULT_CODE_PROMPT, DEFAULT_REVIEW_PR
                      SCHEDULE_FIRST, SCHEDULE_LAST, SOURCE_FIELDS, Settings, get_linear_key, load_settings,
                      read_overrides, source_state, write_overrides)
 from .db import DB
-from .linear import Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, shape_issue
+from .linear import (Linear, LinearError, TeamMeta, client_labels_of, is_linear_upload, matching_client_labels, name_key,
+                     shape_issue)
 from .periscope import Periscope, PeriscopeError, bring_to_front, claudes, pr_links, pr_repos, review_prs
 from .selfcmd import self_command
 from .sources import SourceError
@@ -179,6 +180,10 @@ class CaptureIn(BaseModel):
     text: str = Field(max_length=4000)
 
 
+class ProjectIn(BaseModel):
+    name: str = Field(max_length=200)
+
+
 class IssueEdit(BaseModel):
     state_id: str | None = None
     priority: int | None = Field(default=None, ge=0, le=4)
@@ -276,7 +281,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
 
     cache: dict = {"meta": None, "at": 0.0}
     lock = threading.Lock()
-    label_lock = threading.Lock()   # one client label check and create at a time
+    create_lock = threading.Lock()   # one check-and-create of a client label or project at a time
 
     def check_token(request: Request) -> None:
         # Only loopback names: blocks DNS-rebinding pages that point a hostname at 127.0.0.1.
@@ -335,7 +340,7 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         """The client label ``name`` names, from Linear's labels as they are now, created in the client
         label group if there is none. Returns the label and whether it was created. A 409 if ``name`` names
         two or more labels."""
-        with label_lock:
+        with create_lock:
             m = team_meta(refresh=True)
             found = matching_client_labels(name, [label["name"] for label in m.client_labels])
             if len(found) == 1:
@@ -582,6 +587,21 @@ def create_app(settings: Settings | None = None, db: DB | None = None,
         if body.until and body.until <= today_str():
             raise HTTPException(400, "Pick a date after today")
         return db.snooze(cid, body.until)
+
+    @app.post("/api/projects", dependencies=auth)
+    def create_project(body: ProjectIn) -> dict:
+        """The open project with the same name key ("Todo Hub" is TodoHub), added to the team in Linear
+        when there is none."""
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(400, "The project name can't be empty")
+        with create_lock:
+            m = team_meta(refresh=True)
+            project = next((p for p in m.projects if name_key(p["name"]) == name_key(name)), None)
+            if not project:
+                project = linear_call(lambda l: l.create_project(name, m.team_id))
+                team_meta(refresh=True)      # the pickers and the card edit check know the project now
+            return project
 
     @app.patch("/api/candidates/{cid}", dependencies=auth)
     def edit_candidate(cid: int, edit: CandidateEdit) -> dict:

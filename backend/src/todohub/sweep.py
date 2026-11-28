@@ -268,6 +268,16 @@ def client_rule(settings: Settings) -> str:
             "message, never its initials.")
 
 
+def issue_lines(issues: list[dict]) -> str:
+    """The open issues as prompt lines, with their client and project."""
+    return "\n".join(
+        f"  - {i['identifier']}: {i['title']}"
+        + (f"  [client: {i['client']}]" if i.get("client") else "")
+        + (f"  [project: {i['project']}]" if i.get("project") else "")
+        for i in issues
+    ) or "  (none)"
+
+
 def build_prompt(settings: Settings, since: datetime, client_labels: list[str],
                  open_issues: list[dict], pending: list[dict], decisions: dict | None = None,
                  watched: list[dict] | None = None, projects: list[str] | None = None,
@@ -277,13 +287,8 @@ def build_prompt(settings: Settings, since: datetime, client_labels: list[str],
                  note_section: str | None = None) -> str:
     template = Template(resources.files("todohub").joinpath("sweep_prompt.md").read_text())
     now = datetime.now(timezone.utc)
-    issues = "\n".join(
-        f"  - {i['identifier']}: {i['title']}"
-        + (f"  [client: {i['client']}]" if i.get("client") else "")
-        + (f"  [project: {i['project']}]" if i.get("project") else "")
-        for i in prompt_issues(open_issues)
-    ) or "  (none)"
-    queue = "\n".join(f"  - {c['title']}" for c in pending) or "  (empty)"
+    issues = issue_lines(prompt_issues(open_issues))
+    queue ="\n".join(f"  - {c['title']}" for c in pending) or "  (empty)"
     return template.substitute(
         now=now.replace(microsecond=0).isoformat(),
         now_local=_fmt(now),
@@ -692,14 +697,16 @@ def run_wrapup(settings: Settings) -> dict:
         return db.get_run(run_id) or {}
 
 
-def build_capture_prompt(settings: Settings, text: str, client_labels: list[str], open_issues: list[dict]) -> str:
+def build_capture_prompt(settings: Settings, text: str, client_labels: list[str], open_issues: list[dict],
+                         projects: list[str] | None = None) -> str:
     template = Template(resources.files("todohub").joinpath("capture_prompt.md").read_text())
-    issues = "\n".join(f"  - {i['identifier']}: {i['title']}" for i in open_issues) or "  (none)"
+    issues = issue_lines(open_issues)
     return template.substitute(
         now_local=_fmt(datetime.now(timezone.utc)),
         input=text.replace("`", "'"),          # keep the pasted text inside its fence
         client_labels=", ".join(client_labels) or "(no client labels loaded)",
         client_rule=client_rule(settings),
+        projects=", ".join(projects or []) or "(no projects loaded)",
         open_issues=issues,
     )
 
@@ -711,7 +718,8 @@ def run_capture(settings: Settings, text: str) -> dict:
         log_path = _log_path(settings, "capture")
         run_id = db.start_run("capture", now_iso(), str(log_path))
         open_issues = refresh_linear_context(settings, db)
-        prompt = build_capture_prompt(settings, text, db.get_meta("client_labels", []), open_issues)
+        prompt = build_capture_prompt(settings, text, db.get_meta("client_labels", []), open_issues,
+                                      db.get_meta("projects", []))
         out = _invoke_claude(settings, run_id, prompt, log_path, f"capture {run_id}")
         added = db.count_candidates_for_run(run_id)
         status, error = out["status"], out["error"]

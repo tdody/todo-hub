@@ -376,6 +376,21 @@ class Linear:
             raise LinearError("Linear did not create the label.")
         return result["issueLabel"]
 
+    def create_project(self, name: str, team_id: str) -> dict:
+        """Add a project to the team."""
+        data = self.gql(
+            """
+            mutation($input: ProjectCreateInput!) {
+              projectCreate(input: $input) { success project { id name } }
+            }
+            """,
+            {"input": {"name": name, "teamIds": [team_id]}},
+        )
+        result = data["projectCreate"]
+        if not result["success"]:
+            raise LinearError("Linear did not create the project.")
+        return result["project"]
+
     def get_issue(self, id_or_identifier: str) -> dict:
         """Look an issue up by UUID or by identifier such as ENG-123."""
         data = self.gql(f"query($id: String!) {{ issue(id: $id) {{ {ISSUE_FIELDS} }} }}", {"id": id_or_identifier})
@@ -489,7 +504,7 @@ def client_label_of(issue: dict, client_group: str) -> str | None:
 LEGAL_SUFFIXES = {"inc", "llc", "co", "corp", "corporation", "ltd", "company"}
 
 
-def _name_key(name: str) -> str:
+def name_key(name: str) -> str:
     """Lowercase letters and digits without accents, and without a last word that is a legal suffix
     ("Globex, Inc." -> "globex", "Café" -> "cafe")."""
     words = [w for w in (re.sub(r"[\W_]", "", unicodedata.normalize("NFKD", w)) for w in name.lower().split()) if w]
@@ -512,8 +527,8 @@ def matching_client_labels(name: str, labels: list[str]) -> list[str]:
     """The client labels that ``name`` names: one, none, or more than one for an unclear name. Case, accents,
     punctuation and a legal suffix do not count, and a label's other names count. Of two or more matches, the
     label with the same name wins."""
-    key = _name_key(name)
-    found = [label for label in labels if any(_name_key(n) == key for n in _names_of(label))]
+    key = name_key(name)
+    found = [label for label in labels if any(name_key(n) == key for n in _names_of(label))]
     same = [label for label in found if label.lower() == name.strip().lower()]
     return same if len(same) == 1 else found
 

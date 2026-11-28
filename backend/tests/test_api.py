@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from todohub import tools
 from todohub.api import PREVIEW_DESCRIPTION, create_app, issue_description
+from todohub.capture import named_project
 from todohub.config import load_settings
 from todohub.db import DB
 from todohub.linear import LinearError
@@ -283,6 +284,18 @@ def test_capture_note_is_immediate(env):
     assert client.post("/api/capture", json={"text": "   "}).status_code == 400
 
 
+def test_capture_note_suggests_the_project_it_names(env):
+    client, db, _, _ = env
+    db.set_meta("projects", ["TodoHub", "Globex", "Globex renewal", "AI"])
+    r = client.post("/api/capture", json={"text": "Todo-hub: show the sprint"})
+    assert r.json()["candidate"]["project"] == "TodoHub"
+    assert named_project("Prep the globex RENEWAL call", ["Globex", "Globex renewal"]) == "Globex renewal"
+    assert named_project("Maintain the docs", ["AI"]) is None          # a name only counts on word edges
+    assert named_project("Not able to log in", ["Notable"]) is None    # nor split inside one word
+    assert named_project("the todo hub sprint", ["TodoHub"]) == "TodoHub"
+    assert named_project("Fix it", ["🚀"]) is None             # a name with no letters names nothing
+
+
 def test_capture_link_starts_claude(env):
     client, db, _, launched = env
     link = "https://example.slack.com/archives/C1/p1730650000123456"
@@ -347,6 +360,18 @@ def test_project_suggestion_flows_to_linear(env):
     client.post(f"/api/candidates/{cid}/approve")
     assert [c["project_id"] for c in fake.created] == ["p-globex", "p-globex"]
     assert "Globex" in client.get("/api/meta").json()["projects"]
+
+
+def test_new_project_is_created_once_and_can_be_picked(env):
+    client, db, fake, _ = env
+    assert client.post("/api/projects", json={"name": " globex "}).json() == {"id": "p-globex", "name": "Globex"}
+    assert client.post("/api/projects", json={"name": "Hooli"}).json() == {"id": "p-Hooli", "name": "Hooli"}
+    assert "Hooli" in client.get("/api/meta").json()["projects"]       # known right after the create
+    cid = seed(db)
+    assert client.patch(f"/api/candidates/{cid}", json={"project": "Hooli"}).status_code == 200
+    assert client.post("/api/projects", json={"name": "hoo-li"}).json()["name"] == "Hooli"
+    assert [p["name"] for p in fake.projects].count("Hooli") == 1
+    assert client.post("/api/projects", json={"name": "  "}).status_code == 400
 
 
 def test_today_and_time_blocks(tmp_path):

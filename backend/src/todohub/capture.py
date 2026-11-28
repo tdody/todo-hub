@@ -2,7 +2,7 @@
 
 A Slack, Gmail or Grain link needs Claude to read the item, so it starts a short
 capture run (see sweep.run_capture). Anything else is a note: it becomes a candidate
-right away, with any links in it attached.
+right away, with any links in it attached and the project it names.
 """
 
 from __future__ import annotations
@@ -36,6 +36,17 @@ def needs_claude(settings: Settings, text: str) -> bool:
     return any(source_of(u) in enabled for u in URL_RE.findall(text))
 
 
+def named_project(text: str, projects: list[str]) -> str | None:
+    """The project that ``text`` names, in any case. Spaces and punctuation may differ only between the
+    name's words, so "Todo-hub" names TodoHub but "not able" does not name Notable. The longest name
+    wins, so "Globex renewal" beats "Globex"."""
+    def is_named(project: str) -> bool:
+        words = re.findall(r"[^\W_]+", re.sub(r"(?<=[a-z])(?=[A-Z])", " ", project))   # TodoHub: Todo, Hub
+        pattern = r"\b" + r"[\W_]*".join(words) + r"\b"
+        return bool(words) and re.search(pattern, text, re.IGNORECASE) is not None
+    return max(filter(is_named, projects), key=len, default=None)
+
+
 def add_note(db: DB, text: str) -> dict:
     """A typed note (optionally with links) becomes a candidate without calling Claude."""
     text = text.strip()[:MAX_INPUT]
@@ -52,4 +63,5 @@ def add_note(db: DB, text: str) -> dict:
         why=rest or "Added by hand.", excerpt=text if len(text) <= 300 else text[:300] + "…",
         source_url=urls[0] if urls else None,
         links=[{"url": u, "title": u} for u in urls[1:]],
+        project=named_project(words, db.get_meta("projects", [])),
     )
