@@ -3428,6 +3428,7 @@ function renderHeader() {
   const shown = state.allClients ? clients : clients.slice(0, SIDEBAR_CLIENTS);
   const projects = state.issuesLoaded ? sidebarProjects() : [];
   const shownProjects = state.allProjects ? projects : projects.slice(0, SIDEBAR_CLIENTS);
+  const listsTop = side.querySelector(".side-lists")?.scrollTop ?? 0;
   side.replaceChildren(
     h("div", { class: "side-brand" },
       h("img", { class: "brand-logo", src: "/logo.svg", alt: "" }),
@@ -3440,36 +3441,37 @@ function renderHeader() {
     h("nav", { class: "side-nav", "aria-label": "Sections" },
       item("inbox", "Inbox", 1), item("today", "Today", 2), item("client", "Client", 3), item("dev", "Dev", 4),
       item("pulls", "Pull requests", 5), item("insights", "Insights", 6), h("div", { class: "nav-gap" }), item("settings", "Settings", 7)),
-    clients.length > 0 ? h("div", { class: "side-group" }, "Clients") : "",
-    clients.length > 0 ? h("div", { class: "side-clients" },
-      ...shown.map((c) => h("button", {
-        class: `client-link${state.tab === "client" && state.pickedClient === c.name ? " active" : ""}`,
-        title: `${c.name}: ${c.open} open${c.late ? `, ${c.late} overdue` : ""}${c.meeting ? `, meeting at ${c.meeting}` : ""}`,
-        "data-focus": `client:${c.name}`, onclick: () => pickClient(c.name),
-      }, clientLogo(c.name), h("span", { class: "client-name" }, c.name),
-        c.late ? h("span", { class: "client-hint late" }, `${c.late} late`)
-          : c.meeting ? h("span", { class: "client-hint" }, c.meeting)
-          : h("span", { class: "client-hint" }, String(c.open)))),
-      clients.length > SIDEBAR_CLIENTS && h("button", {
-        class: "client-link more", "data-focus": "more-clients", onclick: () => { state.allClients = !state.allClients; renderHeader(); },
-      }, state.allClients ? "Show fewer" : `+ ${clients.length - SIDEBAR_CLIENTS} more`)) : "",
-    projects.length > 0 ? h("div", { class: "side-group" }, "Projects") : "",
-    projects.length > 0 ? h("div", { class: "side-clients" },
-      ...shownProjects.map((p) => h("button", {
-        class: `client-link${state.tab === "dev" && state.pickedClient === p.name ? " active" : ""}`,
-        title: `${p.name}: ${p.open} open${p.late ? `, ${p.late} overdue` : ""}`,
-        "data-focus": `project:${p.name}`, onclick: () => pickProject(p.name),
-      }, h("span", { class: "proj-mark", "aria-hidden": "true" }, p.name.slice(0, 1).toUpperCase()),
-        h("span", { class: "client-name" }, p.name),
-        p.late ? h("span", { class: "client-hint late" }, `${p.late} late`)
-          : h("span", { class: "client-hint" }, String(p.open)))),
-      projects.length > SIDEBAR_CLIENTS && h("button", {
-        class: "client-link more", "data-focus": "more-projects", onclick: () => { state.allProjects = !state.allProjects; renderHeader(); },
-      }, state.allProjects ? "Show fewer" : `+ ${projects.length - SIDEBAR_CLIENTS} more`)) : "",
-    h("div", { class: "side-fill" }),
+    h("div", { class: "side-lists" },
+      clients.length > 0 ? h("div", { class: "side-group" }, "Clients") : "",
+      clients.length > 0 ? h("div", { class: "side-clients" },
+        ...shown.map((c) => h("button", {
+          class: `client-link${state.tab === "client" && state.pickedClient === c.name ? " active" : ""}`,
+          title: `${c.name}: ${c.open} open${c.late ? `, ${c.late} overdue` : ""}${c.meeting ? `, meeting at ${c.meeting}` : ""}`,
+          "data-focus": `client:${c.name}`, onclick: () => pickClient(c.name),
+        }, clientLogo(c.name), h("span", { class: "client-name" }, c.name),
+          c.late ? h("span", { class: "client-hint late" }, `${c.late} late`)
+            : c.meeting ? h("span", { class: "client-hint" }, c.meeting)
+            : h("span", { class: "client-hint" }, String(c.open)))),
+        clients.length > SIDEBAR_CLIENTS && h("button", {
+          class: "client-link more", "data-focus": "more-clients", onclick: () => { state.allClients = !state.allClients; renderHeader(); },
+        }, state.allClients ? "Show fewer" : `+ ${clients.length - SIDEBAR_CLIENTS} more`)) : "",
+      projects.length > 0 ? h("div", { class: "side-group" }, "Projects") : "",
+      projects.length > 0 ? h("div", { class: "side-clients" },
+        ...shownProjects.map((p) => h("button", {
+          class: `client-link${state.tab === "dev" && state.pickedClient === p.name ? " active" : ""}`,
+          title: `${p.name}: ${p.open} open${p.late ? `, ${p.late} overdue` : ""}`,
+          "data-focus": `project:${p.name}`, onclick: () => pickProject(p.name),
+        }, h("span", { class: "proj-mark", "aria-hidden": "true" }, p.name.slice(0, 1).toUpperCase()),
+          h("span", { class: "client-name" }, p.name),
+          p.late ? h("span", { class: "client-hint late" }, `${p.late} late`)
+            : h("span", { class: "client-hint" }, String(p.open)))),
+        projects.length > SIDEBAR_CLIENTS && h("button", {
+          class: "client-link more", "data-focus": "more-projects", onclick: () => { state.allProjects = !state.allProjects; renderHeader(); },
+        }, state.allProjects ? "Show fewer" : `+ ${projects.length - SIDEBAR_CLIENTS} more`)) : ""),
     updateLine(),
     sweepStatus(),
   );
+  side.querySelector(".side-lists")!.scrollTop = listsTop;    // the new lists start at the top
   for (const k of focusKeys) {
     const el = k ? side.querySelector<HTMLElement>(`[data-focus="${CSS.escape(k)}"]`) : null;
     if (el && !el.matches(":disabled") && !el.closest("details:not([open]) > :not(summary)")) {
