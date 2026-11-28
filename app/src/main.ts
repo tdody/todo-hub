@@ -680,14 +680,18 @@ function projectSelect(value: string | null, onChange: (v: string | null) => voi
   // The list holds open projects only; an issue in a completed or canceled one still shows it.
   const open = state.meta?.projects ?? [];
   const projects = value && !open.includes(value) ? [value, ...open] : open;
+  let current = value;      // an Inbox card keeps a pick in its draft without a re-render
   return quietSelect(h(
     "select",
     {
       class: "project", title: "Linear project",
       onchange: (e: Event) => {
         const select = e.target as HTMLSelectElement;
-        if (select.value !== NEW_PROJECT) return onChange(select.value || null);
-        select.value = value ?? "";       // the old pick stays until the new project exists
+        if (select.value !== NEW_PROJECT) {
+          current = select.value || null;
+          return onChange(current);
+        }
+        select.value = current ?? "";       // the old pick stays until the new project exists
         newProjectDialog(onChange);
       },
     },
@@ -717,8 +721,10 @@ function newProjectDialog(onChange: (v: string) => void) {
     try {
       const project = await api.createProject(name);
       state.meta = await api.meta();
-      close();
-      onChange(project.name);
+      if (input.isConnected) {       // Esc or Cancel during the wait keeps the old pick
+        close();
+        onChange(project.name);
+      }
       render();
     } catch (e) {
       fail(e);
